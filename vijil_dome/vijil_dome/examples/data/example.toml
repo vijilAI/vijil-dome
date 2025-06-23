@@ -1,0 +1,20 @@
+[guardrail]
+input-guards = ["prompt-injection", "input-toxicity"]  # User Defined Names
+output-guards = ["output-toxicity"]  # User Defined Names
+input-early-exit = false # This setting runs both input guards, even if one catches the prompt
+
+[prompt-injection] # matches to UD names
+type="security"
+early-exit = false
+methods = ["prompt-injection-deberta-v3-base", "security-llm"]
+
+[prompt-injection.security-llm]
+model_name = "gpt-4o"
+
+[input-toxicity] # matches to UD names
+type="moderation"
+methods = ["moderations-oai-api"]
+
+[output-toxicity] # matches to UD names
+type="moderation"
+methods = ["moderation-deberta"]

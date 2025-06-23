@@ -1,0 +1,59 @@
+[logging]
+log_level = "INFO"
+
+[resource]
+service_name = "unknown-service"
+service_version = "unknown"
+deployment_environment = "unknown"
+
+[[processor_exporters]]
+# Configuration for the first processor in the processor_exporters list
+[processor_exporters.processor]
+# Configuration for the batch processor
+# This processor batches log records before exporting
+# It helps optimize performance by reducing the number of export operations
+type = "batch"
+max_export_batch_size = 512
+export_timeout_millis = 30000
+max_queue_size = 2048
+
+# Configuration for the exporter associated with the first processor
+# This exporter defines how the log records will be output
+[processor_exporters.exporter]
+type = "console"
+
+# Configuration for the second processor in the processor_exporters list
+# This demonstrates how multiple processors and exporters can be configured
+[[processor_exporters]]
+[processor_exporters.processor]
+type = "simple"
+
+# Configuration for the exporter associated with the second processor
+# This exporter defines how the log records will be sent to an OTLP endpoint
+[processor_exporters.exporter]
+type = "console"
+# type = "otlp"
+# endpoint = "http://localhost:4317"
+# insecure = false
+
+# Configuration for the OpenTelemetry handler
+# This handler is used by the OpenTelemetry logging system
+[[handlers]]
+type = "otel"
+level = "INFO"
+format = ""
+
+# Configuration for the stream handler
+# This handler is used for standard Python logging output
+[[handlers]]
+type = "stream"
+level = "INFO"
+format = "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+
+# Configuration for the file handler
+# This handler writes logs to a file
+[[handlers]]
+type = "file"
+level = "DEBUG"
+format = "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+path = "/tmp/debug_logs.log"

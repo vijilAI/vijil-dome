@@ -1,0 +1,22 @@
+[logging]
+log_level = "INFO"
+
+[resource]
+service_name = "unknown-service"
+service_version = "unknown"
+deployment_environment = "unknown"
+
+[[processor_exporters]]
+[processor_exporters.processor]
+type = "simple"
+max_export_batch_size = 512
+export_timeout_millis = 30000
+max_queue_size = 2048
+
+[processor_exporters.exporter]
+type = "console"
+
+[[handlers]]
+type = "stream"
+level = "INFO"
+format = "[%(asctime)s] [%(ip_address)s] [%(name)s] [%(levelname)s] %(message)s"
