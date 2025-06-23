@@ -45,4 +45,5 @@ jobs:
           PERSPECTIVE_API_KEY: ${{ secrets.PERSPECTIVE_API_KEY }}
           HUGGINGFACE_TOKEN: ${{ secrets.HUGGINGFACE_TOKEN }}
         run: |
+          export PYTHONPATH=$PWD
           make test
