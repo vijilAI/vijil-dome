@@ -4489,4 +4489,4 @@ opentelemetry = ["opentelemetry-api", "opentelemetry-exporter-gcp-monitoring", "
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.11,<3.13"
-content-hash = "febd8a989d6636ec7abaca8d49ad307e04ae749892f9c2db3c49a74eb8f967ec"
+content-hash = "cc31bfb41d644e5e2ce6253ed74fac597ae05147cc3489ca594fa4d52e04bbee"
