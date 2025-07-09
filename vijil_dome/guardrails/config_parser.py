@@ -80,7 +80,6 @@ def create_guard(guard_name: str, guard_config_dict: dict) -> Guard:
                 detector_name, guard_config_dict["type"], detector_config_dict
             )
         )
-
     return Guard(guard_name, detector_list, guard_fail_policy, guard_parallel_policy)
 
 
@@ -128,7 +127,6 @@ def create_guardrail(guardrail_location: str, config_dict: dict) -> Guardrail:
     guardrail = Guardrail(
         guardrail_location, guard_objects, fail_policy, parallel_policy
     )
-
     return guardrail
 
 

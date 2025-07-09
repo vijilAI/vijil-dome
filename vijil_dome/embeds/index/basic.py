@@ -30,9 +30,6 @@ try:
 
     _ANNOY_AVAILABLE = True
 except ImportError:
-    logging.warning(
-        "Annoy was not installed. Only in-memory indexing will be available."
-    )
     _ANNOY_AVAILABLE = False
 
 
