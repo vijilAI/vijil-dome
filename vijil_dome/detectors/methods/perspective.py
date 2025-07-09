@@ -16,7 +16,13 @@
 
 import os
 from typing import Optional, Dict
-from googleapiclient import discovery
+try:
+    from googleapiclient import discovery
+except ImportError as e:
+    raise ImportError(
+        "Google extra is required for PerspectiveAPI. "
+        "Please install it with 'pip install vijil-dome[google]'."
+    ) from e
 from vijil_dome.detectors import (
     DetectionMethod,
     register_method,

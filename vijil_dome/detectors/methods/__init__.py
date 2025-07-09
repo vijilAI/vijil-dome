@@ -22,7 +22,6 @@ __all__ = [
     "jb_perplexity_heuristics",
     "llm_models",
     "openai_models",
-    "perspective",
     "pi_hf_deberta",
     "pi_hf_mbert",
     "pii_presidio",
@@ -30,3 +29,9 @@ __all__ = [
     "embedding_models",
     "secret_detector",
 ]
+
+try:
+    import googleapiclient  # noqa: F401
+    __all__.append("perspective")
+except ImportError:
+    pass
