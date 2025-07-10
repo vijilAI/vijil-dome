@@ -126,7 +126,8 @@ class InMemEmbeddingsIndex(AbstractBaseEmbeddingsIndex):
                 "Index not built. Please build the index before searching for Nearest Neighbor."
             )
         _embedding = (await self._embedder.embeddings([query]))[0]
-        relatedness_fn = lambda x, y: 1 - spatial.distance.cosine(x, y)
+        def relatedness_fn(x, y):
+            return 1 - spatial.distance.cosine(x, y)
         index_and_relatednesses = [
             (i, relatedness_fn(_embedding, row["embedding"]))
             for i, row in self._index.iterrows()

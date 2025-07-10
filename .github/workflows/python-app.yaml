@@ -37,6 +37,11 @@ jobs:
 
       - name: Install pytest
         run: poetry add pytest
+      
+      - name: Lint
+        run: |
+          export PYTHONPATH=$PWD
+          make lint
 
       - name: Run tests
         env:

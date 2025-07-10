@@ -14,4 +14,4 @@
 #
 # vijil and vijil-dome are trademarks owned by Vijil Inc.
 
-from .callbacks import generate_adk_input_callback, generate_adk_output_callback
+__all__ = ["generate_adk_input_callback", "generate_adk_output_callback"]

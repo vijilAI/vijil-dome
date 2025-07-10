@@ -38,7 +38,7 @@ def generate_adk_input_callback(
     dome: Dome,
     blocked_message: Optional[str] = None,
     additional_callback: Optional[Callable] = None,
-) -> dict:
+) -> Callable:
     """
     Given an instance of Dome, a blocked message, and any optional additional callbacks, generate a callback to guard the inputs to the agent.
     """
@@ -81,7 +81,7 @@ def generate_adk_output_callback(
     dome: Dome,
     blocked_message: Optional[str] = None,
     additional_callback: Optional[Callable] = None,
-) -> dict:
+) -> Callable:
     """
     Given an instance of Dome, a blocked message, and any optional additional callbacks, generate a callback to guard the outputs from the agent.
     """

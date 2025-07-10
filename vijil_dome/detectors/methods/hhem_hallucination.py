@@ -23,7 +23,6 @@ from vijil_dome.detectors import (
 )
 from vijil_dome.detectors.utils.hf_model import HFBaseModelWithContext
 import torch
-import numpy as np
 
 logger = logging.getLogger("vijil.dome")
 

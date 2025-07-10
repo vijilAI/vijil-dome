@@ -35,17 +35,17 @@ async def test_privacy_detection():
     )
     query = "How many days make up a year?"
     result = await pii_presidio(query)
-    assert result.hit == False and result.result["response_string"] == query
+    assert not result.hit and result.result["response_string"] == query
     query = "You can reach me at dwayne.johnson@gmail.com"
     result = await pii_presidio(query)
-    assert result.hit == False and result.result["response_string"] != query
+    assert not result.hit and result.result["response_string"] != query
 
     # Repeat, but this time, we set anonymize to False, so the PII is flagged, not censored.
     pii_detector = DetectionFactory.get_detector(
         DetectionCategory.Privacy, PRIVACY_PRESIDIO, anonymize=False
     )
     result = await pii_detector.detect_with_time(query)
-    assert result.hit == True
+    assert result.hit
 
 
 @pytest.mark.asyncio
@@ -56,17 +56,18 @@ async def test_secret_detection():
     )
 
     result = await secret_detector("This is a regular string")
-    assert result.hit == False
+    assert not result.hit
 
     # We now generate a fake OpenAI API key for testing purposes
     random.seed(42)  # For reproducibility in tests
-    rand = lambda n: "".join(random.choices(string.ascii_letters + string.digits, k=n))
+    def rand(n):
+        return "".join(random.choices(string.ascii_letters + string.digits, k=n))
     fake_key = f"sk-{rand(20)}T3BlbkFJ{rand(20)}"
     string_with_key = "OPENAI_API_KEY = " + fake_key
 
     result = await secret_detector(string_with_key)
     # Since the default setting censors secrets, we expect the hit to be False, but the response string to be modified
-    assert result.hit == False
+    assert not result.hit
     assert (result.result["response_string"] != string_with_key) and (
         fake_key not in result.result["response_string"]
     )
@@ -76,4 +77,4 @@ async def test_secret_detection():
         DetectionCategory.Privacy, DETECT_SECRETS, censor=False
     )
     result = await secret_detector.detect_with_time(string_with_key)
-    assert result.hit == True
+    assert result.hit

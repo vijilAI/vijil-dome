@@ -40,12 +40,12 @@ async def test_integrity_detection():
         trust_remote_code=True,
     )
     detection_result = await hhem_detect_with_time("I am in United States.")
-    assert detection_result.hit == False
+    assert not detection_result.hit
     # You can also get the detector and add the context in later
     hhem_detector = DetectionFactory.get_detector(DetectionCategory.Integrity, HHEM)
     hhem_detector.add_context("I am in United States.")
     detection_result = await hhem_detector.detect_with_time("I am in California.")
-    assert detection_result.hit == True
+    assert detection_result.hit
 
 
 @pytest.mark.asyncio
@@ -59,13 +59,13 @@ async def test_integrity_detection_llm():
     detection_result = await llm_hallucination_detect_with_time(
         "I am in United States."
     )
-    assert detection_result.hit == False
+    assert not detection_result.hit
     detector = DetectionFactory.get_detector(
         DetectionCategory.Integrity, HALLUCINATION_LLM
     )
     detector.add_context("I am in United States.")
     detection_result = await detector.detect_with_time("I am in California.")
-    assert detection_result.hit == True
+    assert detection_result.hit
 
 
 @pytest.mark.asyncio
@@ -79,13 +79,13 @@ async def test_integrity_detection_roberta():
     detection_result = await roberta_detect_with_time(
         "Albert Einstein worked in the field of physics."
     )
-    assert detection_result.hit == False
+    assert not detection_result.hit
     roberta_detector = DetectionFactory.get_detector(
         DetectionCategory.Integrity, FACTCHECK_ROBERTA
     )
     roberta_detector.add_context("I am in United States.")
     detection_result = await roberta_detector.detect_with_time("I am in California.")
-    assert detection_result.hit == True
+    assert detection_result.hit
 
 
 @pytest.mark.asyncio
@@ -104,4 +104,4 @@ async def test_integrity_factcheck_llm():
     detection_result = await factcheck_llm_detector.detect_with_time(
         "I am in California."
     )
-    assert detection_result.hit == True
+    assert detection_result.hit

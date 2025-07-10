@@ -44,8 +44,8 @@ async def test_generic_llm_detector():
 
     query_string = "I really love pecorino"
     result = await llm_detector.detect_with_time(query_string)
-    assert result.hit == True
+    assert result.hit
 
     query_string = "What is the capital of france?"
     result = await llm_detector.detect_with_time(query_string)
-    assert result.hit == False
+    assert not result.hit
