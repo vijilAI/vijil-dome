@@ -58,7 +58,7 @@ class PresidioDetector(DetectionMethod):
             provider = NlpEngineProvider(conf_file=config_file)
             nlp_engine = provider.create_engine()
             self.analyzer = AnalyzerEngine(
-                nlp_engine=nlp_engine, supported_languages=["en"]  # TODO: May need to add support for other languages
+                nlp_engine=nlp_engine, supported_languages=["en", "es", "it", "pl"]
             )
             self.anonymize = anonymize
 
