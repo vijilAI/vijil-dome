@@ -54,7 +54,7 @@ def create_guard(guard_name: str, guard_config_dict: dict) -> Guard:
     if "type" not in guard_config_dict:
         raise ValueError("No type specified")
     elif guard_config_dict["type"] not in GUARDRAIL_CATEGORY_MAPPING:
-        raise ValueError(f"{guard_config_dict["type"]} is not a valid guard type")
+        raise ValueError(f"{guard_config_dict['type']} is not a valid guard type")
 
     if EARLY_EXIT in guard_config_dict:
         guard_fail_policy = guard_config_dict[EARLY_EXIT]
