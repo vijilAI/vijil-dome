@@ -41,7 +41,7 @@ jobs:
       - name: Lint
         run: |
           export PYTHONPATH=$PWD
-          poetry install ruff mypy
+          poetry add ruff mypy
           make lint
 
       - name: Run tests
