@@ -17,7 +17,6 @@
 import os
 from abc import ABC, abstractmethod
 from typing import Optional
-from dataclasses import replace
 from litellm import ModelResponse
 
 from vijil_dome.detectors import DetectionResult, DetectionMethod
@@ -50,7 +49,7 @@ class LlmBaseDetector(DetectionMethod, ABC):
             if api_key is None:
                 api_key = os.getenv("TOGETHERAI_API_KEY")
         else:
-            self.base_url = None
+            self.base_url = ""
         self.api_key = api_key
         self.timeout = timeout
         self.max_retries = max_retries
@@ -122,8 +121,8 @@ def parse_litellm_response(llm_response: ModelResponse) -> dict:
             for choice in llm_response.choices
         ],
         "usage": {
-            "completion_tokens": llm_response.usage.completion_tokens,
-            "prompt_tokens": llm_response.usage.prompt_tokens,
-            "total_tokens": llm_response.usage.total_tokens,
+            "completion_tokens": llm_response.usage.completion_tokens,  # type: ignore
+            "prompt_tokens": llm_response.usage.prompt_tokens,  # type: ignore
+            "total_tokens": llm_response.usage.total_tokens,  # type: ignore
         },
     }

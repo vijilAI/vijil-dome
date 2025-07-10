@@ -16,7 +16,7 @@
 
 import logging
 
-from opentelemetry.trace import Tracer
+from opentelemetry.sdk.trace import Tracer
 from opentelemetry.metrics import Meter
 from opentelemetry.instrumentation.logging import LoggingInstrumentor
 from vijil_dome.instrumentation.tracing import auto_trace
@@ -76,10 +76,14 @@ def instrument_dome(dome: Dome, handler: logging.Handler, tracer: Tracer, meter:
         dome.guard_input = auto_trace(tracer, "Dome-Guard-Input")(dome.guard_input)  # type: ignore[method-assign]
         dome.guard_output = auto_trace(tracer, "Dome-Guard-Output")(dome.guard_output)  # type: ignore[method-assign]
 
-        instrument_with_tracer(dome.input_guardrail, tracer, "Dome-Input-Guardrail")
-        instrument_with_tracer(dome.output_guardrail, tracer, "Dome-Output-Guardrail")
+        if dome.input_guardrail is not None:
+            instrument_with_tracer(dome.input_guardrail, tracer, "Dome-Input-Guardrail")
+        if dome.output_guardrail is not None:
+            instrument_with_tracer(dome.output_guardrail, tracer, "Dome-Output-Guardrail")
 
     if meter:
         # add monitors
-        instrument_with_monitors(dome.input_guardrail, meter, "dome-input")
-        instrument_with_monitors(dome.output_guardrail, meter, "dome-output")
+        if dome.input_guardrail is not None:
+            instrument_with_monitors(dome.input_guardrail, meter, "dome-input")
+        if dome.output_guardrail is not None:
+            instrument_with_monitors(dome.output_guardrail, meter, "dome-output")

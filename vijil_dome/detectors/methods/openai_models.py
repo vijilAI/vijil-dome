@@ -47,10 +47,10 @@ class OpenAIModerations(LlmBaseDetector):
         if not oai_moderation or len(oai_moderation) == 0:
             raise ValueError("No moderation results returned from OpenAI")
 
+        flagged = False
         if self.score_threshold_dict is None:
-            flagged = oai_moderation[0].flagged
+            flagged = bool(oai_moderation[0].flagged)
         else:
-            flagged = False
             for category in self.score_threshold_dict:
                 if len(oai_moderation) == 0:
                     raise ValueError("No moderation results returned from OpenAI")
@@ -65,7 +65,9 @@ class OpenAIModerations(LlmBaseDetector):
                 if score > self.score_threshold_dict[category]:
                     flagged = True
                     break
-        return flagged, {
+            
+        # Ensure flagged is always a bool, not None
+        hit_data = {
             "type": type(self),
             "response": {
                 "id": oai_response.id,
@@ -80,3 +82,4 @@ class OpenAIModerations(LlmBaseDetector):
             if flagged
             else query_string,
         }
+        return flagged, hit_data

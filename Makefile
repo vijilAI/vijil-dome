@@ -43,7 +43,7 @@ test:
 lint:
 	@echo "Running linter..."
 	poetry run ruff check .
-	poetry run mypy .
+	poetry run mypy . --config-file ./mypy.ini
 	@echo "Linting complete."
 
 # Format code
