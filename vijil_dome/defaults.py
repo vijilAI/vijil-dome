@@ -15,6 +15,7 @@
 # vijil and vijil-dome are trademarks owned by Vijil Inc.
 
 from vijil_dome.detectors import (
+    ENCODING_HEURISTICS,
     PI_MBERT,
     PRIVACY_PRESIDIO,
     MODERATION_DEBERTA,
@@ -27,7 +28,7 @@ class DefaultDomeConfig:
         self.security_default = {
             "security_default": {
                 "type": "security",
-                "methods": [PI_MBERT],
+                "methods": [ENCODING_HEURISTICS, PI_MBERT],
             }
         }
         self.moderation_default = {
