@@ -421,28 +421,3 @@ class EncodingHeuristicsDetector(DetectionMethod):
             if flagged
             else query_string,
         }
-
-
-if __name__ == "__main__":
-    # Example usage
-    import asyncio
-
-    detector = EncodingHeuristicsDetector()
-    queries = [
-        "U29tZSBzZWNyZXQgdGV4dA==",
-        "Normal text lololol",
-        "The quick brown fox jumps over the lazy dog",
-        "This is a test string with base64: U29tZSBzZWNyZXQgdGV4dA== and some other text.",
-        "A n o t h e r t e s t s t r i n g w i t h s p a c e s .",
-        "Guvf vf n grfg bs EBG13 rapelcgvba",  # ROT13 encoded
-        "This is a test of ROT13 encryption",  # Normal English
-        "Uryyb jbeyq, ubj ner lbh gbqnl?",  # ROT13 encoded
-        "Random gibberish xkcd test 1234",  # Normal text with mixed content
-        "Naq fb vg ortva naq fb vg jvyy raq",  # ROT13 encoded
-        "abcdefghijklmnopqrstuvwxyz",  # Alphabet
-        "nopqrstuvwxyzabcdefghijklm",
-        "This is a string followed by some rot13: Uryyb jbeyq, ubj ner lbh gbqnl?",  # Mixed content
-    ]
-    for query in queries:
-        result = asyncio.run(detector.detect(query))
-        print(f"Query: {query}\nResult: {result}\n")
