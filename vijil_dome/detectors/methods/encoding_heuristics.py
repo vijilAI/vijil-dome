@@ -399,7 +399,7 @@ class EncodingHeuristicsDetector(DetectionMethod):
 
         # Step 2: Substring/word scan (detect embedded/partial encoding)
         words = re.findall(r"\S+", query_string)
-        encoding_counts = {}
+        encoding_counts = {}  # type: Dict[str, int]
         for word in words:
             segment_counts = analyze_segment(word)
             for key in segment_counts:
