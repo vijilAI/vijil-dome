@@ -344,9 +344,6 @@ def analyze_segment(s, full=False):
 class EncodingHeuristicsDetector(DetectionMethod):
     def __init__(self, threshold_map: Optional[Dict[str, float]] = None):
         super().__init__()
-        print(
-            f"Initializing EncodingHeuristicsDetector with threshold_map: {threshold_map}"
-        )
         self.threshold_map = threshold_map or {
             "base64": 0.7,
             "rot13": 0.7,

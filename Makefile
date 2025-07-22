@@ -42,7 +42,7 @@ test:
 # Run linter
 lint:
 	@echo "Running linter..."
-	poetry run ruff check .
+	poetry run ruff check ./vijil_dome
 	poetry run mypy . --config-file ./mypy.ini
 	@echo "Linting complete."
 
