@@ -28,10 +28,12 @@ __all__ = [
     "toxicity_deberta",
     "embedding_models",
     "secret_detector",
+    "encoding_heuristics",
 ]
 
 try:
     import googleapiclient  # noqa: F401
+
     __all__.append("perspective")
 except ImportError:
     pass

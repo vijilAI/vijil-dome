@@ -42,6 +42,7 @@ PI_MBERT = "prompt-injection-mbert"
 SECURITY_LLM = "security-llm"
 SECURITY_EMBEDDINGS = "security-embeddings"
 SECURITY_PROMPTGUARD = "security-promptguard"
+ENCODING_HEURISTICS = "encoding-heuristics"
 
 HHEM = "hhem-hallucination"
 HALLUCINATION_LLM = "hallucination-llm"
@@ -135,6 +136,7 @@ class DetectionMethod(ABC):
         that need specific actions taken when hyperparameters are changed.
         """
         pass  # Default implementation does nothing, to be overridden by subclasses.
+
     def _sanitize_result(self, result: Tuple[bool, dict]) -> dict:
         """
         Sanitize the result dictionary to mask sensitive data.

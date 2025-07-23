@@ -1,4 +1,5 @@
 from vijil_dome import Dome
+from openai import OpenAI
 
 # Initialize Dome with default configuration
 dome = Dome()
@@ -17,7 +18,6 @@ print(f"Guarded response: {output_scan.guarded_response()}")
 
 print("--------------------------------------------------------")
 
-from openai import OpenAI
 
 def create_guarded_openai_client(dome: Dome, client: OpenAI, model: str, query: str):
     """
@@ -32,7 +32,7 @@ def create_guarded_openai_client(dome: Dome, client: OpenAI, model: str, query: 
             model=model,
             messages=[{"role": "user", "content": input_scan_result.guarded_response()}]
         )
-        client_output = client_response.choices[0].message.content
+        client_output = client_response.choices[0].message.content or "The model did not return a response."
         
         # Scan the model's output before returning
         output_scan_result = dome.guard_output(client_output)
