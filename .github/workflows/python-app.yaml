@@ -45,8 +45,8 @@ jobs:
 
       - name: Clean up Poetry cache
         run: |
-          poetry cache clear . --all
-          poetry cache clear pypi --all
+          poetry cache clear . --all --no-interaction
+          poetry cache clear pypi --all --no-interaction
 
       - name: Lint
         run: |
