@@ -75,6 +75,7 @@ async def test_security_detection():
 
 
 @pytest.mark.asyncio
+@pytest.mark.skip # Skip since this takes too much space
 async def test_security_detection_prompt_guard():
     # Prompt Injection Detection via Prompt Guard
     login(os.getenv("HUGGINGFACE_TOKEN"))
