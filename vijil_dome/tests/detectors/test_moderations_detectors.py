@@ -33,6 +33,7 @@ from vijil_dome.detectors import (
 
 
 @pytest.mark.asyncio
+@pytest.mark.skip(reason="Skip since this takes too much space")
 async def test_moderation_detection():
     # Banned phrases moderation
     ban_list_detect_with_time = await DetectionFactory.get_detect_with_time(
@@ -48,6 +49,7 @@ async def test_moderation_detection():
 
 
 @pytest.mark.asyncio
+@pytest.mark.skip(reason="Skip since this takes too much space")
 async def test_moderation_detection_openai():
     # OpenAI Moderation
     gpt_moderation_detect_with_time = await DetectionFactory.get_detect_with_time(
@@ -62,6 +64,7 @@ async def test_moderation_detection_openai():
 
 
 @pytest.mark.asyncio
+@pytest.mark.skip(reason="Skip since this takes too much space")
 async def test_moderation_detection_llm():
     # Moderation via Prompt-Engineering
     llm_detect_with_time = await DetectionFactory.get_detect_with_time(
@@ -74,6 +77,7 @@ async def test_moderation_detection_llm():
 
 
 @pytest.mark.asyncio
+@pytest.mark.skip(reason="Skip since this takes too much space")
 async def test_moderation_detection_llm_together():
     # Moderation via Prompt-Engineering
     llm_detect_with_time = await DetectionFactory.get_detect_with_time(
@@ -89,6 +93,7 @@ async def test_moderation_detection_llm_together():
 
 
 @pytest.mark.asyncio
+@pytest.mark.skip(reason="Skip since this takes too much space")
 async def test_moderation_detection_deberta():
     # Moderation via DeBERTa toxicity model
     deberta_detect_with_time = await DetectionFactory.get_detect_with_time(
@@ -100,6 +105,7 @@ async def test_moderation_detection_deberta():
     assert not result.hit
 
 @pytest.mark.asyncio
+@pytest.mark.skip(reason="Skip since this takes too much space")
 async def test_moderation_detection_perspective():
     # Moderation via Perspective API
     perspective_detect_with_time = await DetectionFactory.get_detect_with_time(
