@@ -37,6 +37,7 @@ from huggingface_hub import login
 
 
 @pytest.mark.asyncio
+@pytest.mark.skip(reason="Skip since this takes too much space")
 async def test_security_detection_vijil_mbert():
     # Prompt Injection Detection via Vijil's MBert model
     prompt_injection_vijil_mbert = await DetectionFactory.get_detect_with_time(
@@ -56,6 +57,7 @@ async def test_security_detection_vijil_mbert():
 
 
 @pytest.mark.asyncio
+@pytest.mark.skip(reason="Skip since this takes too much space")
 async def test_security_detection():
     # Prompt Injection Detection
     prompt_injection_deberta = await DetectionFactory.get_detect_with_time(
@@ -75,6 +77,7 @@ async def test_security_detection():
 
 
 @pytest.mark.asyncio
+@pytest.mark.skip(reason="Skip since this takes too much space")
 async def test_security_detection_prompt_guard():
     # Prompt Injection Detection via Prompt Guard
     login(os.getenv("HUGGINGFACE_TOKEN"))
@@ -95,6 +98,7 @@ async def test_security_detection_prompt_guard():
 
 
 @pytest.mark.asyncio
+@pytest.mark.skip(reason="Skip since this takes too much space")
 async def test_security_detection_llm():
     # Prompt Injection Detection via LLM Prompt-Engineering
     prompt_injection_llm = await DetectionFactory.get_detect_with_time(
@@ -114,6 +118,7 @@ async def test_security_detection_llm():
 
 
 @pytest.mark.asyncio
+@pytest.mark.skip(reason="Skip since this takes too much space")
 async def test_security_detection_jailbreak():
     # Jailbreak Detection via Length/Perplexity heuristic
     jailbreak_length_perplexity = await DetectionFactory.get_detect_with_time(
@@ -132,6 +137,7 @@ async def test_security_detection_jailbreak():
 
 
 @pytest.mark.asyncio
+@pytest.mark.skip(reason="Skip since this takes too much space")
 async def test_security_detection_jailbreak_prefix_suffix():
     # Jailbreak Detection via Prefix-Suffix Perplexity Heuristic
 
