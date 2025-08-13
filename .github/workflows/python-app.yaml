@@ -22,92 +22,63 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Cache pip dependencies
+      - name: Install Poetry
+        uses: snok/install-poetry@v1
+        with:
+          version: latest
+          virtualenvs-create: true
+          virtualenvs-in-project: true
+
+      - name: Cache Poetry dependencies
         uses: actions/cache@v3
         with:
-          path: ~/.cache/pip
-          key: ${{ runner.os }}-pip-test-${{ hashFiles('**/pyproject.toml') }}
+          path: ~/.cache/pypoetry
+          key: ${{ runner.os }}-poetry-${{ hashFiles('**/poetry.lock') }}
           restore-keys: |
-            ${{ runner.os }}-pip-test-
+            ${{ runner.os }}-poetry-
 
-      - name: Install minimal dependencies for testing
+      - name: Install dependencies
         run: |
-          python -m pip install --upgrade pip
-          # Install only essential packages for testing
-          python -m pip install pytest pytest-asyncio
-          python -m pip install ruff mypy
-          # Install core dependencies without heavy ML libraries
-          python -m pip install pydantic numpy pandas tqdm python-dotenv toml
+          poetry config virtualenvs.create false
+          poetry install --no-interaction --no-root --only=main,dev
+          poetry add pytest ruff mypy
 
-      - name: Clean up pip cache immediately
+      - name: Clean up Poetry cache
         run: |
-          python -m pip cache purge
-          rm -rf ~/.cache/pip
-
-      - name: Check disk space before lint
-        run: |
-          echo "=== Disk space before lint ==="
-          df -h
-          echo "=== Available space ==="
-          df -h / | tail -1
+          poetry cache clear . --all --no-interaction
+          poetry cache clear pypi --all --no-interaction
 
       - name: Lint
         run: |
           export PYTHONPATH=$PWD
           make lint
 
-      - name: Clean up after lint
+      - name: Clean up system
         run: |
-          python -m pip cache purge
-          rm -rf ~/.cache/pip
-          sudo rm -rf /tmp/*
-          sudo rm -rf /var/tmp/*
           sudo apt-get clean
           sudo rm -rf /var/lib/apt/lists/*
+          sudo rm -rf /tmp/*
+          sudo rm -rf /var/tmp/*
 
-      - name: Check disk space before tests
+      - name: Check disk space
         run: |
-          echo "=== Disk space before tests ==="
           df -h
-          echo "=== Available space ==="
-          df -h / | tail -1
+          du -sh ~/.cache ~/.local
 
-      - name: Create minimal test environment
-        run: |
-          # Create a minimal test file that doesn't import heavy dependencies
-          cat > minimal_test.py << 'EOF'
-          import pytest
-          
-          def test_basic():
-              assert True
-          
-          def test_imports():
-              # Test that we can import basic modules
-              import pydantic
-              import numpy
-              import pandas
-              assert True
-          
-          @pytest.mark.asyncio
-          async def test_async():
-              assert True
-          EOF
-
-      - name: Run minimal tests
+      - name: Run tests
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          TOGETHERAI_API_KEY: ${{ secrets.TOGETHER_API_KEY }}
+          PERSPECTIVE_API_KEY: ${{ secrets.PERSPECTIVE_API_KEY }}
+          HUGGINGFACE_TOKEN: ${{ secrets.HUGGINGFACE_TOKEN }}
         run: |
           export PYTHONPATH=$PWD
-          python -m pytest minimal_test.py -v --tb=short
+          make test
 
       - name: Final cleanup
         if: always()
         run: |
-          echo "=== Final disk space check ==="
-          df -h
-          python -m pip cache purge
-          rm -rf ~/.cache/pip
+          poetry cache clear . --all
+          poetry cache clear pypi --all
           sudo rm -rf /tmp/*
           sudo rm -rf /var/tmp/*
-          sudo rm -rf /var/cache/*
-          sudo rm -rf /var/log/*
-          sudo find /var -name "*.log" -delete 2>/dev/null || true
-          rm -f minimal_test.py
