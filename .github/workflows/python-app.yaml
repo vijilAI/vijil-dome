@@ -11,7 +11,8 @@ on:
 
 jobs:
   test:
-    runs-on: ubuntu-latest
+    # runs-on: ubuntu-latest
+    runs-on: ubuntu-latest-xl
     # runs-on: LargeRunner
 
     steps:
