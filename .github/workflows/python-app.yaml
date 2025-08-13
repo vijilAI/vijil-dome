@@ -11,7 +11,7 @@ on:
 
 jobs:
   test:
-    runs-on: LargerRunner
+    runs-on: ubuntu-latest
 
     steps:
       - name: Checkout code

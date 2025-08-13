@@ -6,7 +6,7 @@ on:
 
 jobs:
   deploy:
-    runs-on: LargerRunner
+    runs-on: ubuntu-latest
     permissions:
       contents: write
       id-token: write
