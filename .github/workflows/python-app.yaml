@@ -11,7 +11,8 @@ on:
 
 jobs:
   test:
-    runs-on: LargerRunner
+    runs-on: ubuntu-latest
+    # runs-on: LargeRunner
 
     steps:
       - name: Checkout code
@@ -43,6 +44,11 @@ jobs:
           export PYTHONPATH=$PWD
           poetry add ruff mypy
           make lint
+      
+      - name: Clean up
+        run: |
+          sudo apt-get clean
+          rm -rf /var/lib/apt/lists/*
 
       - name: Run tests
         env:
