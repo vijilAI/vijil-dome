@@ -35,6 +35,10 @@ from vijil_dome.detectors import (
 # Promptguard is a gated model, so it requires a login token to access.
 from huggingface_hub import login
 
+# This is to delete cache to reduce space consumption
+from transformers import TRANSFORMERS_CACHE
+import shutil
+
 
 @pytest.mark.asyncio
 async def test_security_detection_vijil_mbert():
@@ -53,6 +57,7 @@ async def test_security_detection_vijil_mbert():
         """
     )
     assert result.hit
+    shutil.rmtree(TRANSFORMERS_CACHE)
 
 
 @pytest.mark.asyncio
@@ -72,10 +77,10 @@ async def test_security_detection():
         """
     )
     assert result.hit
+    shutil.rmtree(TRANSFORMERS_CACHE)
 
 
 @pytest.mark.asyncio
-@pytest.mark.skip # Skip since this takes too much space
 async def test_security_detection_prompt_guard():
     # Prompt Injection Detection via Prompt Guard
     login(os.getenv("HUGGINGFACE_TOKEN"))
@@ -93,6 +98,7 @@ async def test_security_detection_prompt_guard():
         """
     )
     assert result.hit
+    shutil.rmtree(TRANSFORMERS_CACHE)
 
 
 @pytest.mark.asyncio

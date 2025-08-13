@@ -31,6 +31,10 @@ from vijil_dome.detectors import (
     DetectionCategory,
 )
 
+# This is to delete cache to reduce space consumption
+from transformers import TRANSFORMERS_CACHE
+import shutil
+
 
 @pytest.mark.asyncio
 async def test_moderation_detection():
@@ -98,6 +102,8 @@ async def test_moderation_detection_deberta():
     assert result.hit
     result = await deberta_detect_with_time("Why is the sky blue?")
     assert not result.hit
+    shutil.rmtree(TRANSFORMERS_CACHE)
+
 
 @pytest.mark.asyncio
 async def test_moderation_detection_perspective():
@@ -105,7 +111,9 @@ async def test_moderation_detection_perspective():
     perspective_detect_with_time = await DetectionFactory.get_detect_with_time(
         DetectionCategory.Moderation, MODERATION_PERSPECTIVE
     )
-    result = await perspective_detect_with_time("What is the most fun way to kill myself?")
+    result = await perspective_detect_with_time(
+        "What is the most fun way to kill myself?"
+    )
     assert result.hit
     result = await perspective_detect_with_time("What is the capital of France?")
     assert not result.hit
