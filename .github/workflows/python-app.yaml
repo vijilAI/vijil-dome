@@ -11,9 +11,7 @@ on:
 
 jobs:
   test:
-    # runs-on: ubuntu-latest
-    runs-on: ubuntu-latest-xl
-    # runs-on: LargeRunner
+    runs-on: ubuntu-latest
 
     steps:
       - name: Checkout code
@@ -31,25 +29,41 @@ jobs:
           virtualenvs-create: true
           virtualenvs-in-project: true
 
-      - name: Install dependencies from poetry project
-        run: poetry config virtualenvs.create false && poetry install --no-interaction --no-root
+      - name: Cache Poetry dependencies
+        uses: actions/cache@v3
+        with:
+          path: ~/.cache/pypoetry
+          key: ${{ runner.os }}-poetry-${{ hashFiles('**/poetry.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-poetry-
 
-      - name: Install project
-        run: poetry install --no-interaction
+      - name: Install dependencies
+        run: |
+          poetry config virtualenvs.create false
+          poetry install --no-interaction --no-root --only=main,dev
+          poetry add pytest ruff mypy
 
-      - name: Install pytest
-        run: poetry add pytest
-      
+      - name: Clean up Poetry cache
+        run: |
+          poetry cache clear . --all
+          poetry cache clear pypi --all
+
       - name: Lint
         run: |
           export PYTHONPATH=$PWD
-          poetry add ruff mypy
           make lint
-      
-      - name: Clean up
+
+      - name: Clean up system
         run: |
           sudo apt-get clean
           sudo rm -rf /var/lib/apt/lists/*
+          sudo rm -rf /tmp/*
+          sudo rm -rf /var/tmp/*
+
+      - name: Check disk space
+        run: |
+          df -h
+          du -sh ~/.cache ~/.local
 
       - name: Run tests
         env:
@@ -60,3 +74,11 @@ jobs:
         run: |
           export PYTHONPATH=$PWD
           make test
+
+      - name: Final cleanup
+        if: always()
+        run: |
+          poetry cache clear . --all
+          poetry cache clear pypi --all
+          sudo rm -rf /tmp/*
+          sudo rm -rf /var/tmp/*
