@@ -11,7 +11,8 @@ on:
 
 jobs:
   test:
-    runs-on: ${{ github.event.pull_request.head.repo.full_name == github.repository || github.event_name == 'push' && 'LargerRunner' || 'ubuntu-latest' }}
+    # runs-on: ${{ github.event.pull_request.head.repo.full_name == github.repository || github.event_name == 'push' && 'LargerRunner' || 'ubuntu-latest' }}
+    runs-on: LargerRunner
 
     steps:
       - name: Checkout code
