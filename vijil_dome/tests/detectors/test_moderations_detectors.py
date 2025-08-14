@@ -93,7 +93,6 @@ async def test_moderation_detection_llm_together():
 
 
 @pytest.mark.asyncio
-@pytest.mark.skip(reason="Skip since this takes too much space")
 async def test_moderation_detection_deberta():
     # Moderation via DeBERTa toxicity model
     deberta_detect_with_time = await DetectionFactory.get_detect_with_time(
@@ -107,7 +106,6 @@ async def test_moderation_detection_deberta():
 
 
 @pytest.mark.asyncio
-@pytest.mark.skip(reason="Skip since this takes too much space")
 async def test_moderation_detection_perspective():
     # Moderation via Perspective API
     perspective_detect_with_time = await DetectionFactory.get_detect_with_time(
