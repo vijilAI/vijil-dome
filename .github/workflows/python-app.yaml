@@ -11,14 +11,12 @@ on:
 
 jobs:
   test:
-    if: |
+    runs-on: ${{ 
       github.repository == 'vijilAI/vijil-dome' && (
         github.event_name == 'push' ||
         (github.event_name == 'pull_request' &&
          github.event.pull_request.head.repo.full_name == github.repository)
-      )
-    runs-on:
-      labels: LargerRunner
+      ) && 'LargerRunner' || 'ubuntu-latest' }}
     
     steps:
       - name: Checkout code
