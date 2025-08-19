@@ -19,7 +19,6 @@ from typing import Optional
 from opentelemetry.sdk.trace import Tracer
 from opentelemetry.metrics import Meter
 from opentelemetry.instrumentation.logging import LoggingInstrumentor
-from vijil_dome.instrumentation.tracing import auto_trace
 from vijil_dome.guardrails.instrumentation.instrumentation import (
     instrument_with_monitors,
     instrument_with_tracer,
