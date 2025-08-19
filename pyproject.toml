@@ -28,8 +28,6 @@ sentence-transformers = "^5.0.0"
 numpy = "^1.26.4"
 scipy = "^1.16.0"
 pandas = "^2.3.1"
-pytest = "^8.4.1"
-pytest-asyncio = "^1.0.0"
 tqdm = "^4.67.1"
 flashtext = "^2.7"
 presidio_analyzer = "^2.2.358"
@@ -84,3 +82,7 @@ opentelemetry = [
 embeddings = [ "annoy", ]
 langchain = [ ]  # no langchain usage detected — you can add back if needed
 google = [ "google-api-python-client", ]
+
+[tool.poetry.group.dev.dependencies]
+pytest = "^8.4.1"
+pytest-asyncio = "^1.0.0"
