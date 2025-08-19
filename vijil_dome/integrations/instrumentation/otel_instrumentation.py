@@ -15,11 +15,10 @@
 # vijil and vijil-dome are trademarks owned by Vijil Inc.
 
 import logging
-
+from typing import Optional
 from opentelemetry.sdk.trace import Tracer
 from opentelemetry.metrics import Meter
 from opentelemetry.instrumentation.logging import LoggingInstrumentor
-from vijil_dome.instrumentation.tracing import auto_trace
 from vijil_dome.guardrails.instrumentation.instrumentation import (
     instrument_with_monitors,
     instrument_with_tracer,
@@ -59,27 +58,29 @@ def instrument_logger(logger: logging.Logger):
         handler.setFormatter(formatter)
 
 
-def instrument_dome(dome: Dome, handler: logging.Handler, tracer: Tracer, meter: Meter):
+def instrument_dome(
+    dome: Dome,
+    handler: Optional[logging.Handler],
+    tracer: Optional[Tracer],
+    meter: Optional[Meter],
+):
     if not LoggingInstrumentor().is_instrumented_by_opentelemetry:
         LoggingInstrumentor().instrument()
 
-    # Enable OTel logging
+    # Enable OTel logging if a logging handler is provided
     if handler:
         logger = logging.getLogger("vijil.dome")
         logger.addHandler(handler)
         instrument_logger(logger)
 
-    # By default, the log level is set to warning. For this example, we set it to info
-    logger.setLevel(logging.INFO)
     # Add tracer
     if tracer:
-        dome.guard_input = auto_trace(tracer, "Dome-Guard-Input")(dome.guard_input)  # type: ignore[method-assign]
-        dome.guard_output = auto_trace(tracer, "Dome-Guard-Output")(dome.guard_output)  # type: ignore[method-assign]
-
         if dome.input_guardrail is not None:
             instrument_with_tracer(dome.input_guardrail, tracer, "Dome-Input-Guardrail")
         if dome.output_guardrail is not None:
-            instrument_with_tracer(dome.output_guardrail, tracer, "Dome-Output-Guardrail")
+            instrument_with_tracer(
+                dome.output_guardrail, tracer, "Dome-Output-Guardrail"
+            )
 
     if meter:
         # add monitors
