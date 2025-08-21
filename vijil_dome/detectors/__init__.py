@@ -202,3 +202,10 @@ class DetectionFactory:
             logging.error(f"No such category {category.name}")
             raise ValueError(f"No such category {category.name}")
         return list(method_registry[category].keys())
+
+    @staticmethod
+    def list_detector_names_sync(category: DetectionCategory) -> list[str]:
+        if category not in method_registry:
+            logging.error(f"No such category {category.name}")
+            raise ValueError(f"No such category {category.name}")
+        return list(method_registry[category].keys())
