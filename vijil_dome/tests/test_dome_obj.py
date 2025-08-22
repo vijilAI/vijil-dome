@@ -152,11 +152,26 @@ async def test_toml_config():
         output_guard_set.add(guard_name)
     assert output_guard_set == {"output-toxicity"}
 
-    assert dome.input_guardrail.run_in_parallel == True
-    assert dome.input_guardrail.early_exit == False
+    assert dome.input_guardrail.run_in_parallel
+    assert not dome.input_guardrail.early_exit
 
     assert dome.agent_id is None
 
     with_id_toml_path = os.path.join(dir_path, "sample_configs", "with_id.toml")
     dome = Dome(dome_config=with_id_toml_path)
     assert dome.agent_id == "sample-agent-001"
+
+    input_guard_set = set()
+    for guard in dome.input_guardrail.guard_list:
+        guard_name = guard.guard_name
+        input_guard_set.add(guard_name)
+
+    assert input_guard_set == {"prompt-injection", "input-toxicity"}
+    output_guard_set = set()
+    for guard in dome.output_guardrail.guard_list:
+        guard_name = guard.guard_name
+        output_guard_set.add(guard_name)
+    assert output_guard_set == {"output-toxicity"}
+
+    assert dome.input_guardrail.run_in_parallel
+    assert not dome.input_guardrail.early_exit
