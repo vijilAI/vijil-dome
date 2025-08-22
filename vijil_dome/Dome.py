@@ -26,9 +26,15 @@ from pydantic import BaseModel
 
 
 class DomeConfig(GuardrailConfig):
-    def __init__(self, input_guardrail: Guardrail, output_guardrail: Guardrail):
+    def __init__(
+        self,
+        input_guardrail: Guardrail,
+        output_guardrail: Guardrail,
+        agent_id: Optional[str] = None,
+    ):
         self.input_guardrail = input_guardrail
         self.output_guardrail = output_guardrail
+        self.agent_id = agent_id
 
     def get_input_guardrail(self) -> Guardrail:
         return self.input_guardrail
@@ -36,15 +42,18 @@ class DomeConfig(GuardrailConfig):
     def get_output_guardrail(self) -> Guardrail:
         return self.output_guardrail
 
+    def get_agent_id(self) -> Optional[str]:
+        return self.agent_id
+
 
 def create_dome_config(config: Union[Dict, str]) -> DomeConfig:
     if isinstance(config, str):
-        input_guardrail, output_guardrail = convert_toml_to_guardrails(config)
-        config_object = DomeConfig(input_guardrail, output_guardrail)
+        input_guardrail, output_guardrail, agent_id = convert_toml_to_guardrails(config)
+        config_object = DomeConfig(input_guardrail, output_guardrail, agent_id)
         return config_object
     elif isinstance(config, dict):
-        input_guardrail, output_guardrail = convert_dict_to_guardrails(config)
-        config_object = DomeConfig(input_guardrail, output_guardrail)
+        input_guardrail, output_guardrail, agent_id = convert_dict_to_guardrails(config)
+        config_object = DomeConfig(input_guardrail, output_guardrail, agent_id)
         return config_object
     else:
         raise ValueError(
@@ -89,6 +98,7 @@ class Dome:
         self.client = client
         self.input_guardrail = None  # type: Optional[Guardrail]
         self.output_guardrail = None  # type: Optional[Guardrail]
+        self.agent_id = None  # type: Optional[str]
         if dome_config is not None:
             if isinstance(dome_config, DomeConfig):
                 self._init_from_dome_config(dome_config)
@@ -110,6 +120,7 @@ class Dome:
     def _init_from_dome_config(self, dome_config: DomeConfig):
         self.input_guardrail = dome_config.input_guardrail
         self.output_guardrail = dome_config.output_guardrail
+        self.agent_id = dome_config.agent_id
 
     def get_guardrails(self):
         return [self.input_guardrail, self.output_guardrail]

@@ -15,42 +15,26 @@
 # vijil and vijil-dome are trademarks owned by Vijil Inc.
 
 import pytest
-
+import os
 from vijil_dome import Dome, create_dome_config
 
 TEST_CONFIG = {
-    "input-guards": [
-        "prompt-injection",
-        "input-toxicity"
-    ],
-    "output-guards": [
-        "output-toxicity"
-    ],
+    "input-guards": ["prompt-injection", "input-toxicity"],
+    "output-guards": ["output-toxicity"],
     "input-early-exit": False,
     "prompt-injection": {
         "type": "security",
         "early-exit": False,
-        "methods": [
-            "prompt-injection-deberta-v3-base",
-            "security-llm"
-        ],
-        "security-llm": {
-            "model_name": "gpt-4o"
-        }
+        "methods": ["prompt-injection-deberta-v3-base", "security-llm"],
+        "security-llm": {"model_name": "gpt-4o"},
     },
-    "input-toxicity": {
-        "type": "moderation",
-        "methods": [
-            "moderations-oai-api"
-        ]
-    },
+    "input-toxicity": {"type": "moderation", "methods": ["moderations-oai-api"]},
     "output-toxicity": {
         "type": "moderation",
-        "methods": [
-            "moderation-prompt-engineering"
-        ]
-    }
+        "methods": ["moderation-prompt-engineering"],
+    },
 }
+
 
 @pytest.mark.asyncio
 async def test_dome_config():
@@ -62,6 +46,7 @@ async def test_dome_config():
     assert dome.output_guardrail.early_exit
     assert not dome.input_guardrail.run_in_parallel
     assert not dome.output_guardrail.run_in_parallel
+    assert dome.agent_id is None
 
 
 def test_input_detection_safe():
@@ -94,6 +79,7 @@ def test_output_detection_unsafe():
 
     scan = dome.guard_output(unsafe_output)
     assert not scan.is_safe()
+
 
 @pytest.mark.asyncio
 async def test_async_input_detection_safe():
@@ -138,3 +124,54 @@ async def test_async_default_config():
 
     scan = await dome.async_guard_input(safe_input)
     assert scan.is_safe()
+
+
+@pytest.mark.asyncio
+async def test_async_config_agent_id():
+    config_with_agent_id = TEST_CONFIG.copy()
+    config_with_agent_id["agent_id"] = "test-agent-123"
+    dome = Dome(dome_config=create_dome_config(config_with_agent_id))
+    assert dome.agent_id == "test-agent-123"
+
+
+@pytest.mark.asyncio
+async def test_toml_config():
+    dir_path = os.path.dirname(os.path.realpath(__file__))
+    toml_path = os.path.join(dir_path, "sample_configs", "no_id.toml")
+    dome = Dome(dome_config=toml_path)
+
+    input_guard_set = set()
+    for guard in dome.input_guardrail.guard_list:
+        guard_name = guard.guard_name
+        input_guard_set.add(guard_name)
+
+    assert input_guard_set == {"prompt-injection", "input-toxicity"}
+    output_guard_set = set()
+    for guard in dome.output_guardrail.guard_list:
+        guard_name = guard.guard_name
+        output_guard_set.add(guard_name)
+    assert output_guard_set == {"output-toxicity"}
+
+    assert dome.input_guardrail.run_in_parallel
+    assert not dome.input_guardrail.early_exit
+
+    assert dome.agent_id is None
+
+    with_id_toml_path = os.path.join(dir_path, "sample_configs", "with_id.toml")
+    dome = Dome(dome_config=with_id_toml_path)
+    assert dome.agent_id == "sample-agent-001"
+
+    input_guard_set = set()
+    for guard in dome.input_guardrail.guard_list:
+        guard_name = guard.guard_name
+        input_guard_set.add(guard_name)
+
+    assert input_guard_set == {"prompt-injection", "input-toxicity"}
+    output_guard_set = set()
+    for guard in dome.output_guardrail.guard_list:
+        guard_name = guard.guard_name
+        output_guard_set.add(guard_name)
+    assert output_guard_set == {"output-toxicity"}
+
+    assert dome.input_guardrail.run_in_parallel
+    assert not dome.input_guardrail.early_exit

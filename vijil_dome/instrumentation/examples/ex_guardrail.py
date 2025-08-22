@@ -137,7 +137,7 @@ if __name__ == "__main__":
     logger.setLevel(logging.INFO)
 
     guardrail_config = create_example_guardrail_config()
-    input_guardrail, output_guardrail = convert_dict_to_guardrails(guardrail_config)
+    input_guardrail, output_guardrail, _ = convert_dict_to_guardrails(guardrail_config)
 
     # Add instrumentation to the input guardrail
 

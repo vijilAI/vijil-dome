@@ -18,7 +18,7 @@ from vijil_dome.guardrails import Guard, Guardrail
 from vijil_dome.detectors.methods import *  # noqa: F403
 from vijil_dome.detectors import DetectionCategory, DetectionFactory
 import toml
-from typing import Tuple, Dict, Any  # noqa: F401
+from typing import Tuple, Dict, Any, Optional  # noqa: F401
 
 GUARDRAIL_CATEGORY_MAPPING = {
     "security": DetectionCategory.Security,
@@ -148,6 +148,11 @@ def convert_toml_to_guardrail_dict(path_to_toml: str):
         raise ValueError("No [guardrail] in config file!")
 
     raw_config_dict = dict()  # type: Dict[str, Any]
+
+    raw_config_dict["agent_id"] = toml_config_dict.get("guardrail", {}).get(
+        "agent_id", None
+    )
+
     raw_config_dict["input-guards"] = extract_field_from_toml(
         "input", "guards", [], toml_config_dict
     )
@@ -176,13 +181,18 @@ def convert_toml_to_guardrail_dict(path_to_toml: str):
 
 
 # Convert a dictionary into the corresponding guardrails
-def convert_dict_to_guardrails(config_dict: dict) -> Tuple[Guardrail, Guardrail]:
+def convert_dict_to_guardrails(
+    config_dict: dict,
+) -> Tuple[Guardrail, Guardrail, Optional[str]]:
     input_guardrail = create_guardrail("input", config_dict)
     output_guardrail = create_guardrail("output", config_dict)
-    return input_guardrail, output_guardrail
+    agent_id = config_dict.get("agent_id", None)
+    return input_guardrail, output_guardrail, agent_id
 
 
 # convert a toml file into its corresponding guardrails
-def convert_toml_to_guardrails(path_to_toml: str) -> Tuple[Guardrail, Guardrail]:
+def convert_toml_to_guardrails(
+    path_to_toml: str,
+) -> Tuple[Guardrail, Guardrail, Optional[str]]:
     config_dict = convert_toml_to_guardrail_dict(path_to_toml)
     return convert_dict_to_guardrails(config_dict)
