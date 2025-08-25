@@ -84,7 +84,7 @@ class ScanResult(BaseModel):
             "exec_time": self.exec_time,
             "response": self.response_string,
         }
-        return result_dict
+        return str(result_dict)
 
     def __repr__(self):
         return self.__str__()
