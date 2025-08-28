@@ -129,7 +129,6 @@ class Dome:
         client: Optional[OpenAI] = None,
     ) -> "Dome":
         config_dict = get_config_from_vijil_agent(api_key, agent_id, base_url)
-        print(config_dict)
         if config_dict is None:
             raise ValueError(f"No Dome configuration found for agent ID {agent_id}")
         return Dome(dome_config=config_dict, client=client)
