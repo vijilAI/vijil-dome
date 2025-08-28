@@ -46,3 +46,40 @@ def get_config_from_vijil_agent(
                 return config
     except httpx.HTTPError as e:
         raise Exception(f"Failed to fetch Dome config: {e}")
+
+
+def get_config_from_vijil_evaluation(
+    api_token: str, evaluation_id: str, base_url: Optional[str] = None
+) -> Optional[dict]:
+    """
+    Fetch the Dome configuration from a specific evaluation in Vijil Evaluate using the provided API token and evaluation ID.
+
+    Args:
+        api_token (str): The API token for authentication.
+        evaluation_id (str): The ID of the evaluation whose configuration is to be fetched.
+
+    Returns:
+        dict: The Dome configuration as a dictionary.
+
+    Raises:
+        Exception: If the API call fails or returns an error.
+    """
+    headers = {
+        "Authorization": f"Bearer {api_token}",
+        "Content-Type": "application/json",
+    }
+    base_url = base_url or VIJIL_API_BASE_URL
+    url = f"{base_url}/recommend-dome-config"
+
+    payload = {"evaluation_id": evaluation_id}
+
+    try:
+        response = httpx.post(url, headers=headers, json=payload)
+        response.raise_for_status()
+        dome_config = response.json()
+        if dome_config is None:
+            raise Exception("Dome configuration not found in the response.")
+        else:
+            return dome_config
+    except httpx.HTTPError as e:
+        raise Exception(f"Failed to fetch Dome config: {e}")

@@ -19,7 +19,10 @@ from vijil_dome.guardrails.config_parser import (
     convert_dict_to_guardrails,
     convert_toml_to_guardrails,
 )
-from vijil_dome.integrations.vijil.evaluate import get_config_from_vijil_agent
+from vijil_dome.integrations.vijil.evaluate import (
+    get_config_from_vijil_agent,
+    get_config_from_vijil_evaluation,
+)
 from openai import OpenAI
 from typing import Union, Dict, Optional, Callable
 from .defaults import get_default_config
@@ -128,6 +131,20 @@ class Dome:
         config_dict = get_config_from_vijil_agent(api_key, agent_id, base_url)
         if config_dict is None:
             raise ValueError(f"No Dome configuration found for agent ID {agent_id}")
+        return Dome(dome_config=config_dict, client=client)
+
+    @staticmethod
+    def create_from_vijil_evaluation(
+        evaluation_id: str,
+        api_key: str,
+        base_url: Optional[str] = None,
+        client: Optional[OpenAI] = None,
+    ) -> "Dome":
+        config_dict = get_config_from_vijil_evaluation(api_key, evaluation_id, base_url)
+        if config_dict is None:
+            raise ValueError(
+                f"No Dome configuration recommendation could be generated for evaluation ID {evaluation_id}"
+            )
         return Dome(dome_config=config_dict, client=client)
 
     def _init_from_dome_config(self, dome_config: DomeConfig):
