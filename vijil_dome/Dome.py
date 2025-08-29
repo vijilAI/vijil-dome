@@ -137,10 +137,13 @@ class Dome:
     def create_from_vijil_evaluation(
         evaluation_id: str,
         api_key: str,
+        latency_threshold: Optional[float] = None,
         base_url: Optional[str] = None,
         client: Optional[OpenAI] = None,
     ) -> "Dome":
-        config_dict = get_config_from_vijil_evaluation(api_key, evaluation_id, base_url)
+        config_dict = get_config_from_vijil_evaluation(
+            api_key, evaluation_id, base_url, latency_threshold
+        )
         if config_dict is None:
             raise ValueError(
                 f"No Dome configuration recommendation could be generated for evaluation ID {evaluation_id}"
