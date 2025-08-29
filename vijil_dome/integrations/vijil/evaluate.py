@@ -3,7 +3,7 @@ Integrations with Vijil Evaluate
 """
 
 import httpx
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any # noqa: F401
 
 VIJIL_API_BASE_URL = "https://evaluate-api.vijil.ai/v1"
 
