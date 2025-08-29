@@ -3,7 +3,7 @@ Integrations with Vijil Evaluate
 """
 
 import httpx
-from typing import Optional
+from typing import Optional, Dict, Any
 
 VIJIL_API_BASE_URL = "https://evaluate-api.vijil.ai/v1"
 
@@ -74,7 +74,7 @@ def get_config_from_vijil_evaluation(
     base_url = base_url or VIJIL_API_BASE_URL
     url = f"{base_url}/recommend-dome-config"
 
-    payload = {"evaluation_id": evaluation_id}
+    payload = {"evaluation_id": evaluation_id} # type: Dict[str, Any]
     if latency_threshold:
         payload["latency_threshold"] = latency_threshold
 
