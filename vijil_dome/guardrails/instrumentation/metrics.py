@@ -35,7 +35,7 @@ def _return_wrapper(
 
 def _create_request_counter(name: str, meter: Meter):
     request_counter = meter.create_counter(
-        f"{name}-requests",
+        f"{name}-requests_total",
         description=f"Number of requests to {name}",
     )
     return request_counter
@@ -63,7 +63,7 @@ def _add_request_counter(request_counter: Counter):
 
 def _create_latency_histogram(name: str, meter: Meter):
     request_latency = meter.create_histogram(
-        f"{name}-latency",
+        f"{name}-latency_seconds",
         description=f"{name} latency",
         unit="seconds",
     )
@@ -94,7 +94,7 @@ def _add_request_latency_histogram(request_latency: Histogram):
 
 def _create_request_flagged_counter(name: str, meter: Meter):
     request_flagged_counter = meter.create_counter(
-        f"{name}-flagged",
+        f"{name}-flagged_total",
         description=f"Number of requests to {name} that are flagged",
     )
     return request_flagged_counter
@@ -137,7 +137,7 @@ def _add_request_flagged_counter(request_flagged_counter: Counter):
 
 def _create_request_error_counter(name: str, meter: Meter):
     request_error_counter = meter.create_counter(
-        f"{name}-error",
+        f"{name}-error_total",
         description=f"Number of requests to {name} that errored",
     )
     return request_error_counter
