@@ -7,6 +7,12 @@ Check out the contents of this folder and set up a new virtual environment.
 
 ```bash
 python -m venv dome-tutorials
+# Activate the virtual environment
+# macOS/Linux:
+source dome-tutorials/bin/activate
+# Windows:
+dome-tutorials\Scripts\activate
+
 python -m pip install -r requirements.txt
 ```
 
