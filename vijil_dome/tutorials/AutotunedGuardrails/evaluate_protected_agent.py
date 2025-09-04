@@ -54,16 +54,17 @@ if __name__ == "__main__":
     )
     args = parser.parse_args()
 
-    if os.getenv("VIJIL_API_KEY") is None:
+    VIJIL_API_KEY = os.getenv("VIJIL_API_KEY")
+    if VIJIL_API_KEY is None:
         raise ValueError("Vijil API key was not set. Please set it.")
 
     vijil = Vijil(
-        api_key=os.getenv("VIJIL_API_KEY"),
+        api_key=VIJIL_API_KEY,
     )
 
     dome = Dome.create_from_vijil_evaluation(
         evaluation_id=args.evaluation_id,
-        api_key=os.getenv("VIJIL_API_KEY"),
+        api_key=VIJIL_API_KEY,
         latency_threshold=args.latency_threshold,
     )
 

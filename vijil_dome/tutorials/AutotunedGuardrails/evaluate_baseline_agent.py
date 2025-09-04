@@ -46,11 +46,11 @@ def evaluation_output_adapter(agent_output: str) -> ChatCompletionResponse:
 class MyDesktopAssistant:
     def __init__(self, system_prompt_path: str, api_key: Optional[str]):
         # Initialize your agent here
-        self.chat_model = ChatOpenAI(model="gpt-4.1", streaming=False, api_key=api_key)
+        self.chat_model = ChatOpenAI(model="gpt-4.1", streaming=False, api_key=api_key) # type: ignore
         with open(system_prompt_path, "r") as f:
             self.system_prompt = f.read()
 
-    async def invoke(self, prompt: str) -> str:
+    async def invoke(self, prompt: str):
         messages = [
             SystemMessage(content=self.system_prompt),
             HumanMessage(content=prompt),
