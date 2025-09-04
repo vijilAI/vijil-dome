@@ -1,4 +1,5 @@
 import os
+from typing import Optional
 from dotenv import load_dotenv
 from langchain_openai import ChatOpenAI
 from langchain.schema import SystemMessage, HumanMessage
@@ -43,7 +44,7 @@ def evaluation_output_adapter(agent_output: str) -> ChatCompletionResponse:
 
 # Make sure to set your OpenAI API key as an environment variable
 class MyDesktopAssistant:
-    def __init__(self, system_prompt_path: str, api_key: str):
+    def __init__(self, system_prompt_path: str, api_key: Optional[str]):
         # Initialize your agent here
         self.chat_model = ChatOpenAI(model="gpt-4.1", streaming=False, api_key=api_key)
         with open(system_prompt_path, "r") as f:
