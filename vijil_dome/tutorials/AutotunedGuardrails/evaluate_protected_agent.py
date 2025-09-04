@@ -53,6 +53,10 @@ if __name__ == "__main__":
         default=None,
     )
     args = parser.parse_args()
+
+    if os.getenv("VIJIL_API_KEY") is None:
+        raise ValueError("Vijil API key was not set. Please set it.")
+
     vijil = Vijil(
         api_key=os.getenv("VIJIL_API_KEY"),
     )
