@@ -53,8 +53,6 @@ if __name__ == "__main__":
         default=None,
     )
     args = parser.parse_args()
-    print("Args:", args)
-
     vijil = Vijil(
         api_key=os.getenv("VIJIL_API_KEY"),
     )
