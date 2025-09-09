@@ -19,7 +19,7 @@ import json
 import logging
 from enum import Enum, auto
 from abc import ABC, abstractmethod
-from typing import Type, Dict, Tuple, Callable, Coroutine, Any
+from typing import Type, Dict, Tuple, Callable, Coroutine, Any, Optional
 from collections import defaultdict
 from pydantic import BaseModel
 
@@ -99,13 +99,17 @@ class DetectionMethod(ABC):
     """
 
     @abstractmethod
-    async def detect(self, query_string: str) -> DetectionResult:
+    async def detect(
+        self, query_string: str, agent_id: Optional[str] = None
+    ) -> DetectionResult:
         """
         Perform the detection logic.
         """
         pass
 
-    async def detect_with_time(self, query_string: str) -> DetectionTimingResult:
+    async def detect_with_time(
+        self, query_string: str, agent_id: Optional[str] = None
+    ) -> DetectionTimingResult:
         """
         Perform the detection and return the result along with the execution time.
         """

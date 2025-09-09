@@ -24,6 +24,10 @@ def _set_func_span_attributes(span: Span, *args, **kwargs):
     span.set_attribute("function.args", str(args))
     span.set_attribute("function.kwargs", str(kwargs))
 
+    agent_id = kwargs.get("agent_id")
+    if agent_id:
+        span.set_attribute("agent.id", agent_id)
+
 
 def _set_func_span_result_attributes(span: Span, result):
     if isinstance(result, BaseModel):
@@ -40,7 +44,7 @@ def auto_trace(tracer: Tracer, name: str):
         def sync_wrapper(*args, **kwargs):
             with tracer.start_as_current_span(name) as span:
                 # Add input arguments to the span
-                _set_func_span_attributes(span, args, kwargs)
+                _set_func_span_attributes(span, *args, **kwargs)
                 # Execute the function
                 result = func(*args, **kwargs)
                 # set function output result in span
@@ -51,7 +55,7 @@ def auto_trace(tracer: Tracer, name: str):
         async def async_wrapper(*args, **kwargs):
             with tracer.start_as_current_span(name) as span:
                 # Add input arguments to the span
-                _set_func_span_attributes(span, args, kwargs)
+                _set_func_span_attributes(span, *args, **kwargs)
                 # Execute the function
                 result = await func(*args, **kwargs)
                 # set function output result in span

@@ -18,7 +18,7 @@ import time
 from inspect import iscoroutinefunction
 from opentelemetry.metrics import Meter, Counter, Histogram
 from functools import wraps
-from typing import Union, Callable, Coroutine
+from typing import Union, Callable, Coroutine, Optional
 from vijil_dome.guardrails import GuardResult, GuardrailResult
 from vijil_dome.detectors import DetectionTimingResult
 
@@ -46,13 +46,17 @@ def _add_request_counter(request_counter: Counter):
     def decorator(func):
         @wraps(func)
         def sync_wrapper(*args, **kwargs):
-            request_counter.add(1)
+            agent_id = kwargs.get("agent_id")
+            attributes = {"agent.id": agent_id} if agent_id else None
+            request_counter.add(1, attributes=attributes or {})
             result = func(*args, **kwargs)
             return result
 
         @wraps(func)
         async def async_wrapper(*args, **kwargs):
-            request_counter.add(1)
+            agent_id = kwargs.get("agent_id")
+            attributes = {"agent.id": agent_id} if agent_id else None
+            request_counter.add(1, attributes=attributes or {})
             result = await func(*args, **kwargs)
             return result
 
@@ -75,16 +79,24 @@ def _add_request_latency_histogram(request_latency: Histogram):
     def decorator(func):
         @wraps(func)
         def sync_wrapper(*args, **kwargs):
+            agent_id = kwargs.get("agent_id")
+            attributes = {"agent.id": agent_id} if agent_id else None
             start_time = time.time()
             result = func(*args, **kwargs)
-            request_latency.record(time.time() - start_time)
+            request_latency.record(
+                time.time() - start_time, attributes=attributes or {}
+            )
             return result
 
         @wraps(func)
         async def async_wrapper(*args, **kwargs):
+            agent_id = kwargs.get("agent_id")
+            attributes = {"agent.id": agent_id} if agent_id else None
             start_time = time.time()
             result = await func(*args, **kwargs)
-            request_latency.record(time.time() - start_time)
+            request_latency.record(
+                time.time() - start_time, attributes=attributes or {}
+            )
             return result
 
         return _return_wrapper(func, sync_wrapper, async_wrapper)
@@ -103,16 +115,17 @@ def _create_request_flagged_counter(name: str, meter: Meter):
 def _set_result_counter(
     result: Union[GuardrailResult, GuardResult, DetectionTimingResult],
     request_flagged_counter: Counter,
+    attributes: Optional[dict] = None,
 ) -> None:
     if isinstance(result, GuardrailResult):
         if result.flagged:
-            request_flagged_counter.add(1)
+            request_flagged_counter.add(1, attributes=attributes or {})
     elif isinstance(result, GuardResult):
         if result.triggered:
-            request_flagged_counter.add(1)
+            request_flagged_counter.add(1, attributes=attributes or {})
     elif isinstance(result, DetectionTimingResult):
         if result.hit:
-            request_flagged_counter.add(1)
+            request_flagged_counter.add(1, attributes=attributes or {})
 
 
 # Add counter to track number of requests flagged
@@ -120,14 +133,18 @@ def _add_request_flagged_counter(request_flagged_counter: Counter):
     def decorator(func):
         @wraps(func)
         def sync_wrapper(*args, **kwargs):
+            agent_id = kwargs.get("agent_id")
+            attributes = {"agent.id": agent_id} if agent_id else None
             result = func(*args, **kwargs)
-            _set_result_counter(result, request_flagged_counter)
+            _set_result_counter(result, request_flagged_counter, attributes)
             return result
 
         @wraps(func)
         async def async_wrapper(*args, **kwargs):
+            agent_id = kwargs.get("agent_id")
+            attributes = {"agent.id": agent_id} if agent_id else None
             result = await func(*args, **kwargs)
-            _set_result_counter(result, request_flagged_counter)
+            _set_result_counter(result, request_flagged_counter, attributes)
             return result
 
         return _return_wrapper(func, sync_wrapper, async_wrapper)
@@ -147,19 +164,23 @@ def _add_request_error_counter(request_error_counter: Counter):
     def decorator(func):
         @wraps(func)
         def sync_wrapper(*args, **kwargs):
+            agent_id = kwargs.get("agent_id")
+            attributes = {"agent.id": agent_id} if agent_id else None
             try:
                 result = func(*args, **kwargs)
             except:
-                request_error_counter.add(1)
+                request_error_counter.add(1, attributes=attributes or {})
                 raise
             return result
 
         @wraps(func)
         async def async_wrapper(*args, **kwargs):
+            agent_id = kwargs.get("agent_id")
+            attributes = {"agent.id": agent_id} if agent_id else None
             try:
                 result = await func(*args, **kwargs)
             except:
-                request_error_counter.add(1)
+                request_error_counter.add(1, attributes=attributes or {})
                 raise
             return result
 
