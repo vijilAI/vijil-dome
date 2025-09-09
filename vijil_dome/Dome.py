@@ -164,10 +164,10 @@ class Dome:
             flagged=False, response_string=query_string, trace={}, exec_time=0.0
         )
 
-    def guard_input(self, query_string: str):
+    def guard_input(self, query_string: str, *, agent_id: Optional[str] = None):
         if self.input_guardrail is None:
             return self._empty_guardrail_result(query_string)
-        result = self.input_guardrail.scan(query_string)
+        result = self.input_guardrail.scan(query_string, agent_id=agent_id)
         return ScanResult(
             flagged=result.flagged,
             response_string=result.guardrail_response_message,
@@ -175,10 +175,12 @@ class Dome:
             exec_time=result.exec_time,
         )
 
-    async def async_guard_input(self, query_string: str):
+    async def async_guard_input(
+        self, query_string: str, *, agent_id: Optional[str] = None
+    ):
         if self.input_guardrail is None:
             return self._empty_guardrail_result(query_string)
-        result = await self.input_guardrail.async_scan(query_string)
+        result = await self.input_guardrail.async_scan(query_string, agent_id=agent_id)
         return ScanResult(
             flagged=result.flagged,
             response_string=result.guardrail_response_message,
@@ -186,10 +188,10 @@ class Dome:
             exec_time=result.exec_time,
         )
 
-    def guard_output(self, query_string: str):
+    def guard_output(self, query_string: str, *, agent_id: Optional[str] = None):
         if self.output_guardrail is None:
             return self._empty_guardrail_result(query_string)
-        result = self.output_guardrail.scan(query_string)
+        result = self.output_guardrail.scan(query_string, agent_id=agent_id)
         return ScanResult(
             flagged=result.flagged,
             response_string=result.guardrail_response_message,
@@ -197,10 +199,12 @@ class Dome:
             exec_time=result.exec_time,
         )
 
-    async def async_guard_output(self, query_string: str):
+    async def async_guard_output(
+        self, query_string: str, *, agent_id: Optional[str] = None
+    ):
         if self.output_guardrail is None:
             return self._empty_guardrail_result(query_string)
-        result = await self.output_guardrail.async_scan(query_string)
+        result = await self.output_guardrail.async_scan(query_string, agent_id=agent_id)
         return ScanResult(
             flagged=result.flagged,
             response_string=result.guardrail_response_message,
