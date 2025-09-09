@@ -99,9 +99,7 @@ class DetectionMethod(ABC):
     """
 
     @abstractmethod
-    async def detect(
-        self, query_string: str, agent_id: Optional[str] = None
-    ) -> DetectionResult:
+    async def detect(self, query_string: str) -> DetectionResult:
         """
         Perform the detection logic.
         """
