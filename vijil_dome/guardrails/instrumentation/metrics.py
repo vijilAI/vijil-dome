@@ -66,10 +66,13 @@ def _add_request_counter(request_counter: Counter):
 
 
 def _create_latency_histogram(name: str, meter: Meter):
+    bucket_advisory = [0.05 * i for i in range(21)]
+    bucket_advisory = bucket_advisory + [1.25, 1.5, 1.75, 2, 2.5, 3, 4, 5, 6, 10]
     request_latency = meter.create_histogram(
         f"{name}-latency_seconds",
         description=f"{name} latency",
         unit="seconds",
+        explicit_bucket_boundaries_advisory=bucket_advisory,
     )
     return request_latency
 
@@ -83,9 +86,8 @@ def _add_request_latency_histogram(request_latency: Histogram):
             attributes = {"agent.id": agent_id} if agent_id else None
             start_time = time.time()
             result = func(*args, **kwargs)
-            request_latency.record(
-                time.time() - start_time, attributes=attributes or {}
-            )
+            hist_time = time.time() - start_time
+            request_latency.record(hist_time, attributes=attributes or {})
             return result
 
         @wraps(func)
@@ -94,9 +96,8 @@ def _add_request_latency_histogram(request_latency: Histogram):
             attributes = {"agent.id": agent_id} if agent_id else None
             start_time = time.time()
             result = await func(*args, **kwargs)
-            request_latency.record(
-                time.time() - start_time, attributes=attributes or {}
-            )
+            hist_time = time.time() - start_time
+            request_latency.record(hist_time, attributes=attributes or {})
             return result
 
         return _return_wrapper(func, sync_wrapper, async_wrapper)
