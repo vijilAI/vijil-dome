@@ -15,7 +15,7 @@
 # vijil and vijil-dome are trademarks owned by Vijil Inc.
 
 import pytest
-
+import os
 from vijil_dome.detectors.methods.hhem_hallucination import *  # noqa: F403
 from vijil_dome.detectors.methods.factcheck_roberta import *  # noqa: F403
 from vijil_dome.detectors.methods.llm_models import *  # noqa: F403
@@ -29,10 +29,14 @@ from vijil_dome.detectors import (
     DetectionCategory,
 )
 
+# HHEM is a gated model, so it requires a login token to access.
+from huggingface_hub import login
+
 
 @pytest.mark.asyncio
 async def test_integrity_detection():
     # Hallucination detection via HHEM
+    login(os.getenv("HUGGINGFACE_TOKEN"))
     hhem_detect_with_time = await DetectionFactory.get_detect_with_time(
         DetectionCategory.Integrity,
         HHEM,
