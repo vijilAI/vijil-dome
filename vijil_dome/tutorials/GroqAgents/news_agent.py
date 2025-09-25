@@ -36,7 +36,7 @@ class MyNewsBot:
             response = await self.client.responses.create(
                 model=self.model,
                 input=query_string,
-                tools=self.tools,
+                tools=self.tools,  # type: ignore[arg-type]
                 stream=False,
                 temperature=self.temperature,
                 top_p=self.top_p,
