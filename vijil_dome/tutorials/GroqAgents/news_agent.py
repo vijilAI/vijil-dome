@@ -49,7 +49,7 @@ class MyNewsBot:
             )
 
             return content
-        except Exception as e:
+        except Exception:
             return "Sorry, an internal error occurred. Please try again."
 
 
