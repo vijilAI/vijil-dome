@@ -37,7 +37,7 @@ class MBertPromptInjectionModel(HFBaseModel):
     def __init__(self, truncation: bool = True, max_length: int = 512):
         try:
             super().__init__(
-                model_name="vijil/mbert-prompt-injection-v2",
+                model_name="vijil/vijil_dome_prompt_injection_detection",
                 tokenizer_name="answerdotai/ModernBERT-base",
             )
 
