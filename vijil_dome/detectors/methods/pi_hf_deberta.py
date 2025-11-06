@@ -25,6 +25,7 @@ from vijil_dome.detectors import (
     DetectionCategory,
     DetectionResult,
 )
+from typing import Optional
 from transformers import pipeline
 from torch.nn.functional import softmax
 from vijil_dome.detectors.utils.hf_model import HFBaseModel
@@ -43,7 +44,7 @@ class BaseDebertaPromptInjectionModel(HFBaseModel):
         response_method: str,
         model_dir: str = "deberta-prompt-injection",
         truncation: bool = True,
-        max_length: int = 512
+        max_length: int = 512,
     ):
         try:
             model_path = os.path.join(
@@ -62,8 +63,7 @@ class BaseDebertaPromptInjectionModel(HFBaseModel):
                 tokenizer=self.tokenizer,
                 truncation=truncation,
                 max_length=max_length,
-                device=torch.device(
-                    "cuda" if torch.cuda.is_available() else "cpu"),
+                device=torch.device("cuda" if torch.cuda.is_available() else "cpu"),
             )
             self.response_string = f"Method:{response_method}"
             self.run_in_executor = True
@@ -72,7 +72,9 @@ class BaseDebertaPromptInjectionModel(HFBaseModel):
             logger.error(f"Failed to initialize DeBERTa model: {str(e)}")
             raise
 
-    def sync_detect(self, query_string: str) -> DetectionResult:
+    def sync_detect(
+        self, query_string: str, agent_id: Optional[str] = None
+    ) -> DetectionResult:
         pred = self.classifier(query_string)
         flagged = pred[0]["label"] != "SAFE"
         return flagged, {
@@ -97,7 +99,7 @@ class DebertaPromptInjectionModel(BaseDebertaPromptInjectionModel):
             model_identifier="protectai/deberta-v3-base-prompt-injection-v2",
             response_method=PI_DEBERTA_V3_BASE,
             truncation=truncation,
-            max_length=max_length
+            max_length=max_length,
         )
 
 
@@ -112,7 +114,7 @@ class DebertaTuned60PromptInjectionModel(BaseDebertaPromptInjectionModel):
             model_identifier="vijil/pi_deberta_finetuned_11122024",
             response_method=PI_DEBERTA_FINETUNED_11122024,
             truncation=truncation,
-            max_length=max_length
+            max_length=max_length,
         )
 
 
@@ -139,8 +141,7 @@ class PromptGuardSecurityModel(HFBaseModel):
                 padding=True,
                 truncation=truncation,
                 max_length=max_length,
-                device=torch.device(
-                    "cuda" if torch.cuda.is_available() else "cpu"),
+                device=torch.device("cuda" if torch.cuda.is_available() else "cpu"),
             )
             self.score_threshold = score_threshold
             self.response_string = f"Method:{SECURITY_PROMPTGUARD}"
@@ -205,7 +206,9 @@ class PromptGuardSecurityModel(HFBaseModel):
         probabilities = self.get_class_probabilities(text, temperature, device)
         return (probabilities[0, 1] + probabilities[0, 2]).item()
 
-    def sync_detect(self, query_string: str) -> DetectionResult:
+    def sync_detect(
+        self, query_string: str, agent_id: Optional[str] = None
+    ) -> DetectionResult:
         logger.debug("Detecting using Prompt Guard...")
         jb_score = self.get_jailbreak_score(query_string)
         flagged = jb_score >= self.score_threshold

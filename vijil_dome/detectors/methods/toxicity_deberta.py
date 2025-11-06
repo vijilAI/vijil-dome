@@ -62,7 +62,9 @@ class ToxicityDeberta(HFBaseModel):
             logger.error(f"Failed to initialize Deberta toxicity model: {str(e)}")
             raise
 
-    def sync_detect(self, query_string: str) -> DetectionResult:
+    def sync_detect(
+        self, query_string: str, agent_id: Optional[str] = None
+    ) -> DetectionResult:
         pred = self.classifier(query_string)
         flagged = pred[0]["label"] == "LABEL_1"
         return flagged, {

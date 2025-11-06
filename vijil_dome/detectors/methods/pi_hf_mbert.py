@@ -24,6 +24,7 @@ from vijil_dome.detectors import (
 )
 from transformers import pipeline
 from vijil_dome.detectors.utils.hf_model import HFBaseModel
+from typing import Optional
 
 logger = logging.getLogger("vijil.dome")
 
@@ -56,7 +57,9 @@ class MBertPromptInjectionModel(HFBaseModel):
             logger.error(f"Failed to initialize MBert model: {str(e)}")
             raise
 
-    def sync_detect(self, query_string: str) -> DetectionResult:
+    def sync_detect(
+        self, query_string: str, agent_id: Optional[str] = None
+    ) -> DetectionResult:
         pred = self.classifier(query_string)
         flagged = bool(pred[0]["label"])  # Returns 1 if prompt injection, 0 otherwise
         return flagged, {
