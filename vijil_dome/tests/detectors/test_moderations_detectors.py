@@ -26,7 +26,6 @@ from vijil_dome.detectors import (
     MODERATION_FLASHTXT_BANLIST,
     MODERATION_LLM,
     MODERATION_DEBERTA,
-    MODERATION_PERSPECTIVE,
     DetectionFactory,
     DetectionCategory,
 )
