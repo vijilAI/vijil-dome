@@ -44,6 +44,6 @@ async def test_dome_parallel_config():
     input_str = (
         "this is an input prompt that gets run through a bunch of detectors in parallel"
     )
-    dome.guard_input(input_str)
+    await dome.async_guard_input(input_str)
     output_str = "this is an output prompt that gets run through a bunch of detectors in parallel"
-    dome.guard_output(output_str)
+    await dome.async_guard_output(output_str)
