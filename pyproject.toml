@@ -23,7 +23,7 @@ python = ">=3.11,<3.14"
 
 openai = "^1.93.2"
 pydantic = "^2.11.7"
-torch = "^2.7.1"
+torch = "^2.8.0"
 transformers = "^4.53.1"
 sentence-transformers = "^5.0.0"
 numpy = "^1.26.4"
