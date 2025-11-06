@@ -25,6 +25,29 @@ Optional extras for common integrations:
 
 > ⚠️ Note: `annoy` is not currently compatible with agents built using Google ADK + Cloud Run. Use in-memory embeddings in those cases.
 
+### CPU-Only Installation
+
+By default, `pip install vijil-dome` installs PyTorch with CUDA support (~2-3GB). For CPU-only environments, you can significantly reduce the installation size (~100-200MB) by using the CPU-only version of PyTorch:
+
+```bash
+# Install vijil-dome
+pip install vijil-dome
+
+# Replace with CPU-only PyTorch (saves ~2GB)
+pip install --force-reinstall torch --index-url https://download.pytorch.org/whl/cpu
+```
+
+**When to use CPU-only PyTorch:**
+- Deploying to cloud environments without GPU (Lambda, Cloud Run, etc.)
+- Running on machines without NVIDIA GPUs
+- Reducing Docker image sizes
+- Development/testing environments where GPU isn't needed
+
+**Performance considerations:**
+- All guardrails remain fully functional on CPU
+- Model inference will be slower than GPU (typically 2-5x)
+- For most guardrailing use cases, CPU performance is acceptable
+- The library automatically detects available devices and falls back to CPU gracefully
 
 ## 🔒 Guarding Agents in One Line
 
