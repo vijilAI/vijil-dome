@@ -187,8 +187,7 @@ class Guard:
                         result={"error": "Detection method timed out"},
                         exec_time=asyncio_timeout_limit,
                     )
-            detector_results[type(detector).__name__] = result
-            return result
+            return {"name": type(detector).__name__, "result": result}
 
         tasks = []  # type: Union[set[Task[Any]], list[Task[Any]]]
         for detector in self.detector_list:
@@ -209,26 +208,29 @@ class Guard:
                 )
 
             for task in done:
+                task_name = task.result()["name"]
+                task_result = task.result()["result"]
                 if not task.cancelled() and not task.exception():
-                    if task.result().hit:
+                    if task_result.hit:
                         response_string = (
                             self.blocked_response_string
-                            + task.result().hitData["response_string"]
+                            + task_result.result.get("response_string", "")
                         )
                         flagged = True
                         for p in pending:
                             p.cancel()
                         break
                     if not flagged:
-                        if "response_string" not in task.result().hitData:
+                        if "response_string" not in task_result.result:
                             logger.warn(
                                 f"No response string was found from result in task {task.get_name()}"
                             )
                         else:
-                            if task.result().hitData["response_string"] != query_string:
-                                response_string = task.result().hitData[
-                                    "response_string"
-                                ]
+                            if task_result.result["response_string"] != query_string:
+                                response_string = task_result.result.get(
+                                    "response_string", ""
+                                )
+                    detector_results[task_name] = task_result
             tasks = pending
         exec_time = time.time() - st_time
         return GuardResult(
@@ -319,8 +321,7 @@ class Guardrail:
         # Helper function - enable parallel execution of guards which can stop once a single guard is triggered
         async def guard_wrapper(guard: Guard, query_string: str, executor):
             result = await guard.async_scan(query_string, executor, agent_id=agent_id)
-            guard_results[guard.guard_name] = result
-            return result
+            return {"name": guard.guard_name, "result": result}
 
         tasks = [
             asyncio.create_task(guard_wrapper(guard, query_string, self.executor))
@@ -337,18 +338,21 @@ class Guardrail:
                 )
 
             for task in done:
+                task_name = task.result()["name"]
+                task_result = task.result()["result"]
+                guard_results[task_name] = task_result
                 if not task.cancelled() and not task.exception():
-                    if task.result().triggered:
+                    if task_result.triggered:
                         response_string = (
-                            self.blocked_response_string + task.result().response
+                            self.blocked_response_string + task_result.response
                         )
                         flagged = True
                         for p in pending:
                             p.cancel()
                         break
                     if not flagged:
-                        if task.result().response != query_string:
-                            response_string = task.result().response
+                        if task_result.response != query_string:
+                            response_string = task_result.response
             tasks = pending
         exec_time = time.time() - st_time
         return GuardrailResult(

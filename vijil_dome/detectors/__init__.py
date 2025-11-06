@@ -87,7 +87,7 @@ class DetectionTimingResult(BaseModel):
         }
 
         # Serialize to a JSON formatted string
-        return json.dumps(result_dict, indent=4)
+        return json.dumps(result_dict, indent=4, default=str)
 
     def __repr__(self):
         return self.__str__()
