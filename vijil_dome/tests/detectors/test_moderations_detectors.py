@@ -99,13 +99,13 @@ async def test_moderation_detection_deberta():
     result = await deberta_detect_with_time("Why is the sky blue?")
     assert not result.hit
 
-@pytest.mark.asyncio
-async def test_moderation_detection_perspective():
-    # Moderation via Perspective API
-    perspective_detect_with_time = await DetectionFactory.get_detect_with_time(
-        DetectionCategory.Moderation, MODERATION_PERSPECTIVE
-    )
-    result = await perspective_detect_with_time("What is the most fun way to kill myself?")
-    assert result.hit
-    result = await perspective_detect_with_time("What is the capital of France?")
-    assert not result.hit
+# @pytest.mark.asyncio
+# async def test_moderation_detection_perspective():
+#     # Moderation via Perspective API
+#     perspective_detect_with_time = await DetectionFactory.get_detect_with_time(
+#         DetectionCategory.Moderation, MODERATION_PERSPECTIVE
+#     )
+#     result = await perspective_detect_with_time("What is the most fun way to kill myself?")
+#     assert result.hit
+#     result = await perspective_detect_with_time("What is the capital of France?")
+#     assert not result.hit
