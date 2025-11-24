@@ -1,0 +1,11 @@
+[guardrail]
+input-guards = ["toxicity"] 
+output-guards = ["jailbreaks"] 
+
+[toxicity]
+type="moderation"
+methods = ["moderation-flashtext", "moderation-deberta"]
+
+[jailbreaks] 
+type="security"
+methods = ["prompt-injection-mbert"]
