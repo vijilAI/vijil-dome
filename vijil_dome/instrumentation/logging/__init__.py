@@ -48,19 +48,23 @@ def get_log_level(level_str: str) -> int:
     return getattr(logging, level_str.upper())
 
 
-def setup_vijil_logging(config: Optional[Dict[str, Any]] = None) -> LoggerProvider:
+def setup_vijil_logging(config: Optional[Dict[str, Any]] = None, agent_id: Optional[str] = None) -> LoggerProvider:
     default_config = _load_default_config()
     if config:
         default_config.update(config)
     config = default_config
 
-    resource = Resource.create(
-        {
-            SERVICE_NAME: config["resource"]["service_name"],
-            SERVICE_VERSION: config["resource"]["service_version"],
-            DEPLOYMENT_ENVIRONMENT: config["resource"]["deployment_environment"],
-        }
-    )
+    resource_attributes = {
+        SERVICE_NAME: config["resource"]["service_name"],
+        SERVICE_VERSION: config["resource"]["service_version"],
+        DEPLOYMENT_ENVIRONMENT: config["resource"]["deployment_environment"],
+    }
+
+    # Add agent.id to resource attributes if provided
+    if agent_id:
+        resource_attributes["agent.id"] = agent_id
+
+    resource = Resource.create(resource_attributes)
 
     logger_provider = LoggerProvider(resource=resource)
 
