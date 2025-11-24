@@ -14,48 +14,64 @@ DEFAULT_TOOL_CALL_BLOCKED_MESSAGE = (
 DEFAULT_TOOL_RESPONSE_BLOCKED_MESSAGE = "Sorry, the response from the tool call was flagged by Vijil Dome and cannot be provided."
 
 
-def transform_mcp_schema(schema: dict) -> dict:
+# In order to deal with tool calls that expect a structured output, there are two possible solutions
+# 1. We modify the output schema to set all the fields as optional, and include guardrail info,
+# 2. We create a minimal valid object that satisfies the required fields, and include guardrail info.
+# While 1, is more ideal, it breaks JSON RPC communication with tools that run locally via stdio transport,
+# Hence, we go for the second option.
+# TODO: Revisit option 1, and see if we can make it work
+def _make_minimal_object(schema: Optional[dict[str, Any]]):
     """
-    Transform an MCP tool schema so that:
-    - All properties become optional (i.e. removed from 'required')
-    - A new boolean field 'blocked_by_guardrails' is added at root
+    Given an MCP-style JSON schema dict, return a minimally valid object
+    that satisfies required fields. Optional fields are omitted.
     """
 
-    def make_optional(node: dict):
-        """Recursively remove 'required' from all object schemas."""
-        if not isinstance(node, dict):
-            return node
+    if schema is None:
+        return None
 
-        # If this schema declares properties, remove 'required'
-        if node.get("type") == "object" and "properties" in node:
-            node.pop("required", None)
+    schema_type = schema.get("type")
 
-            for key, value in node["properties"].items():
-                node["properties"][key] = make_optional(value)
+    # --- If oneOf / anyOf exists, use the first branch ---
+    if "oneOf" in schema:
+        return _make_minimal_object(schema["oneOf"][0])
+    if "anyOf" in schema:
+        return _make_minimal_object(schema["anyOf"][0])
 
-        # Handle arrays with items
-        if node.get("type") == "array" and "items" in node:
-            node["items"] = make_optional(node["items"])
+    # --- Base types ---
+    if schema_type == "string":
+        return ""
+    if schema_type == "number":
+        return 0
+    if schema_type == "integer":
+        return 0
+    if schema_type == "boolean":
+        return False
+    if schema_type == "null":
+        return None
 
-        # Support oneOf / anyOf / allOf
-        for group in ("oneOf", "anyOf", "allOf"):
-            if group in node:
-                node[group] = [make_optional(x) for x in node[group]]
+    # --- Enum ---
+    if "enum" in schema:
+        return schema["enum"][0]
 
-        return node
+    # --- Array ---
+    if schema_type == "array":
+        # minimal array is empty
+        return []
 
-    # Deep copy to avoid mutating original
-    new_schema = make_optional(dict(schema))
+    # --- Object ---
+    if schema_type == "object":
+        props = schema.get("properties", {})
+        required = schema.get("required", [])
 
-    # Inject guardrail field at the top level
-    props = new_schema.setdefault("properties", {})
-    props["blocked_by_guardrails"] = {"type": "boolean"}
+        output = {}
+        for field in required:
+            field_schema = props.get(field, {})
+            output[field] = _make_minimal_object(field_schema)
 
-    # Ensure root is object schema
-    if new_schema.get("type") != "object":
-        new_schema["type"] = "object"
+        return output
 
-    return new_schema
+    # Unknown fallback
+    return None
 
 
 class DomedMCPServer:
@@ -91,12 +107,21 @@ class DomedMCPServer:
                 original_input = str(context.message)
                 input_scan = await dome_instance.async_guard_input(original_input)
                 if input_scan.flagged:
+                    # Dome is triggered. Create a minimal response object that satisfies output typecast
+                    tool_in_ctx = await context.fastmcp_context.fastmcp.get_tool(
+                        context.message.name
+                    )
+                    tool_structured_output = tool_in_ctx.output_schema
+                    minimal_output = _make_minimal_object(tool_structured_output)
+                    # Now add in the guardrail info
+                    minimal_output["blocked_by_guardrails"] = True
+                    minimal_output["guardrail_message"] = tool_call_block_message
                     return ToolResult(
                         content=[
                             TextContent(type="text", text=tool_call_block_message)
                         ],
+                        structured_content=minimal_output,
                     )
-                    # raise ToolError(tool_call_block_message)
                 result = await call_next(context)
                 return result
 
@@ -107,28 +132,27 @@ class DomedMCPServer:
                     str(result.structured_content)
                 )
                 if output_scan.flagged:
+                    # Dome is triggered. Create a minimal response object that satisfies output typecast
+                    tool_in_ctx = await context.fastmcp_context.fastmcp.get_tool(
+                        context.message.name
+                    )
+                    tool_structured_output = tool_in_ctx.output_schema
+                    minimal_output = _make_minimal_object(tool_structured_output)
+                    minimal_output["blocked_by_guardrails"] = True
+                    minimal_output["guardrail_message"] = tool_response_block_message
                     return ToolResult(
                         content=[
                             TextContent(type="text", text=tool_response_block_message)
                         ],
+                        structured_content=minimal_output,
                     )
-                    # raise ToolError(tool_response_block_message)
                 return result
 
         proxy = FastMCP.as_proxy(self.mcp_server_config, name=self.server_name)
-
-        # Disable forced output schemas to allow guardrail middleware to modify outputs freely
-        # If we don't do this, guardrailed outputs that contain just the block message will fail schema validation
-        # TBD: How can we keep this for better performance and retain compatibility with local stdio mcp servers?
-
-        tools = await proxy.get_tools()
-        for tool_name in tools:
-            local_tool = tools[tool_name].copy()
-            local_tool.output_schema = None
-            proxy.add_tool(local_tool)
-
+        # Add guardrail middlewares
         proxy.add_middleware(InputGuardrailMiddleware())
         proxy.add_middleware(OutputGuardrailMiddleware())
+
         return proxy
 
     def run(
