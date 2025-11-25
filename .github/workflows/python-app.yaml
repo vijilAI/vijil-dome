@@ -63,6 +63,7 @@ jobs:
         run: |
           export PYTHONPATH=$PWD
           poetry add ruff mypy
+          mypy --install-types
           make lint
 
       - name: Run tests
