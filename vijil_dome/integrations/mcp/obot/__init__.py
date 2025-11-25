@@ -14,6 +14,6 @@
 #
 # vijil and vijil-dome are trademarks owned by Vijil Inc.
 
-from .wrapper import DomedMCPServer
+from .client import ObotClient
 
-__all__ = ["DomedMCPServer"]
+__all__ = ["ObotClient"]

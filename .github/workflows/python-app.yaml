@@ -62,7 +62,7 @@ jobs:
       - name: Lint
         run: |
           export PYTHONPATH=$PWD
-          poetry add ruff mypy
+          poetry add ruff mypy types-requests
           make lint
 
       - name: Run tests
