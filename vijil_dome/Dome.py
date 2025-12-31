@@ -14,7 +14,7 @@
 #
 # vijil and vijil-dome are trademarks owned by Vijil Inc.
 
-from vijil_dome.guardrails import Guardrail, GuardrailConfig
+from vijil_dome.guardrails import Guardrail, GuardrailConfig, aggregator_or, AggregateFn
 from vijil_dome.guardrails.config_parser import (
     convert_dict_to_guardrails,
     convert_toml_to_guardrails,
@@ -98,11 +98,13 @@ class Dome:
         self,
         dome_config: Optional[Union[DomeConfig, Dict, str]] = None,
         client: Optional[OpenAI] = None,
+        guard_aggregator: AggregateFn = aggregator_or,
     ):
         self.client = client
         self.input_guardrail = None  # type: Optional[Guardrail]
         self.output_guardrail = None  # type: Optional[Guardrail]
         self.agent_id = None  # type: Optional[str]
+        self.guard_aggregator: AggregateFn = guard_aggregator
         if dome_config is not None:
             if isinstance(dome_config, DomeConfig):
                 self._init_from_dome_config(dome_config)
@@ -117,9 +119,9 @@ class Dome:
 
     @staticmethod
     def create_from_config(
-        config: Union[Dict, str], client: Optional[OpenAI] = None
+        config: Union[Dict, str], client: Optional[OpenAI] = None, guard_aggregator: AggregateFn = aggregator_or
     ) -> "Dome":
-        return Dome(dome_config=config, client=client)
+        return Dome(dome_config=config, client=client, guard_aggregator=guard_aggregator)
 
     @staticmethod
     def create_from_vijil_agent(
@@ -127,11 +129,12 @@ class Dome:
         api_key: str,
         base_url: Optional[str] = None,
         client: Optional[OpenAI] = None,
+        guard_aggregator: AggregateFn = aggregator_or,
     ) -> "Dome":
         config_dict = get_config_from_vijil_agent(api_key, agent_id, base_url)
         if config_dict is None:
             raise ValueError(f"No Dome configuration found for agent ID {agent_id}")
-        return Dome(dome_config=config_dict, client=client)
+        return Dome(dome_config=config_dict, client=client, guard_aggregator=guard_aggregator)
 
     @staticmethod
     def create_from_vijil_evaluation(
@@ -140,6 +143,7 @@ class Dome:
         latency_threshold: Optional[float] = None,
         base_url: Optional[str] = None,
         client: Optional[OpenAI] = None,
+        guard_aggregator: AggregateFn = aggregator_or,
     ) -> "Dome":
         config_dict = get_config_from_vijil_evaluation(
             api_key, evaluation_id, base_url, latency_threshold
@@ -148,12 +152,17 @@ class Dome:
             raise ValueError(
                 f"No Dome configuration recommendation could be generated for evaluation ID {evaluation_id}"
             )
-        return Dome(dome_config=config_dict, client=client)
+        return Dome(dome_config=config_dict, client=client, guard_aggregator=guard_aggregator)
 
     def _init_from_dome_config(self, dome_config: DomeConfig):
         self.input_guardrail = dome_config.input_guardrail
         self.output_guardrail = dome_config.output_guardrail
         self.agent_id = dome_config.agent_id
+        # Apply aggregator function to both guardrails
+        if self.input_guardrail is not None:
+            self.input_guardrail.aggregate_fn = self.guard_aggregator
+        if self.output_guardrail is not None:
+            self.output_guardrail.aggregate_fn = self.guard_aggregator
 
     def get_guardrails(self):
         return [self.input_guardrail, self.output_guardrail]
