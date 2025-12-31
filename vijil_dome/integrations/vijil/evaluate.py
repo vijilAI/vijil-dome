@@ -29,7 +29,7 @@ def get_config_from_vijil_agent(
         "Content-Type": "application/json",
     }
     base_url = base_url or VIJIL_API_BASE_URL
-    url = f"{base_url}/agent-configurations/{agent_id}/dome-configs"
+    url = f"{base_url}/agents/{agent_id}/dome-configs"
 
     try:
         response = httpx.get(url, headers=headers)
