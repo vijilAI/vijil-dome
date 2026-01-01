@@ -18,7 +18,7 @@ from vijil_dome.detectors import DetectionMethod, DetectionTimingResult
 import asyncio
 from asyncio import Task  # noqa: F401
 import concurrent.futures
-from typing import List, Dict, Tuple, Union, Any, Optional  # noqa: F401
+from typing import List, Dict, Tuple, Union, Any, Optional, Callable  # noqa: F401
 from abc import ABC, abstractmethod
 import time
 from pydantic import BaseModel
@@ -31,6 +31,51 @@ DEFAULT_GUARDRAIL_BLOCKED_PATTERNS = [
 ]
 
 logger = logging.getLogger("vijil.dome")
+
+# Aggregation function type. Positional parameters map as follows:
+#   1) current_flagged: bool        -> whether any prior guard triggered so far
+#   2) current_response: str        -> the response string accumulated so far
+#   3) guard_scan_result: GuardResult -> the most recent guard's result
+#   4) blocked_prefix: str          -> prefix used for blocked messages (includes level/context)
+#   5) original_query: str          -> the original unmodified query string
+# Returns a tuple:
+#   (new_flagged: bool, new_response: str, break_now: bool)
+# where `break_now=True` instructs the caller to early-exit this loop iteration
+# (typically honored only when the caller's `early_exit` setting is enabled).
+AggregateFn = Callable[[bool, str, "GuardResult", str, str], Tuple[bool, str, bool]]
+
+def aggregator_or(
+    current_flagged: bool,
+    current_response: str,
+    guard_scan_result: "GuardResult",
+    blocked_prefix: str,
+    original_query: str,
+) -> Tuple[bool, str, bool]:
+    """Default OR aggregator.
+
+    Args:
+        current_flagged: Whether any prior guard has already triggered.
+        current_response: The response string accumulated so far.
+        guard_scan_result: Result of the current guard (triggered + response).
+        blocked_prefix: Prefix for blocked messages (e.g., "Blocked by input guardrail at ").
+        original_query: The original, unmodified query string.
+
+    Returns:
+        (new_flagged, new_response, break_now):
+            - new_flagged: True if any guard (including current) triggered.
+            - new_response: Either the blocked message or a passthrough/modified response.
+            - break_now: True if this guard triggered; caller may early-exit if configured.
+
+    Behavior:
+        - If the guard is triggered, set flagged and prefix blocked message; request break.
+        - Otherwise, if not already flagged and this guard modified the response, forward it.
+        - Else, preserve the current aggregate state.
+    """
+    if guard_scan_result.triggered:
+        return True, blocked_prefix + guard_scan_result.response, True
+    if not current_flagged and guard_scan_result.response != original_query:
+        return False, guard_scan_result.response, False
+    return current_flagged, current_response, False
 
 
 class GuardResult(BaseModel):
@@ -269,6 +314,7 @@ class Guardrail:
         guard_list: List[Guard],
         early_exit: bool = True,
         run_in_parallel: bool = False,
+        aggregate_fn: Optional[AggregateFn] = None,
     ):
         if level not in ["input", "output"]:
             raise ValueError("Guardrail level must be 'input' or 'output'")
@@ -278,6 +324,8 @@ class Guardrail:
         self.run_in_parallel = run_in_parallel
         self.blocked_response_string = f"Blocked by {self.level} guardrail at "
         self.executor = concurrent.futures.ThreadPoolExecutor()
+        # Use provided aggregator or default OR behavior
+        self.aggregate_fn: AggregateFn = aggregate_fn or aggregator_or
 
     async def sequential_guard(
         self, query_string: str, agent_id: Optional[str] = None
@@ -291,16 +339,15 @@ class Guardrail:
                 query_string, self.executor, agent_id=agent_id
             )
             guard_results[guard.guard_name] = guard_scan_result
-            if guard_scan_result.triggered:
-                response_string = (
-                    self.blocked_response_string + guard_scan_result.response
-                )
-                flagged = True
-                if self.early_exit:
-                    break
-            if not flagged:
-                if guard_scan_result.response != query_string:
-                    response_string = guard_scan_result.response
+            flagged, response_string, break_now = self.aggregate_fn(
+                flagged,
+                response_string,
+                guard_scan_result,
+                self.blocked_response_string,
+                query_string,
+            )
+            if self.early_exit and break_now:
+                break
         exec_time = time.time() - st_time
         return GuardrailResult(
             flagged=flagged,
