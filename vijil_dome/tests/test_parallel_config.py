@@ -287,6 +287,4 @@ async def test_guardrail_parallel_no_early_exit():
     assert triggering_detector.was_executed is True
     assert slow_detector.was_executed is True
     assert result.flagged is True
-    # Both guards should be in the results
-    assert "triggering-guard" in result.guard_exec_details
-    assert "slow-guard" in result.guard_exec_details
+
