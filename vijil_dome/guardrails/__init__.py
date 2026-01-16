@@ -228,7 +228,7 @@ class Guard:
                     break
                 if not flagged:
                     if "response_string" not in task_result.result:
-                        logger.warn(
+                        logger.warning(
                             f"No response string was found from result in task {task.get_name()}"
                         )
                     else:
