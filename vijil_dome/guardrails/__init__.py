@@ -179,7 +179,7 @@ class Guard:
                             query_string, agent_id=agent_id
                         )
                 except TimeoutError:
-                    logger.warn(
+                    logger.warning(
                         f"Detection method {detector.__class__.__name__} timed out."
                     )
                     result = DetectionTimingResult(
@@ -215,8 +215,9 @@ class Guard:
                         f"Task {task.get_name()} raised exception: {task.exception()}"
                     )
                     continue
-                task_name = task.result()["name"]
-                task_result = task.result()["result"]
+                result = task.result()
+                task_name = result["name"]
+                task_result = result["result"]
                 if task_result.hit:
                     response_string = (
                         self.blocked_response_string
@@ -351,8 +352,9 @@ class Guardrail:
                         f"Task {task.get_name()} raised exception: {task.exception()}"
                     )
                     continue
-                task_name = task.result()["name"]
-                task_result = task.result()["result"]
+                result = task.result()
+                task_name = result["name"]
+                task_result = result["result"]
                 guard_results[task_name] = task_result
                 if task_result.triggered:
                     response_string = (
