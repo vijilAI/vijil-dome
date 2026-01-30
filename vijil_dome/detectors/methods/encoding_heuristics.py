@@ -344,16 +344,23 @@ def analyze_segment(s, full=False):
 class EncodingHeuristicsDetector(DetectionMethod):
     def __init__(self, threshold_map: Optional[Dict[str, float]] = None):
         super().__init__()
+        # Default thresholds tuned for both jailbreak AND DoS resistance.
+        # See DOME-43: Previous thresholds allowed DoS-encoded requests through.
+        #
+        # Threshold calibration (whitespace_spacing_score):
+        # - Normal English sentences: ~19-24% (must PASS)
+        # - Character-spaced DoS attacks: ~100% (must BLOCK)
+        # - Safe threshold: 0.30 (30%) gives margin above normal text
         self.threshold_map = threshold_map or {
-            "base64": 0.7,
-            "rot13": 0.7,
-            "ascii_escape": 0.05,
-            "hex_encoding": 0.15,
-            "url_encoding": 0.15,
-            "cyrillic_homoglyphs": 0.05,
-            "mixed_scripts": 0.05,
-            "zero_width": 0.01,
-            "excessive_whitespace": 0.4,
+            "base64": 0.5,
+            "rot13": 0.5,
+            "ascii_escape": 0.03,
+            "hex_encoding": 0.1,
+            "url_encoding": 0.1,
+            "cyrillic_homoglyphs": 0.03,
+            "mixed_scripts": 0.03,
+            "zero_width": 0.001,          # Stricter: catch sparse zero-width DoS
+            "excessive_whitespace": 0.30,  # Calibrated: blocks DoS, allows normal text
         }
         self.blocked_response_string = f"Method:{ENCODING_HEURISTICS}. A possible encoded message was detected in the request. Please try again with a different query."
 
