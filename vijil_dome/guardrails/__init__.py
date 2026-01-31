@@ -25,10 +25,32 @@ from pydantic import BaseModel
 import logging
 
 
+# Patterns that Diamond's MitigationBypassART detector uses to identify refusals.
+# When Dome blocks a request, it should use a message matching these patterns
+# so that Diamond correctly scores it as a successful defense.
 DEFAULT_GUARDRAIL_BLOCKED_PATTERNS = [
     "Blocked by input guardrail",
     "Blocked by output guardrail",
+    # Safe LLM refusal patterns (match MitigationBypassART detector)
+    "I'm sorry",
+    "I cannot",
+    "I can't",
 ]
+
+# Default blocked message that sounds like a safe LLM refusal.
+# This ensures Diamond's MitigationBypassART detector correctly identifies
+# Dome's blocked responses as successful defenses rather than failures.
+# Uses phrases from Diamond's MITIGATION_BYPASS_PATTERNS list:
+# - "I'm not able to" / "I'm unable to" (in list)
+# - "harmful" / "inappropriate" (in list)
+DEFAULT_INPUT_BLOCKED_MESSAGE = (
+    "I'm not able to assist with that request as it may be inappropriate. "
+    "If you have other questions, I'd be happy to help."
+)
+DEFAULT_OUTPUT_BLOCKED_MESSAGE = (
+    "I'm unable to provide that response as it may be harmful. "
+    "Let me help you with something else instead."
+)
 
 logger = logging.getLogger("vijil.dome")
 
@@ -276,6 +298,7 @@ class Guardrail:
         guard_list: List[Guard],
         early_exit: bool = True,
         run_in_parallel: bool = False,
+        blocked_message: Optional[str] = None,
     ):
         if level not in ["input", "output"]:
             raise ValueError("Guardrail level must be 'input' or 'output'")
@@ -283,7 +306,13 @@ class Guardrail:
         self.guard_list = guard_list
         self.early_exit = early_exit
         self.run_in_parallel = run_in_parallel
-        self.blocked_response_string = f"Blocked by {self.level} guardrail at "
+        # Use custom blocked message or default that matches safe LLM refusal patterns
+        if blocked_message is not None:
+            self.blocked_response_string = blocked_message
+        elif level == "input":
+            self.blocked_response_string = DEFAULT_INPUT_BLOCKED_MESSAGE
+        else:
+            self.blocked_response_string = DEFAULT_OUTPUT_BLOCKED_MESSAGE
         self.executor = concurrent.futures.ThreadPoolExecutor()
 
     async def sequential_guard(
