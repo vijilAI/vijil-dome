@@ -92,10 +92,12 @@ def create_guardrail(guardrail_location: str, config_dict: dict) -> Guardrail:
     guard_objects = []
     fail_policy = True
     parallel_policy = False
+    blocked_message = None
 
     guard_level = f"{guardrail_location}-guards"
     fail_fast = f"{guardrail_location}-early-exit"
     run_parallel = f"{guardrail_location}-run-parallel"
+    blocked_msg_key = f"{guardrail_location}-blocked-message"
 
     if guard_level in config_dict:  # maybe worth raising a warning if missing?
         guard_list = config_dict[guard_level]
@@ -125,8 +127,11 @@ def create_guardrail(guardrail_location: str, config_dict: dict) -> Guardrail:
     if run_parallel in config_dict:
         parallel_policy = config_dict[run_parallel]
 
+    if blocked_msg_key in config_dict:
+        blocked_message = config_dict[blocked_msg_key]
+
     guardrail = Guardrail(
-        guardrail_location, guard_objects, fail_policy, parallel_policy
+        guardrail_location, guard_objects, fail_policy, parallel_policy, blocked_message
     )
     return guardrail
 
@@ -163,6 +168,9 @@ def convert_toml_to_guardrail_dict(path_to_toml: str):
     raw_config_dict["input-run-parallel"] = extract_field_from_toml(
         "input", "run-parallel", False, toml_config_dict
     )
+    raw_config_dict["input-blocked-message"] = extract_field_from_toml(
+        "input", "blocked-message", None, toml_config_dict
+    )
     raw_config_dict["output-guards"] = extract_field_from_toml(
         "output", "guards", [], toml_config_dict
     )
@@ -171,6 +179,9 @@ def convert_toml_to_guardrail_dict(path_to_toml: str):
     )
     raw_config_dict["output-run-parallel"] = extract_field_from_toml(
         "output", "run-parallel", False, toml_config_dict
+    )
+    raw_config_dict["output-blocked-message"] = extract_field_from_toml(
+        "output", "blocked-message", None, toml_config_dict
     )
 
     for groupname in raw_config_dict["input-guards"]:
