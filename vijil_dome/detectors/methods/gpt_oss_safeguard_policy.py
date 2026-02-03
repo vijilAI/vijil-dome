@@ -73,14 +73,24 @@ class PolicyGptOssSafeguard(LlmBaseDetector):
             FileNotFoundError: If policy_file path does not exist
             ValueError: If reasoning_effort not in [low, medium, high]
         """
+        # Fix for LiteLLM: when using custom base_url, LiteLLM strips one "openai/" prefix
+        # So we need to double it: "openai/gpt-oss-120b" -> "openai/openai/gpt-oss-120b"
+        if hub_name == "nebius" and model_name.startswith("openai/"):
+            litellm_model_name = f"openai/{model_name}"
+        else:
+            litellm_model_name = model_name
+
         super().__init__(
             method_name=POLICY_GPT_OSS_SAFEGUARD,
             hub_name=hub_name,
-            model_name=model_name,
+            model_name=litellm_model_name,
             api_key=api_key,
             timeout=timeout,
             max_retries=max_retries,
         )
+
+        # Store original model name for metadata
+        self.original_model_name = model_name
 
         # Validate reasoning_effort
         valid_efforts = ["low", "medium", "high"]
@@ -185,25 +195,19 @@ class PolicyGptOssSafeguard(LlmBaseDetector):
             response_text = llm_response.choices[0].message.content
             is_violation, reasoning = self._parse_response(response_text)
 
-            return DetectionResult(
-                hit=is_violation,
-                reason=reasoning,
-                metadata={
-                    "model_response": response_text,
-                    "model": self.model_name,
-                    "hub": self.hub_name,
-                    "policy_source": self.policy_source,
-                    "reasoning_effort": self.reasoning_effort,
-                }
-            )
+            return is_violation, {
+                "model_response": response_text,
+                "model": self.original_model_name,
+                "hub": self.hub_name,
+                "policy_source": self.policy_source,
+                "reasoning_effort": self.reasoning_effort,
+                "reasoning": reasoning,
+            }
 
         except Exception as e:
             # Fail-open: return safe result on error
-            return DetectionResult(
-                hit=False,
-                reason=f"Error during detection: {str(e)}",
-                metadata={
-                    "error": str(e),
-                    "model": self.model_name,
-                }
-            )
+            return False, {
+                "error": str(e),
+                "model": self.original_model_name,
+                "reasoning": f"Error during detection: {str(e)}",
+            }
