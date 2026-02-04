@@ -170,13 +170,10 @@ async def example_reasoning_efforts():
 
 
 async def example_with_dome_integration():
-    """Example 5: Integration with Dome guardrails"""
+    """Example 5: Direct Usage Recommendation (Dome config limitation)"""
     print("\n" + "="*60)
-    print("Example 5: Dome Integration")
+    print("Example 5: Direct Usage Pattern (Recommended)")
     print("="*60)
-
-    from vijil_dome import Dome
-    from vijil_dome.guardrails.config_parser import convert_dict_to_guardrails
 
     policy_file = (
         Path(__file__).parent.parent.parent
@@ -185,36 +182,31 @@ async def example_with_dome_integration():
         / "spam_policy.md"
     )
 
-    # Configure guardrail with policy detector
-    guardrail_config = {
-        "input-guards": [{
-            "policy-spam": {
-                "type": "generic",
-                "exit-early": True,
-                "methods": [{
-                    "name": POLICY_GPT_OSS_SAFEGUARD,
-                    "policy_file": str(policy_file),
-                    "model_name": "openai/gpt-oss-120b",
-                    "reasoning_effort": "medium"
-                }],
-            }
-        }],
-        "output-guards": [],
-    }
+    print("\nNote: The Dome config parser currently supports these guard types:")
+    print("  - security")
+    print("  - moderation")
+    print("  - privacy")
+    print("  - integrity")
+    print("\nDetectionCategory.Generic is not yet mapped in Dome config.")
+    print("Recommended: Use direct detector instantiation (Examples 1-4 above).\n")
 
-    input_guardrail, output_guardrail, _ = convert_dict_to_guardrails(guardrail_config)
+    # Demonstrate direct usage pattern
+    detector = PolicyGptOssSafeguard(
+        policy_file=str(policy_file),
+        model_name="openai/gpt-oss-120b",
+        reasoning_effort="medium"
+    )
 
-    # Test with Dome
     test_cases = [
         "What is your refund policy?",
         "BUY NOW BUY NOW BUY NOW!!!",
     ]
 
     for text in test_cases:
-        scan_result = await input_guardrail.async_guard(text)
+        result = await detector.detect(text)
         print(f"\nInput: {text}")
-        print(f"Safe: {scan_result.is_safe()}")
-        print(f"Response: {scan_result.guarded_response()}")
+        print(f"Violation: {result[0]}")
+        print(f"Model: {result[1]['model']}")
 
 
 async def main():
