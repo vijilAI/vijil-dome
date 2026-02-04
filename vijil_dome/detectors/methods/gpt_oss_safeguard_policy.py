@@ -16,7 +16,7 @@
 
 from typing import Optional, Union, List, Dict, Any
 from pathlib import Path
-from litellm import completion as litellm_completion, acompletion
+from litellm import acompletion
 
 from vijil_dome.detectors import DetectionCategory, DetectionResult, register_method
 from vijil_dome.detectors.utils.llm_api_base import LlmBaseDetector
