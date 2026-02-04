@@ -14,9 +14,9 @@
 #
 # vijil and vijil-dome are trademarks owned by Vijil Inc.
 
-from typing import Optional
+from typing import Optional, Union, List, Dict, Any
 from pathlib import Path
-from litellm import completion as litellm_completion
+from litellm import completion as litellm_completion, acompletion
 
 from vijil_dome.detectors import DetectionCategory, DetectionResult, register_method
 from vijil_dome.detectors.utils.llm_api_base import LlmBaseDetector
@@ -135,6 +135,32 @@ class PolicyGptOssSafeguard(LlmBaseDetector):
             # Append reasoning directive
             return f"{policy_content.rstrip()}\n\nReasoning: {self.reasoning_effort}"
 
+    def _content_to_text(self, content: Union[str, List[Dict[str, Any]], None]) -> str:
+        """
+        Extract text from LiteLLM message content.
+
+        LiteLLM can return content as str, list[dict] (OpenAI content blocks), or None.
+
+        Args:
+            content: Raw content from llm_response.choices[0].message.content
+
+        Returns:
+            Extracted text string
+        """
+        if content is None:
+            return ""
+        if isinstance(content, str):
+            return content
+        if isinstance(content, list):
+            # OpenAI-style content blocks: [{"type": "text", "text": "..."}, ...]
+            return "".join(
+                block.get("text", "")
+                for block in content
+                if isinstance(block, dict) and block.get("type") == "text"
+            )
+        # Fallback: stringify unknown types
+        return str(content)
+
     def _parse_response(self, response_text: str) -> tuple[bool, str]:
         """
         Parse Harmony format response from gpt-oss-safeguard.
@@ -164,8 +190,16 @@ class PolicyGptOssSafeguard(LlmBaseDetector):
             reasoning_end = response_text.find("</reasoning>")
             reasoning = response_text[reasoning_start:reasoning_end].strip()
 
-        # Simple violation check: look for "1" in output
-        is_violation = "1" in output
+        # Strict violation check: exact match for "0" or "1"
+        output_clean = output.strip()
+        if output_clean in {"0", "1"}:
+            is_violation = (output_clean == "1")
+        else:
+            # Handle unexpected output gracefully
+            # Check if "1" appears as primary indicator (original loose logic as fallback)
+            is_violation = "1" in output_clean
+            # Log warning in reasoning
+            reasoning = f"Warning: Unexpected output format '{output_clean}'. " + (reasoning or "")
 
         return is_violation, reasoning or output
 
@@ -180,7 +214,7 @@ class PolicyGptOssSafeguard(LlmBaseDetector):
             DetectionResult with violation status and metadata
         """
         try:
-            llm_response = litellm_completion(
+            llm_response = await acompletion(
                 model=self.model_name,
                 messages=[
                     {"role": "system", "content": self.policy},
@@ -190,9 +224,10 @@ class PolicyGptOssSafeguard(LlmBaseDetector):
                 base_url=self.base_url,
                 timeout=self.timeout,
                 max_retries=self.max_retries,
+                temperature=0,  # Deterministic classification
             )
 
-            response_text = llm_response.choices[0].message.content
+            response_text = self._content_to_text(llm_response.choices[0].message.content)
             is_violation, reasoning = self._parse_response(response_text)
 
             return is_violation, {
