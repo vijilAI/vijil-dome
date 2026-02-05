@@ -50,6 +50,7 @@ FACTCHECK_ROBERTA = "fact-check-roberta"
 FACTCHECK_LLM = "fact-check-llm"
 
 GENERIC_LLM = "generic-llm"
+POLICY_GPT_OSS_SAFEGUARD = "policy-gpt-oss-safeguard"
 
 # Define types for detection results and data
 DetectorType = Dict["type", str]

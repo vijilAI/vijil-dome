@@ -128,7 +128,7 @@ config = {
 }
 ```
 
-Dome includes nearly 20 prebuilt guardrails and supports building your own!
+Dome includes 20+ prebuilt guardrails and supports building your own!
 
 👉 For the full list of guardrail methods, advanced config options, and extensibility, check out the [Docs](https://docs.vijil.ai/dome/intro.html).
 

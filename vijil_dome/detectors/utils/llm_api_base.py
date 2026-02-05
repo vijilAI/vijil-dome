@@ -37,14 +37,18 @@ class LlmBaseDetector(DetectionMethod, ABC):
         timeout: Optional[int] = None,
         max_retries: Optional[int] = None,
     ) -> None:
-        supported_hubs = [None, "openai", "together"]
+        supported_hubs = [None, "openai", "together", "nebius"]
         self.model_name = model_name
         self.hub_name = hub_name
         if self.hub_name not in supported_hubs:
             raise ValueError(
                 f"Unsupported hub name: {self.hub_name}. Supported hubs are: {supported_hubs}"
             )
-        if self.hub_name == "together":
+        if self.hub_name == "nebius":
+            self.base_url = "https://api.tokenfactory.nebius.com/v1/"
+            if api_key is None:
+                api_key = os.getenv("NEBIUS_API_KEY")
+        elif self.hub_name == "together":
             self.base_url = "https://api.together.xyz/v1"
             if api_key is None:
                 api_key = os.getenv("TOGETHERAI_API_KEY")
