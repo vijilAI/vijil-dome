@@ -21,6 +21,7 @@ __all__ = [
     "hhem_hallucination",
     "jb_perplexity_heuristics",
     "llm_models",
+    "llamaguard_groq",
     "openai_models",
     "pi_hf_deberta",
     "pi_hf_mbert",

@@ -43,6 +43,7 @@ SECURITY_LLM = "security-llm"
 SECURITY_EMBEDDINGS = "security-embeddings"
 SECURITY_PROMPTGUARD = "security-promptguard"
 ENCODING_HEURISTICS = "encoding-heuristics"
+PI_LLAMAGUARD_GROQ = "prompt-injection-llamaguard-groq"
 
 HHEM = "hhem-hallucination"
 HALLUCINATION_LLM = "hallucination-llm"
