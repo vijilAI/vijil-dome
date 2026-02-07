@@ -108,6 +108,17 @@ def calibrate_threshold(y_true: np.ndarray, y_score: np.ndarray, latencies_ms: n
     return best_threshold, best_metrics
 
 
+def is_binary_scores(scores: np.ndarray) -> bool:
+    if scores.size == 0:
+        return True
+    # OpenAI-compatible guard runner yields hard 0/1. In that case calibration is meaningless;
+    # we want to evaluate the classifier output directly (threshold=0.5).
+    uniq = np.unique(scores.astype(float))
+    if uniq.size > 2:
+        return False
+    return bool(np.all((np.isclose(scores, 0.0)) | (np.isclose(scores, 1.0))))
+
+
 def infer_positive_from_label(label: str, positive_label_tokens: list[str]) -> bool:
     label_norm = label.strip().lower()
     if label_norm in {"1", "label_1", "true"}:
@@ -554,7 +565,12 @@ def main() -> None:
 
             y_dev_score = dev_pred_df["score"].astype(float).to_numpy()
             dev_lat = dev_pred_df["latency_ms"].astype(float).to_numpy()
-            threshold, dev_metrics = calibrate_threshold(y_dev, y_dev_score, dev_lat, args.max_fnr)
+            if is_binary_scores(y_dev_score):
+                threshold = 0.5
+                dev_metrics = metric_dict(y_dev, y_dev_score, threshold, dev_lat)
+                dev_metrics["calibration"] = "skipped_binary_scores"
+            else:
+                threshold, dev_metrics = calibrate_threshold(y_dev, y_dev_score, dev_lat, args.max_fnr)
 
             cached_holdout = maybe_load_cached(holdout_pred_path, args.overwrite)
             if cached_holdout is None:
