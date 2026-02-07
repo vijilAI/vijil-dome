@@ -49,6 +49,19 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--model-id", type=str, default="openguardrails/OpenGuardrails-Text-4B-0124")
     p.add_argument("--served-model-name", type=str, default="")
     p.add_argument(
+        "--max-input-tokens",
+        type=int,
+        default=4096,
+        help="Max input tokens after chat template. Prevents context overflow and keeps latency bounded.",
+    )
+    p.add_argument(
+        "--truncation-side",
+        type=str,
+        default="right",
+        choices=["left", "right"],
+        help="Which side to truncate from when input exceeds --max-input-tokens.",
+    )
+    p.add_argument(
         "--device",
         type=str,
         default="auto",
@@ -85,18 +98,28 @@ def choose_dtype(dtype: str, device: str) -> torch.dtype | None:
 
 
 class ServerState:
-    def __init__(self, tokenizer: Any, model: Any, device: str, served_model_name: str) -> None:
+    def __init__(self, tokenizer: Any, model: Any, device: str, served_model_name: str, max_input_tokens: int, truncation_side: str) -> None:
         self.tokenizer = tokenizer
         self.model = model
         self.device = device
         self.served_model_name = served_model_name
+        self.max_input_tokens = int(max(256, max_input_tokens))
+        self.truncation_side = truncation_side
         self._gen_lock = threading.Lock()
 
     def chat_completion(self, messages: list[dict[str, Any]], max_tokens: int, temperature: float) -> str:
         # Apply the model's chat template. For OpenGuardrails-Text this matters;
         # the backend expects a chat-formatted prompt even if the content is [INST]...[/INST].
         prompt = self.tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
-        inputs = self.tokenizer([prompt], return_tensors="pt")
+        # Some benchmark prompts can be extremely long (or tokenize into many tokens).
+        # Truncation here makes the server robust and keeps evaluation time bounded.
+        self.tokenizer.truncation_side = self.truncation_side
+        inputs = self.tokenizer(
+            [prompt],
+            return_tensors="pt",
+            truncation=True,
+            max_length=self.max_input_tokens,
+        )
         inputs = {k: v.to(self.device) for k, v in inputs.items()}
 
         do_sample = bool(temperature and temperature > 0.0)
@@ -216,7 +239,14 @@ def main() -> None:
     model.eval()
     print("Model ready.")
 
-    state = ServerState(tokenizer=tok, model=model, device=device, served_model_name=served_name)
+    state = ServerState(
+        tokenizer=tok,
+        model=model,
+        device=device,
+        served_model_name=served_name,
+        max_input_tokens=args.max_input_tokens,
+        truncation_side=args.truncation_side,
+    )
     httpd: ThreadingHTTPServer = ThreadingHTTPServer((args.host, args.port), OpenAICompatHandler)
     httpd.state = state  # type: ignore[attr-defined]
     print(f"Listening on http://{args.host}:{args.port} (OpenAI base_url http://{args.host}:{args.port}/v1)")
@@ -227,4 +257,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-
