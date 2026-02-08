@@ -53,7 +53,9 @@ class LlmBaseDetector(DetectionMethod, ABC):
             if api_key is None:
                 api_key = os.getenv("TOGETHERAI_API_KEY")
         elif self.hub_name == "groq":
-            self.base_url = "https://api.groq.com/openai/v1"
+            # LiteLLM has native Groq support - no custom base_url needed
+            # Model names should use groq/ prefix (handled by detector)
+            self.base_url = ""
             if api_key is None:
                 api_key = os.getenv("GROQ_API_KEY")
         else:

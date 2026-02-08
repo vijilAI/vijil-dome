@@ -19,7 +19,7 @@ Example: Policy-based Content Classification with GPT-OSS-Safeguard
 
 This example demonstrates how to use the PolicyGptOssSafeguard detector
 for custom policy-based content moderation using OpenAI's gpt-oss-safeguard
-model via the Nebius gateway.
+model via Groq.
 
 Prerequisites:
 - Set GROQ_API_KEY environment variable
@@ -28,6 +28,10 @@ Prerequisites:
 The detector supports:
 - Custom policy files defining violation criteria
 - Two model variants: openai/gpt-oss-safeguard-120b (more accurate) and openai/gpt-oss-safeguard-20b (faster)
+- Three output formats:
+  - "binary": Returns 0/1 only (fastest)
+  - "policy_ref": Returns JSON with violation + policy_category (default)
+  - "with_rationale": Returns JSON with full reasoning
 - Configurable reasoning effort: low, medium, high
 """
 
@@ -40,7 +44,10 @@ from vijil_dome.detectors import (
     DetectionFactory,
     DetectionCategory,
 )
-from vijil_dome.detectors.methods.gpt_oss_safeguard_policy import PolicyGptOssSafeguard
+from vijil_dome.detectors.methods.gpt_oss_safeguard_policy import (
+    PolicyGptOssSafeguard,
+    OutputFormat,
+)
 
 
 async def example_factory_usage():
@@ -76,7 +83,7 @@ async def example_factory_usage():
         print(f"\nInput: {text}")
         print(f"Violation: {result.hit}")
         print(f"Execution time: {result.exec_time}ms")
-        print(f"Model: {result.result['model']}")
+        print(f"Model: {result.result['config']['model']}")
 
 
 async def example_direct_instantiation():
@@ -97,6 +104,7 @@ async def example_direct_instantiation():
         policy_file=str(policy_file),
         hub_name="groq",
         model_name="openai/gpt-oss-safeguard-20b",
+        output_format="policy_ref",  # Returns JSON with policy category
         reasoning_effort="high",  # Use high reasoning for better accuracy
         timeout=90,
         max_retries=3
@@ -107,9 +115,8 @@ async def example_direct_instantiation():
 
     print(f"\nInput: {test_text}")
     print(f"Violation detected: {result[0]}")
-    print(f"Model response: {result[1]['model_response'][:200]}...")
-    print(f"Policy source: {result[1]['policy_source']}")
-    print(f"Reasoning effort: {result[1]['reasoning_effort']}")
+    print(f"Config: {result[1]['config']}")
+    print(f"Parsed output: {result[1]['parsed_output']}")
 
 
 async def example_different_models():
@@ -138,13 +145,13 @@ async def example_different_models():
 
         result = await detector.detect(test_text)
         print(f"Violation: {result[0]}")
-        print(f"Model: {result[1]['model']}")
+        print(f"Model: {result[1]['config']['model']}")
 
 
-async def example_reasoning_efforts():
-    """Example 4: Different reasoning effort levels"""
+async def example_output_formats():
+    """Example 4: Different output format levels"""
     print("\n" + "="*60)
-    print("Example 4: Reasoning Effort Levels")
+    print("Example 4: Output Format Comparison")
     print("="*60)
 
     policy_file = (
@@ -154,19 +161,22 @@ async def example_reasoning_efforts():
         / "spam_policy.md"
     )
 
-    test_text = "Special discount available - contact us for details"
+    test_text = "BUY NOW!!! FREE MONEY!!! CLICK HERE!!!"
 
-    for effort in ["low", "medium", "high"]:
-        print(f"\n--- Reasoning effort: {effort} ---")
+    formats: list[OutputFormat] = ["binary", "policy_ref", "with_rationale"]
+
+    for fmt in formats:
+        print(f"\n--- Output format: {fmt} ---")
 
         detector = PolicyGptOssSafeguard(
             policy_file=str(policy_file),
-            reasoning_effort=effort
+            output_format=fmt,
+            reasoning_effort="medium"
         )
 
         result = await detector.detect(test_text)
         print(f"Violation: {result[0]}")
-        print(f"Reasoning effort: {result[1]['reasoning_effort']}")
+        print(f"Parsed output: {result[1]['parsed_output']}")
 
 
 async def example_with_dome_integration():
@@ -206,7 +216,7 @@ async def example_with_dome_integration():
         result = await detector.detect(text)
         print(f"\nInput: {text}")
         print(f"Violation: {result[0]}")
-        print(f"Model: {result[1]['model']}")
+        print(f"Model: {result[1]['config']['model']}")
 
 
 async def main():
@@ -227,7 +237,7 @@ async def main():
         await example_factory_usage()
         await example_direct_instantiation()
         await example_different_models()
-        await example_reasoning_efforts()
+        await example_output_formats()
         await example_with_dome_integration()
 
         print("\n" + "="*60)
