@@ -48,8 +48,8 @@ class PolicyGptOssSafeguard(LlmBaseDetector):
     def __init__(
         self,
         policy_file: str,
-        hub_name: str = "nebius",
-        model_name: str = "openai/gpt-oss-120b",
+        hub_name: str = "groq",
+        model_name: str = "openai/gpt-oss-safeguard-20b",
         reasoning_effort: str = "medium",
         api_key: Optional[str] = None,
         timeout: Optional[int] = 60,
@@ -60,12 +60,12 @@ class PolicyGptOssSafeguard(LlmBaseDetector):
 
         Args:
             policy_file: Path to policy markdown file (required)
-            hub_name: LLM hub to use (default: "nebius")
+            hub_name: LLM hub to use (default: "groq")
             model_name: Model identifier - options:
-                       - "openai/gpt-oss-120b" (default, most accurate)
-                       - "openai/gpt-oss-20b" (faster, lower cost)
+                       - "openai/gpt-oss-safeguard-20b" (default, faster)
+                       - "openai/gpt-oss-safeguard-120b" (most accurate)
             reasoning_effort: Reasoning depth - "low", "medium", "high" (default: "medium")
-            api_key: API key for the hub (defaults to NEBIUS_API_KEY env var)
+            api_key: API key for the hub (defaults to GROQ_API_KEY env var)
             timeout: Request timeout in seconds
             max_retries: Maximum number of retry attempts
 
@@ -73,17 +73,10 @@ class PolicyGptOssSafeguard(LlmBaseDetector):
             FileNotFoundError: If policy_file path does not exist
             ValueError: If reasoning_effort not in [low, medium, high]
         """
-        # Fix for LiteLLM: when using custom base_url, LiteLLM strips one "openai/" prefix
-        # So we need to double it: "openai/gpt-oss-120b" -> "openai/openai/gpt-oss-120b"
-        if hub_name == "nebius" and model_name.startswith("openai/"):
-            litellm_model_name = f"openai/{model_name}"
-        else:
-            litellm_model_name = model_name
-
         super().__init__(
             method_name=POLICY_GPT_OSS_SAFEGUARD,
             hub_name=hub_name,
-            model_name=litellm_model_name,
+            model_name=model_name,
             api_key=api_key,
             timeout=timeout,
             max_retries=max_retries,

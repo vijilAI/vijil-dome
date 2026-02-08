@@ -37,7 +37,7 @@ class LlmBaseDetector(DetectionMethod, ABC):
         timeout: Optional[int] = None,
         max_retries: Optional[int] = None,
     ) -> None:
-        supported_hubs = [None, "openai", "together", "nebius"]
+        supported_hubs = [None, "openai", "together", "nebius", "groq"]
         self.model_name = model_name
         self.hub_name = hub_name
         if self.hub_name not in supported_hubs:
@@ -52,6 +52,10 @@ class LlmBaseDetector(DetectionMethod, ABC):
             self.base_url = "https://api.together.xyz/v1"
             if api_key is None:
                 api_key = os.getenv("TOGETHERAI_API_KEY")
+        elif self.hub_name == "groq":
+            self.base_url = "https://api.groq.com/openai/v1"
+            if api_key is None:
+                api_key = os.getenv("GROQ_API_KEY")
         else:
             self.base_url = ""
         self.api_key = api_key

@@ -22,12 +22,12 @@ for custom policy-based content moderation using OpenAI's gpt-oss-safeguard
 model via the Nebius gateway.
 
 Prerequisites:
-- Set NEBIUS_API_KEY environment variable
+- Set GROQ_API_KEY environment variable
 - Create a policy file (see vijil_dome/detectors/policies/spam_policy.md for example)
 
 The detector supports:
 - Custom policy files defining violation criteria
-- Two model variants: openai/gpt-oss-120b (more accurate) and openai/gpt-oss-20b (faster)
+- Two model variants: openai/gpt-oss-safeguard-120b (more accurate) and openai/gpt-oss-safeguard-20b (faster)
 - Configurable reasoning effort: low, medium, high
 """
 
@@ -95,8 +95,8 @@ async def example_direct_instantiation():
     # Create detector with custom configuration
     detector = PolicyGptOssSafeguard(
         policy_file=str(policy_file),
-        hub_name="nebius",
-        model_name="openai/gpt-oss-120b",
+        hub_name="groq",
+        model_name="openai/gpt-oss-safeguard-20b",
         reasoning_effort="high",  # Use high reasoning for better accuracy
         timeout=90,
         max_retries=3
@@ -127,7 +127,7 @@ async def example_different_models():
 
     test_text = "Congratulations! You've won a FREE iPhone! Click now to claim!"
 
-    for model_name in ["openai/gpt-oss-120b", "openai/gpt-oss-20b"]:
+    for model_name in ["openai/gpt-oss-safeguard-120b", "openai/gpt-oss-safeguard-20b"]:
         print(f"\n--- Testing with {model_name} ---")
 
         detector = PolicyGptOssSafeguard(
@@ -193,7 +193,7 @@ async def example_with_dome_integration():
     # Demonstrate direct usage pattern
     detector = PolicyGptOssSafeguard(
         policy_file=str(policy_file),
-        model_name="openai/gpt-oss-120b",
+        model_name="openai/gpt-oss-safeguard-20b",
         reasoning_effort="medium"
     )
 
@@ -212,10 +212,10 @@ async def example_with_dome_integration():
 async def main():
     """Run all examples"""
     # Check for API key
-    if not os.getenv("NEBIUS_API_KEY"):
-        print("ERROR: NEBIUS_API_KEY environment variable not set")
-        print("Please set your Nebius API key before running this example:")
-        print("  export NEBIUS_API_KEY='your-api-key-here'")
+    if not os.getenv("GROQ_API_KEY"):
+        print("ERROR: GROQ_API_KEY environment variable not set")
+        print("Please set your Groq API key before running this example:")
+        print("  export GROQ_API_KEY='your-api-key-here'")
         return
 
     print("\n" + "="*60)
