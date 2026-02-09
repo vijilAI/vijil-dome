@@ -19,37 +19,43 @@ Example: Policy-based Content Classification with GPT-OSS-Safeguard
 
 This example demonstrates how to use the PolicyGptOssSafeguard detector
 for custom policy-based content moderation using OpenAI's gpt-oss-safeguard
-model via the Nebius gateway.
+model via Groq.
 
 Prerequisites:
-- Set NEBIUS_API_KEY environment variable
+- Set GROQ_API_KEY environment variable
 - Create a policy file (see vijil_dome/detectors/policies/spam_policy.md for example)
 
 The detector supports:
 - Custom policy files defining violation criteria
-- Two model variants: openai/gpt-oss-120b (more accurate) and openai/gpt-oss-20b (faster)
+- Two model variants: openai/gpt-oss-safeguard-120b (more accurate) and
+  openai/gpt-oss-safeguard-20b (faster)
+- Three output formats:
+  - "binary": Returns 0/1 only
+  - "policy_ref": Returns JSON with violation + policy_category
+  - "with_rationale": Returns JSON with full reasoning
 - Configurable reasoning effort: low, medium, high
 """
 
-import os
 import asyncio
+import os
 from pathlib import Path
 
 from vijil_dome.detectors import (
     POLICY_GPT_OSS_SAFEGUARD,
-    DetectionFactory,
     DetectionCategory,
+    DetectionFactory,
 )
-from vijil_dome.detectors.methods.gpt_oss_safeguard_policy import PolicyGptOssSafeguard
+from vijil_dome.detectors.methods.gpt_oss_safeguard_policy import (
+    OutputFormat,
+    PolicyGptOssSafeguard,
+)
 
 
 async def example_factory_usage():
-    """Example 1: Using DetectionFactory to create detector"""
-    print("\n" + "="*60)
+    print("\n" + "=" * 60)
     print("Example 1: Factory Pattern Usage")
-    print("="*60)
+    print("=" * 60)
 
-    # Path to policy file
     policy_file = (
         Path(__file__).parent.parent.parent
         / "detectors"
@@ -57,14 +63,12 @@ async def example_factory_usage():
         / "spam_policy.md"
     )
 
-    # Create detector via factory
     detector = await DetectionFactory.get_detect_with_time(
         DetectionCategory.Generic,
         POLICY_GPT_OSS_SAFEGUARD,
-        policy_file=str(policy_file)
+        policy_file=str(policy_file),
     )
 
-    # Test with various inputs
     test_cases = [
         "How do I reset my password?",
         "BUY NOW!!! CLICK HERE FOR FREE MONEY $$$",
@@ -76,14 +80,13 @@ async def example_factory_usage():
         print(f"\nInput: {text}")
         print(f"Violation: {result.hit}")
         print(f"Execution time: {result.exec_time}ms")
-        print(f"Model: {result.result['model']}")
+        print(f"Model: {result.result['config']['model']}")
 
 
 async def example_direct_instantiation():
-    """Example 2: Direct instantiation with custom parameters"""
-    print("\n" + "="*60)
+    print("\n" + "=" * 60)
     print("Example 2: Direct Instantiation")
-    print("="*60)
+    print("=" * 60)
 
     policy_file = (
         Path(__file__).parent.parent.parent
@@ -92,14 +95,14 @@ async def example_direct_instantiation():
         / "spam_policy.md"
     )
 
-    # Create detector with custom configuration
     detector = PolicyGptOssSafeguard(
         policy_file=str(policy_file),
-        hub_name="nebius",
-        model_name="openai/gpt-oss-120b",
-        reasoning_effort="high",  # Use high reasoning for better accuracy
+        hub_name="groq",
+        model_name="openai/gpt-oss-safeguard-20b",
+        output_format="policy_ref",
+        reasoning_effort="high",
         timeout=90,
-        max_retries=3
+        max_retries=3,
     )
 
     test_text = "JOIN NOW!!! LIMITED TIME OFFER!!! CLICK HERE!!!"
@@ -107,16 +110,14 @@ async def example_direct_instantiation():
 
     print(f"\nInput: {test_text}")
     print(f"Violation detected: {result[0]}")
-    print(f"Model response: {result[1]['model_response'][:200]}...")
-    print(f"Policy source: {result[1]['policy_source']}")
-    print(f"Reasoning effort: {result[1]['reasoning_effort']}")
+    print(f"Config: {result[1]['config']}")
+    print(f"Parsed output: {result[1]['parsed_output']}")
 
 
 async def example_different_models():
-    """Example 3: Comparing 120B vs 20B models"""
-    print("\n" + "="*60)
+    print("\n" + "=" * 60)
     print("Example 3: Model Comparison (120B vs 20B)")
-    print("="*60)
+    print("=" * 60)
 
     policy_file = (
         Path(__file__).parent.parent.parent
@@ -126,26 +127,22 @@ async def example_different_models():
     )
 
     test_text = "Congratulations! You've won a FREE iPhone! Click now to claim!"
-
-    for model_name in ["openai/gpt-oss-120b", "openai/gpt-oss-20b"]:
+    for model_name in ["openai/gpt-oss-safeguard-120b", "openai/gpt-oss-safeguard-20b"]:
         print(f"\n--- Testing with {model_name} ---")
-
         detector = PolicyGptOssSafeguard(
             policy_file=str(policy_file),
             model_name=model_name,
-            reasoning_effort="medium"
+            reasoning_effort="medium",
         )
-
         result = await detector.detect(test_text)
         print(f"Violation: {result[0]}")
-        print(f"Model: {result[1]['model']}")
+        print(f"Model: {result[1]['config']['model']}")
 
 
-async def example_reasoning_efforts():
-    """Example 4: Different reasoning effort levels"""
-    print("\n" + "="*60)
-    print("Example 4: Reasoning Effort Levels")
-    print("="*60)
+async def example_output_formats():
+    print("\n" + "=" * 60)
+    print("Example 4: Output Format Comparison")
+    print("=" * 60)
 
     policy_file = (
         Path(__file__).parent.parent.parent
@@ -154,26 +151,24 @@ async def example_reasoning_efforts():
         / "spam_policy.md"
     )
 
-    test_text = "Special discount available - contact us for details"
-
-    for effort in ["low", "medium", "high"]:
-        print(f"\n--- Reasoning effort: {effort} ---")
-
+    test_text = "BUY NOW!!! FREE MONEY!!! CLICK HERE!!!"
+    formats: list[OutputFormat] = ["binary", "policy_ref", "with_rationale"]
+    for fmt in formats:
+        print(f"\n--- Output format: {fmt} ---")
         detector = PolicyGptOssSafeguard(
             policy_file=str(policy_file),
-            reasoning_effort=effort
+            output_format=fmt,
+            reasoning_effort="medium",
         )
-
         result = await detector.detect(test_text)
         print(f"Violation: {result[0]}")
-        print(f"Reasoning effort: {result[1]['reasoning_effort']}")
+        print(f"Parsed output: {result[1]['parsed_output']}")
 
 
 async def example_with_dome_integration():
-    """Example 5: Direct Usage Recommendation (Dome config limitation)"""
-    print("\n" + "="*60)
+    print("\n" + "=" * 60)
     print("Example 5: Direct Usage Pattern (Recommended)")
-    print("="*60)
+    print("=" * 60)
 
     policy_file = (
         Path(__file__).parent.parent.parent
@@ -190,11 +185,10 @@ async def example_with_dome_integration():
     print("\nDetectionCategory.Generic is not yet mapped in Dome config.")
     print("Recommended: Use direct detector instantiation (Examples 1-4 above).\n")
 
-    # Demonstrate direct usage pattern
     detector = PolicyGptOssSafeguard(
         policy_file=str(policy_file),
-        model_name="openai/gpt-oss-120b",
-        reasoning_effort="medium"
+        model_name="openai/gpt-oss-safeguard-20b",
+        reasoning_effort="medium",
     )
 
     test_cases = [
@@ -206,37 +200,34 @@ async def example_with_dome_integration():
         result = await detector.detect(text)
         print(f"\nInput: {text}")
         print(f"Violation: {result[0]}")
-        print(f"Model: {result[1]['model']}")
+        print(f"Model: {result[1]['config']['model']}")
 
 
 async def main():
-    """Run all examples"""
-    # Check for API key
-    if not os.getenv("NEBIUS_API_KEY"):
-        print("ERROR: NEBIUS_API_KEY environment variable not set")
-        print("Please set your Nebius API key before running this example:")
-        print("  export NEBIUS_API_KEY='your-api-key-here'")
+    if not os.getenv("GROQ_API_KEY"):
+        print("ERROR: GROQ_API_KEY environment variable not set")
+        print("Please set your Groq API key before running this example:")
+        print("  export GROQ_API_KEY='your-api-key-here'")
         return
 
-    print("\n" + "="*60)
+    print("\n" + "=" * 60)
     print("GPT-OSS-Safeguard Policy Detector Examples")
-    print("="*60)
+    print("=" * 60)
 
     try:
-        # Run examples
         await example_factory_usage()
         await example_direct_instantiation()
         await example_different_models()
-        await example_reasoning_efforts()
+        await example_output_formats()
         await example_with_dome_integration()
 
-        print("\n" + "="*60)
+        print("\n" + "=" * 60)
         print("All examples completed successfully!")
-        print("="*60)
-
-    except Exception as e:
-        print(f"\nError running examples: {e}")
+        print("=" * 60)
+    except Exception as exc:
+        print(f"\nError running examples: {exc}")
         import traceback
+
         traceback.print_exc()
 
 
