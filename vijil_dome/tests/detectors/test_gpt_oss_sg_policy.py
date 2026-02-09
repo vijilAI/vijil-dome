@@ -333,6 +333,8 @@ async def test_policy_detector_config_matrix(
         reasoning_effort=reasoning_effort,  # type: ignore[arg-type]
         output_format=output_format,
     )
+    assert f"Reasoning: {reasoning_effort}" in detector.policy
+    assert detector.policy.count("Reasoning:") == 1
 
     flagged, metadata = await detector.detect(
         "User request: Need campaign advice\n"
@@ -346,36 +348,51 @@ async def test_policy_detector_config_matrix(
     assert metadata["config"]["hub"] == "groq"
     assert metadata["config"]["model"] == "openai/gpt-oss-safeguard-20b"
     assert metadata["config"]["policy_source"] == str(SPAM_POLICY_FILE)
+    assert "error" not in metadata
+    assert "warning" not in metadata
+    assert isinstance(metadata["model_response"], str)
+    assert metadata["model_response"].strip() != ""
+    assert isinstance(metadata["normalized_query"], str)
+    assert "User request:" in metadata["normalized_query"]
+    assert "Agent response:" in metadata["normalized_query"]
     assert isinstance(metadata["parsed_output"], dict)
 
     parsed_output = metadata["parsed_output"]
     if output_format == "binary":
-        assert set(parsed_output.keys()).issuperset({"output", "model_reasoning"})
+        assert set(parsed_output.keys()) == {"output", "model_reasoning"}
         assert parsed_output["output"] in {"0", "1"}
+        assert isinstance(parsed_output["model_reasoning"], str)
         assert flagged is (parsed_output["output"] == "1")
     elif output_format == "policy_ref":
-        assert set(parsed_output.keys()).issuperset(
-            {"violation", "policy_category", "model_reasoning"}
-        )
+        assert set(parsed_output.keys()) == {
+            "violation",
+            "policy_category",
+            "model_reasoning",
+        }
         assert parsed_output["violation"] in {0, 1}
         assert flagged is (parsed_output["violation"] == 1)
+        assert isinstance(parsed_output["model_reasoning"], str)
         assert (
             parsed_output["policy_category"] is None
             or isinstance(parsed_output["policy_category"], str)
         )
+        if parsed_output["violation"] == 0:
+            assert parsed_output["policy_category"] is None
+        else:
+            assert isinstance(parsed_output["policy_category"], str)
+            assert parsed_output["policy_category"].strip() != ""
     else:
-        assert set(parsed_output.keys()).issuperset(
-            {
-                "violation",
-                "policy_category",
-                "rule_ids",
-                "confidence",
-                "rationale",
-                "model_reasoning",
-            }
-        )
+        assert set(parsed_output.keys()) == {
+            "violation",
+            "policy_category",
+            "rule_ids",
+            "confidence",
+            "rationale",
+            "model_reasoning",
+        }
         assert parsed_output["violation"] in {0, 1}
         assert flagged is (parsed_output["violation"] == 1)
+        assert isinstance(parsed_output["model_reasoning"], str)
         assert (
             parsed_output["policy_category"] is None
             or isinstance(parsed_output["policy_category"], str)
@@ -384,3 +401,11 @@ async def test_policy_detector_config_matrix(
         assert all(isinstance(rule_id, str) for rule_id in parsed_output["rule_ids"])
         assert parsed_output["confidence"] in {"low", "medium", "high"}
         assert isinstance(parsed_output["rationale"], str)
+        if parsed_output["violation"] == 0:
+            assert parsed_output["policy_category"] is None
+            assert parsed_output["rule_ids"] == []
+        else:
+            assert isinstance(parsed_output["policy_category"], str)
+            assert parsed_output["policy_category"].strip() != ""
+            assert parsed_output["rule_ids"] != []
+            assert parsed_output["rationale"].strip() != ""
