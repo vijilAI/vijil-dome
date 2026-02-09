@@ -27,6 +27,7 @@ from vijil_dome.detectors import (
 from vijil_dome.detectors.methods.gpt_oss_safeguard_policy import (
     OutputFormat,
     PolicyGptOssSafeguard,
+    normalize_query_for_classification,
 )
 
 SPAM_POLICY_FILE = (
@@ -115,6 +116,38 @@ def test_reasoning_directive_appending():
     policy_with_directive = "# Policy\n\nReasoning: medium"
     result = detector._build_system_message(policy_with_directive)
     assert result.count("Reasoning:") == 1
+
+
+def test_normalize_query_with_both_sides():
+    query = (
+        "User request: Can I share this non-public info?\n"
+        "Agent response: Yes, send it to your friend."
+    )
+    normalized = normalize_query_for_classification(query)
+    assert normalized == query
+
+
+def test_normalize_query_assistant_only():
+    query = "Assistant: You can backdate the report and submit."
+    normalized = normalize_query_for_classification(query)
+    assert normalized == "Agent response: You can backdate the report and submit."
+
+
+def test_normalize_query_user_only():
+    query = "User request: Is it okay to trade before earnings?"
+    normalized = normalize_query_for_classification(query)
+    assert normalized == query
+
+
+def test_normalize_query_chat_transcript_uses_latest_turns():
+    query = (
+        "User: first question\n"
+        "Assistant: first answer\n"
+        "User: final question\n"
+        "Assistant: final answer"
+    )
+    normalized = normalize_query_for_classification(query)
+    assert normalized == "User request: final question\nAgent response: final answer"
 
 
 @pytest.mark.asyncio

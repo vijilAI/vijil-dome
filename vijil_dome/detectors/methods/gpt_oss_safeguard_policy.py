@@ -46,11 +46,15 @@ OUTPUT_PATTERN = re.compile(r"<output>(.*?)</output>", re.DOTALL)
 
 CLASSIFIER_PREAMBLE = """## CRITICAL: YOU ARE A SAFETY CLASSIFIER, NOT AN ASSISTANT
 
-You will receive content in this format:
-- "User request: ..." - what a user asked an AI agent
-- "Agent response: ..." - what the AI agent replied
+You may receive content in one of these formats:
+- "User request: ..." and "Agent response: ..."
+- only "Agent response: ..." / "Assistant: ..."
+- only "User request: ..." / "User: ..."
+- freeform text
 
-Your job is to CLASSIFY whether the AGENT RESPONSE violates the policy rules below.
+Your job is to CLASSIFY whether the provided content violates the policy rules below.
+If both user and agent content are present, prioritize classifying the AGENT/ASSISTANT response.
+If only one side is present, classify that available content.
 You are NOT the agent. Do NOT answer the user's question. Do NOT provide help.
 
 You are a CLASSIFIER. Your ONLY output is a classification.
@@ -152,6 +156,64 @@ def content_to_text(content: Union[str, List[Dict[str, Any]], None]) -> str:
             if isinstance(block, dict) and block.get("type") == "text"
         )
     return str(content)
+
+
+ROLE_BLOCK_PATTERN = re.compile(
+    r"(?im)^\s*"
+    r"(user request|user|human|agent response|assistant response|assistant|agent)"
+    r"\s*:\s*"
+)
+
+
+def _normalize_role(role: str) -> str:
+    role = role.strip().lower()
+    if role in {"agent response", "assistant response", "assistant", "agent"}:
+        return "assistant"
+    return "user"
+
+
+def normalize_query_for_classification(query: str) -> str:
+    """Normalize mixed input into canonical classifier input.
+
+    Behavior:
+    - If transcript contains assistant/agent turns, keep the latest assistant turn.
+    - Keep latest user turn as context when available.
+    - If only one side exists, return that side only.
+    - If no role markers exist, return the raw input unchanged.
+    """
+    text = query.strip()
+    if not text:
+        return text
+
+    matches = list(ROLE_BLOCK_PATTERN.finditer(text))
+    if not matches:
+        return text
+
+    blocks: list[tuple[str, str]] = []
+    for idx, match in enumerate(matches):
+        role = _normalize_role(match.group(1))
+        content_start = match.end()
+        content_end = matches[idx + 1].start() if idx + 1 < len(matches) else len(text)
+        content = text[content_start:content_end].strip()
+        if content:
+            blocks.append((role, content))
+
+    if not blocks:
+        return text
+
+    last_user = next((content for role, content in reversed(blocks) if role == "user"), "")
+    last_assistant = next(
+        (content for role, content in reversed(blocks) if role == "assistant"),
+        "",
+    )
+
+    if last_user and last_assistant:
+        return f"User request: {last_user}\nAgent response: {last_assistant}"
+    if last_assistant:
+        return f"Agent response: {last_assistant}"
+    if last_user:
+        return f"User request: {last_user}"
+    return text
 
 
 def has_classification_instructions(policy_content: str) -> bool:
@@ -262,11 +324,12 @@ class PolicyGptOssSafeguard(LlmBaseDetector):
 
     async def detect(self, query_string: str) -> DetectionResult:
         try:
+            normalized_query = normalize_query_for_classification(query_string)
             response = await acompletion(
                 model=self.model_name or "",
                 messages=[
                     {"role": "system", "content": self.policy},
-                    {"role": "user", "content": query_string},
+                    {"role": "user", "content": normalized_query},
                 ],
                 api_key=self.api_key,
                 base_url=self.base_url if self.base_url else None,
@@ -282,6 +345,7 @@ class PolicyGptOssSafeguard(LlmBaseDetector):
                 "config": self.config,
                 "parsed_output": parsed.output,
                 "model_response": response_text,
+                "normalized_query": normalized_query,
             }
             if parsed.warning:
                 result["warning"] = parsed.warning
