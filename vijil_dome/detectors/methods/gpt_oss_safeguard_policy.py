@@ -134,11 +134,30 @@ def parse_binary_output(output: str) -> tuple[bool, Optional[str]]:
     return "1" in normalized, f"Unexpected output format: {normalized}"
 
 
+def _strip_json_fences(text: str) -> str:
+    cleaned = text.strip()
+    fence_match = re.match(r"^```(?:json)?\s*(.*?)\s*```$", cleaned, flags=re.DOTALL | re.IGNORECASE)
+    if fence_match:
+        return fence_match.group(1).strip()
+    return cleaned
+
+
+def _json_violation_to_bool(value: Any) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return int(value) == 1
+    if isinstance(value, str):
+        return value.strip().lower() in {"1", "true", "yes"}
+    return False
+
+
 def parse_json_output(output: str) -> tuple[bool, Dict[str, Any], Optional[str]]:
+    cleaned = _strip_json_fences(output)
     try:
-        parsed = json.loads(output.strip())
+        parsed = json.loads(cleaned)
         if isinstance(parsed, dict):
-            return parsed.get("violation", 0) == 1, parsed, None
+            return _json_violation_to_bool(parsed.get("violation", 0)), parsed, None
         if isinstance(parsed, (int, float)):
             is_violation = int(parsed) == 1
             return is_violation, {"violation": int(is_violation)}, None
@@ -147,8 +166,100 @@ def parse_json_output(output: str) -> tuple[bool, Dict[str, Any], Optional[str]]
             return is_violation, {"violation": int(is_violation)}, None
         return False, {"raw_output": output}, "Unexpected JSON output shape"
     except json.JSONDecodeError:
+        # Fallback: extract first JSON object if present.
+        obj_match = re.search(r"\{.*\}", cleaned, flags=re.DOTALL)
+        if obj_match:
+            try:
+                parsed = json.loads(obj_match.group(0))
+                if isinstance(parsed, dict):
+                    return _json_violation_to_bool(parsed.get("violation", 0)), parsed, None
+            except json.JSONDecodeError:
+                pass
         is_violation = bool(re.search(r'"violation"\s*:\s*1', output))
         return is_violation, {"raw_output": output}, "Failed to parse JSON output"
+
+
+def _to_binary_violation(value: Any) -> int:
+    if isinstance(value, bool):
+        return int(value)
+    if isinstance(value, (int, float)):
+        return 1 if int(value) == 1 else 0
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        if normalized in {"1", "true", "yes"}:
+            return 1
+    return 0
+
+
+def _normalize_confidence(value: Any) -> str:
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        if normalized in {"high", "medium", "low"}:
+            return normalized
+        try:
+            numeric = float(normalized)
+        except ValueError:
+            return "medium"
+    elif isinstance(value, (int, float)):
+        numeric = float(value)
+    else:
+        return "medium"
+
+    if numeric >= 0.85:
+        return "high"
+    if numeric >= 0.6:
+        return "medium"
+    return "low"
+
+
+def _canonicalize_policy_ref_output(
+    parsed: Dict[str, Any],
+    is_violation: bool,
+) -> Dict[str, Any]:
+    violation = _to_binary_violation(parsed.get("violation", int(is_violation)))
+    policy_category = parsed.get("policy_category")
+    if violation == 0:
+        policy_category = None
+    elif policy_category is not None:
+        policy_category = str(policy_category)
+    return {
+        "violation": violation,
+        "policy_category": policy_category,
+    }
+
+
+def _canonicalize_with_rationale_output(
+    parsed: Dict[str, Any],
+    is_violation: bool,
+) -> Dict[str, Any]:
+    violation = _to_binary_violation(parsed.get("violation", int(is_violation)))
+    policy_category = parsed.get("policy_category")
+    if violation == 0:
+        policy_category = None
+    elif policy_category is not None:
+        policy_category = str(policy_category)
+
+    rule_ids = parsed.get("rule_ids", [])
+    if isinstance(rule_ids, str):
+        rule_ids = [rule_ids]
+    elif not isinstance(rule_ids, list):
+        rule_ids = []
+    rule_ids = [str(r) for r in rule_ids]
+
+    rationale = parsed.get("rationale", "")
+    if rationale is None:
+        rationale = ""
+    rationale = str(rationale)
+
+    confidence = _normalize_confidence(parsed.get("confidence", "medium"))
+
+    return {
+        "violation": violation,
+        "policy_category": policy_category,
+        "rule_ids": rule_ids,
+        "confidence": confidence,
+        "rationale": rationale,
+    }
 
 
 def content_to_text(content: Union[str, List[Dict[str, Any]], None]) -> str:
@@ -334,9 +445,19 @@ class PolicyGptOssSafeguard(LlmBaseDetector):
 
         if self.output_format == "binary":
             is_violation, warning = parse_binary_output(output_text)
-            output = {"output": output_text, "model_reasoning": reasoning}
+            output = {
+                "output": "1" if is_violation else "0",
+                "model_reasoning": reasoning,
+            }
+            if warning:
+                output["raw_output"] = output_text
+        elif self.output_format == "policy_ref":
+            is_violation, parsed_output, warning = parse_json_output(output_text)
+            output = _canonicalize_policy_ref_output(parsed_output, is_violation)
+            output["model_reasoning"] = reasoning
         else:
-            is_violation, output, warning = parse_json_output(output_text)
+            is_violation, parsed_output, warning = parse_json_output(output_text)
+            output = _canonicalize_with_rationale_output(parsed_output, is_violation)
             output["model_reasoning"] = reasoning
 
         return ParsedResponse(is_violation, reasoning, output, warning)

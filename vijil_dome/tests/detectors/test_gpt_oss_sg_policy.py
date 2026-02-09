@@ -347,3 +347,40 @@ async def test_policy_detector_config_matrix(
     assert metadata["config"]["model"] == "openai/gpt-oss-safeguard-20b"
     assert metadata["config"]["policy_source"] == str(SPAM_POLICY_FILE)
     assert isinstance(metadata["parsed_output"], dict)
+
+    parsed_output = metadata["parsed_output"]
+    if output_format == "binary":
+        assert set(parsed_output.keys()).issuperset({"output", "model_reasoning"})
+        assert parsed_output["output"] in {"0", "1"}
+        assert flagged is (parsed_output["output"] == "1")
+    elif output_format == "policy_ref":
+        assert set(parsed_output.keys()).issuperset(
+            {"violation", "policy_category", "model_reasoning"}
+        )
+        assert parsed_output["violation"] in {0, 1}
+        assert flagged is (parsed_output["violation"] == 1)
+        assert (
+            parsed_output["policy_category"] is None
+            or isinstance(parsed_output["policy_category"], str)
+        )
+    else:
+        assert set(parsed_output.keys()).issuperset(
+            {
+                "violation",
+                "policy_category",
+                "rule_ids",
+                "confidence",
+                "rationale",
+                "model_reasoning",
+            }
+        )
+        assert parsed_output["violation"] in {0, 1}
+        assert flagged is (parsed_output["violation"] == 1)
+        assert (
+            parsed_output["policy_category"] is None
+            or isinstance(parsed_output["policy_category"], str)
+        )
+        assert isinstance(parsed_output["rule_ids"], list)
+        assert all(isinstance(rule_id, str) for rule_id in parsed_output["rule_ids"])
+        assert parsed_output["confidence"] in {"low", "medium", "high"}
+        assert isinstance(parsed_output["rationale"], str)
