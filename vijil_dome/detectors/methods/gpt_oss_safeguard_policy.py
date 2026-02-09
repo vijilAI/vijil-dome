@@ -71,34 +71,41 @@ NEVER:
 """
 
 OUTPUT_FORMAT_TEMPLATES: dict[str, str] = {
-    "binary": """## TASK
-Classify whether the content violates the policy rules below.
+    "binary": """## OUTPUT FORMAT (REQUIRED)
+Return exactly one character: 0 or 1.
+Do not include any explanation or punctuation.
 
-- 0 = Content does NOT violate this policy (SAFE)
-- 1 = Content DOES violate this policy (VIOLATION)
+0 = Content does NOT violate this policy.
+1 = Content violates this policy.""",
+    "policy_ref": """## OUTPUT FORMAT (REQUIRED)
+If the content violates this policy, return:
+{"violation": 1, "policy_category": "<category_or_rule_id>"}
 
-## OUTPUT FORMAT
-Return EXACTLY one character: 0 or 1
-No explanation. No punctuation. Just the digit.""",
-    "policy_ref": """## TASK
-Classify whether the content violates the policy rules below.
-If it violates, identify which policy category applies.
+If the content does NOT violate this policy, return:
+{"violation": 0, "policy_category": null}""",
+    "with_rationale": """## OUTPUT FORMAT (REQUIRED)
+Return ONLY valid JSON in this shape:
+{
+  "violation": 1,
+  "policy_category": "<category_or_rule_id>",
+  "rule_ids": ["<rule_id_1>", "<rule_id_2>"],
+  "confidence": "high",
+  "rationale": "Short non-step-by-step rationale."
+}
 
-## OUTPUT FORMAT
-Return ONLY valid JSON, no other text:
-- Violation: {"violation": 1, "policy_category": "<rule_id>"}
-- Safe: {"violation": 0, "policy_category": null}""",
-    "with_rationale": """## TASK
-Classify whether the content violates the policy rules below.
-Identify which rules apply and provide brief rationale.
+If safe, set "violation": 0, "policy_category": null, and "rule_ids": [].""",
+}
 
-## OUTPUT FORMAT
-Return ONLY valid JSON with these fields:
-- violation: 1 if violates policy, 0 if safe
-- policy_category: Main category/section violated (or null if safe)
-- rule_ids: Array of specific rule IDs that apply (or empty array)
-- confidence: "high", "medium", or "low"
-- rationale: Brief explanation with policy citations""",
+OUTPUT_FORMAT_REMINDERS: dict[str, str] = {
+    "binary": """## OUTPUT FORMAT REMINDER (REQUIRED)
+Return exactly one character: 0 or 1. No explanation or punctuation.""",
+    "policy_ref": """## OUTPUT FORMAT REMINDER (REQUIRED)
+Return ONLY JSON:
+{"violation": 1, "policy_category": "<category_or_rule_id>"}
+or
+{"violation": 0, "policy_category": null}""",
+    "with_rationale": """## OUTPUT FORMAT REMINDER (REQUIRED)
+Return ONLY JSON with: violation, policy_category, rule_ids, confidence, rationale.""",
 }
 
 
@@ -216,6 +223,23 @@ def normalize_query_for_classification(query: str) -> str:
     return text
 
 
+EXAMPLES_HEADER_PATTERN = re.compile(r"(?im)^\s*##\s*examples?\b")
+
+
+def inject_output_reminder(policy_content: str, reminder_block: str) -> str:
+    """Repeat output instructions near the bottom (before examples if present)."""
+    if reminder_block in policy_content:
+        return policy_content
+
+    match = EXAMPLES_HEADER_PATTERN.search(policy_content)
+    if not match:
+        return f"{policy_content.rstrip()}\n\n{reminder_block}"
+
+    before = policy_content[: match.start()].rstrip()
+    after = policy_content[match.start() :].lstrip("\n")
+    return f"{before}\n\n{reminder_block}\n\n{after}"
+
+
 def has_classification_instructions(policy_content: str) -> bool:
     upper = policy_content.upper()
     has_instructions = "## INSTRUCTIONS" in upper or "## TASK" in upper
@@ -228,12 +252,17 @@ def build_system_prompt(
     output_format: OutputFormat,
     reasoning_effort: ReasoningEffort,
 ) -> str:
+    output_block = OUTPUT_FORMAT_TEMPLATES[output_format]
+    reminder_block = OUTPUT_FORMAT_REMINDERS[output_format]
+
     if not has_classification_instructions(policy_content):
         policy_content = f"""{CLASSIFIER_PREAMBLE}
-{OUTPUT_FORMAT_TEMPLATES[output_format]}
+{output_block}
 
 ## POLICY RULES
 {policy_content.rstrip()}"""
+
+    policy_content = inject_output_reminder(policy_content, reminder_block)
 
     if "Reasoning:" not in policy_content:
         policy_content = f"{policy_content.rstrip()}\n\nReasoning: {reasoning_effort}"

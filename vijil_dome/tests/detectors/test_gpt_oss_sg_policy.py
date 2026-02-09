@@ -27,6 +27,7 @@ from vijil_dome.detectors import (
 from vijil_dome.detectors.methods.gpt_oss_safeguard_policy import (
     OutputFormat,
     PolicyGptOssSafeguard,
+    build_system_prompt,
     normalize_query_for_classification,
 )
 
@@ -118,6 +119,40 @@ def test_reasoning_directive_appending():
     assert result.count("Reasoning:") == 1
 
 
+def test_build_system_prompt_repeats_binary_output_instruction():
+    policy = """# Policy
+
+## EXAMPLES
+Content: foo
+Answer: 0
+"""
+    prompt = build_system_prompt(policy, output_format="binary", reasoning_effort="medium")
+    assert prompt.count("Return exactly one character: 0 or 1") >= 2
+    assert "## OUTPUT FORMAT REMINDER (REQUIRED)" in prompt
+    assert prompt.index("## OUTPUT FORMAT REMINDER (REQUIRED)") < prompt.index("## EXAMPLES")
+
+
+def test_build_system_prompt_policy_ref_json_shape():
+    prompt = build_system_prompt(
+        "# Policy\nNo bribery.",
+        output_format="policy_ref",
+        reasoning_effort="medium",
+    )
+    assert '{"violation": 1, "policy_category": "<category_or_rule_id>"}' in prompt
+    assert '{"violation": 0, "policy_category": null}' in prompt
+
+
+def test_build_system_prompt_with_rationale_fields():
+    prompt = build_system_prompt(
+        "# Policy\nNo inside trading.",
+        output_format="with_rationale",
+        reasoning_effort="high",
+    )
+    assert '"rule_ids": ["<rule_id_1>", "<rule_id_2>"]' in prompt
+    assert '"confidence": "high"' in prompt
+    assert '"rationale": "Short non-step-by-step rationale."' in prompt
+
+
 def test_normalize_query_with_both_sides():
     query = (
         "User request: Can I share this non-public info?\n"
@@ -148,6 +183,51 @@ def test_normalize_query_chat_transcript_uses_latest_turns():
     )
     normalized = normalize_query_for_classification(query)
     assert normalized == "User request: final question\nAgent response: final answer"
+
+
+@pytest.mark.parametrize(
+    ("output_format", "harmony_response", "expected_key"),
+    [
+        (
+            "binary",
+            "<reasoning>binary check</reasoning><output>1</output>",
+            "output",
+        ),
+        (
+            "policy_ref",
+            (
+                "<reasoning>policy ref check</reasoning>"
+                "<output>{\"violation\":1,\"policy_category\":\"H2.f\"}</output>"
+            ),
+            "policy_category",
+        ),
+        (
+            "with_rationale",
+            (
+                "<reasoning>rationale check</reasoning>"
+                "<output>{\"violation\":1,"
+                "\"policy_category\":\"H2.f\","
+                "\"rule_ids\":[\"H2.d\",\"H2.f\"],"
+                "\"confidence\":\"high\","
+                "\"rationale\":\"Content compares a protected class to animals.\"}"
+                "</output>"
+            ),
+            "rule_ids",
+        ),
+    ],
+)
+def test_parse_response_supports_all_output_formats(
+    output_format: OutputFormat,
+    harmony_response: str,
+    expected_key: str,
+):
+    detector = PolicyGptOssSafeguard(
+        policy_file=str(SPAM_POLICY_FILE),
+        output_format=output_format,
+    )
+    parsed = detector._parse_response(harmony_response)
+    assert parsed.is_violation is True
+    assert expected_key in parsed.output
 
 
 @pytest.mark.asyncio
