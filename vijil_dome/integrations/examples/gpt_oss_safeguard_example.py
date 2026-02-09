@@ -40,6 +40,7 @@ import asyncio
 import os
 from pathlib import Path
 
+from vijil_dome import Dome, create_dome_config
 from vijil_dome.detectors import (
     POLICY_GPT_OSS_SAFEGUARD,
     DetectionCategory,
@@ -167,7 +168,7 @@ async def example_output_formats():
 
 async def example_with_dome_integration():
     print("\n" + "=" * 60)
-    print("Example 5: Direct Usage Pattern (Recommended)")
+    print("Example 5: Dome Config Usage (TOML/Dict Pattern)")
     print("=" * 60)
 
     policy_file = (
@@ -177,30 +178,33 @@ async def example_with_dome_integration():
         / "spam_policy.md"
     )
 
-    print("\nNote: The Dome config parser currently supports these guard types:")
-    print("  - security")
-    print("  - moderation")
-    print("  - privacy")
-    print("  - integrity")
-    print("\nDetectionCategory.Generic is not yet mapped in Dome config.")
-    print("Recommended: Use direct detector instantiation (Examples 1-4 above).\n")
-
-    detector = PolicyGptOssSafeguard(
-        policy_file=str(policy_file),
-        model_name="openai/gpt-oss-safeguard-20b",
-        reasoning_effort="medium",
-    )
+    config = {
+        "input-guards": ["policy-input"],
+        "output-guards": [],
+        "policy-input": {
+            "type": "generic",
+            "methods": ["policy-gpt-oss-safeguard"],
+            "policy-gpt-oss-safeguard": {
+                "policy_file": str(policy_file),
+                "hub_name": "groq",
+                "model_name": "openai/gpt-oss-safeguard-20b",
+                "output_format": "policy_ref",
+                "reasoning_effort": "medium",
+            },
+        },
+    }
+    dome = Dome(dome_config=create_dome_config(config))
 
     test_cases = [
-        "What is your refund policy?",
-        "BUY NOW BUY NOW BUY NOW!!!",
+        "User request: What is your refund policy?\nAgent response: Please check FAQ.",
+        "User request: Should I send unsolicited ads?\nAgent response: BUY NOW BUY NOW BUY NOW!!!",
     ]
 
     for text in test_cases:
-        result = await detector.detect(text)
+        result = await dome.async_guard_input(text)
         print(f"\nInput: {text}")
-        print(f"Violation: {result[0]}")
-        print(f"Model: {result[1]['config']['model']}")
+        print(f"Blocked: {result.flagged}")
+        print(f"Guarded response: {result.response_string}")
 
 
 async def main():
