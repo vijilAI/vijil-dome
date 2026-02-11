@@ -373,14 +373,40 @@ def build_system_prompt(
 
 @register_method(DetectionCategory.Generic, POLICY_GPT_OSS_SAFEGUARD)
 class PolicyGptOssSafeguard(LlmBaseDetector):
-    """Policy-based content classifier using gpt-oss-safeguard."""
+    """Policy-based content classifier using gpt-oss-safeguard.
+
+    This detector uses custom policy prompts to classify content based on
+    user-defined rules and criteria. The policy can be provided either as a
+    file path or as inline content.
+
+    Example with file:
+        detector = PolicyGptOssSafeguard(
+            policy_file="vijil_dome/detectors/policies/spam_policy.md",
+            model_name="openai/gpt-oss-120b",
+            output_format="policy_ref",
+            reasoning_effort="medium"
+        )
+
+    Example with inline content:
+        detector = PolicyGptOssSafeguard(
+            policy_content="# Policy\n\n## INSTRUCTIONS\n...",
+            model_name="openai/gpt-oss-120b",
+            output_format="policy_ref",
+            reasoning_effort="medium"
+        )
+
+        result = await detector.detect("Check this out: example.com")
+        print(result.hit)  # True if policy violation detected
+        print(result.reason)  # Explanation from model
+    """
 
     _OUTPUT_FORMATS = ("binary", "policy_ref", "with_rationale")
     _REASONING_EFFORTS = ("low", "medium", "high")
 
     def __init__(
         self,
-        policy_file: str,
+        policy_file: Optional[str] = None,
+        policy_content: Optional[str] = None,
         hub_name: str = "groq",
         model_name: str = "openai/gpt-oss-safeguard-20b",
         output_format: OutputFormat = "policy_ref",
@@ -389,17 +415,49 @@ class PolicyGptOssSafeguard(LlmBaseDetector):
         timeout: int = 60,
         max_retries: int = 3,
     ):
+        """Initialize PolicyGptOssSafeguard detector.
+
+        Args:
+            policy_file: Path to policy markdown file (optional if policy_content provided)
+            policy_content: Inline policy markdown content (optional if policy_file provided)
+            hub_name: LLM hub to use (default: "groq")
+            model_name: Model identifier - options:
+                       - "openai/gpt-oss-safeguard-20b" (default for groq)
+                       - "openai/gpt-oss-120b" (for nebius)
+            output_format: Output format - "binary", "policy_ref", "with_rationale" (default: "policy_ref")
+            reasoning_effort: Reasoning depth - "low", "medium", "high" (default: "medium")
+            api_key: API key for the hub (defaults to GROQ_API_KEY or NEBIUS_API_KEY env var)
+            timeout: Request timeout in seconds
+            max_retries: Maximum number of retry attempts
+
+        Raises:
+            ValueError: If neither policy_file nor policy_content provided, or both provided
+            FileNotFoundError: If policy_file path does not exist
+            ValueError: If output_format or reasoning_effort not in valid values
+        """
         if output_format not in self._OUTPUT_FORMATS:
             raise ValueError(f"output_format must be one of {self._OUTPUT_FORMATS}")
         if reasoning_effort not in self._REASONING_EFFORTS:
             raise ValueError(f"reasoning_effort must be one of {self._REASONING_EFFORTS}")
 
+        # Validate that exactly one of policy_file or policy_content is provided
+        if not policy_file and not policy_content:
+            raise ValueError("Either policy_file or policy_content must be provided")
+        if policy_file and policy_content:
+            raise ValueError("Cannot specify both policy_file and policy_content")
+
+        # Handle API key defaults based on hub
         if hub_name == "groq" and api_key is None:
             api_key = os.getenv("GROQ_API_KEY")
 
+        # Handle model name formatting for different hubs
         litellm_model = model_name
         if hub_name == "groq" and not model_name.startswith("groq/"):
             litellm_model = f"groq/{model_name}"
+        elif hub_name == "nebius" and model_name.startswith("openai/"):
+            # Fix for LiteLLM: when using custom base_url, LiteLLM strips one "openai/" prefix
+            # So we need to double it: "openai/gpt-oss-120b" -> "openai/openai/gpt-oss-120b"
+            litellm_model = f"openai/{model_name}"
 
         super().__init__(
             method_name=POLICY_GPT_OSS_SAFEGUARD,
@@ -415,13 +473,24 @@ class PolicyGptOssSafeguard(LlmBaseDetector):
         self.output_format = output_format
         self.reasoning_effort = reasoning_effort
 
-        policy_path = Path(policy_file)
-        if not policy_path.exists():
-            raise FileNotFoundError(f"Policy file not found: {policy_file}")
+        # Load policy content
+        if policy_content:
+            # Use provided inline content
+            policy_text = policy_content
+            self.policy_source = "inline_content"
+        else:
+            # Load from file
+            if policy_file is None:
+                raise ValueError("policy_file must be provided when policy_content is not")
+            policy_path = Path(policy_file)
+            if not policy_path.exists():
+                raise FileNotFoundError(f"Policy file not found: {policy_file}")
 
-        policy_content = policy_path.read_text(encoding="utf-8")
-        self.policy = build_system_prompt(policy_content, output_format, reasoning_effort)
-        self.policy_source = str(policy_path)
+            policy_text = policy_path.read_text(encoding="utf-8")
+            self.policy_source = str(policy_path)
+
+        # Build system message with reasoning directive
+        self.policy = build_system_prompt(policy_text, output_format, reasoning_effort)
 
     def _build_system_message(self, policy_content: str) -> str:
         return build_system_prompt(

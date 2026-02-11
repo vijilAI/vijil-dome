@@ -76,9 +76,21 @@ def create_guard(guard_name: str, guard_config_dict: dict) -> Guard:
             detector_config_dict = guard_config_dict[detector_name]
         else:
             detector_config_dict = {}
+        
+        # Support 'method' field in config to override the detector method name
+        # This allows multiple instances of the same detector with different configs
+        actual_method_name = detector_config_dict.get("method", detector_name)
+        
+        # Remove metadata fields that shouldn't be passed to detector constructors
+        # These are used for tracking/logging but aren't detector parameters
+        metadata_fields = {"method", "section_id", "header", "policy_id"}
+        detector_config_dict = {
+            k: v for k, v in detector_config_dict.items() if k not in metadata_fields
+        }
+        
         detector_list.append(
             create_detector_for_guard(
-                detector_name, guard_config_dict["type"], detector_config_dict
+                actual_method_name, guard_config_dict["type"], detector_config_dict
             )
         )
     return Guard(guard_name, detector_list, guard_fail_policy, guard_parallel_policy)
