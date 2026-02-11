@@ -15,15 +15,10 @@
 # vijil and vijil-dome are trademarks owned by Vijil Inc.
 
 import pytest
-import json
-import tempfile
-import os
 import sys
 from unittest.mock import Mock, patch
 
 from vijil_dome import Dome
-from vijil_dome.utils.policy_loader import load_policy_sections_from_s3
-from vijil_dome.utils.policy_config_builder import build_dome_config_from_sections
 
 
 @pytest.fixture
@@ -47,7 +42,7 @@ def test_create_from_s3_policy_by_ids(sample_policy_data):
     dome_module = sys.modules['vijil_dome.Dome']
     
     with patch.object(dome_module, 'load_policy_sections_from_s3', return_value=sample_policy_data) as mock_load_s3, \
-         patch.object(dome_module, 'build_dome_config_from_sections', return_value={"input-guards": [], "output-guards": []}) as mock_build_config:
+         patch.object(dome_module, 'build_dome_config_from_sections', return_value={"input-guards": [], "output-guards": []}):
         
         dome = Dome.create_from_s3_policy_by_ids(
             bucket="test-bucket",
@@ -152,7 +147,7 @@ def test_create_from_s3_policy_aws_credentials(sample_policy_data):
         mock_load_s3.return_value = sample_policy_data
         mock_build_config.return_value = {"input-guards": [], "output-guards": []}
         
-        dome = Dome.create_from_s3_policy(
+        Dome.create_from_s3_policy(
             bucket="test-bucket",
             key="test-key",
             aws_access_key_id="test-key",
@@ -180,7 +175,7 @@ def test_create_from_s3_policy_cache_dir(sample_policy_data):
         
         # Use tempfile for cache directory instead of /custom/cache/path
         with tempfile.TemporaryDirectory() as temp_dir:
-            dome = Dome.create_from_s3_policy(
+            Dome.create_from_s3_policy(
                 bucket="test-bucket",
                 key="test-key",
                 cache_dir=temp_dir
@@ -202,11 +197,11 @@ def test_create_from_s3_policy_client_parameter(sample_policy_data):
         mock_build_config.return_value = {"input-guards": [], "output-guards": []}
         mock_client = Mock(spec=OpenAI)
         
-        dome = Dome.create_from_s3_policy(
+        Dome.create_from_s3_policy(
             bucket="test-bucket",
             key="test-key",
             client=mock_client
         )
 
-        # Verify client was passed - check that Dome was instantiated
-        assert dome is not None
+        # Verify function was called successfully
+        mock_load_s3.assert_called_once()

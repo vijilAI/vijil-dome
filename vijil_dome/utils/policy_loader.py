@@ -139,9 +139,8 @@ def load_policy_sections_from_s3(
         ValueError: If JSON structure is invalid
         Exception: For S3 access errors
     """
-    try:
-        import boto3
-    except ImportError:
+    import importlib.util
+    if importlib.util.find_spec("boto3") is None:
         raise ImportError(
             "boto3 is required for S3 access. Install it with: pip install boto3"
         )
