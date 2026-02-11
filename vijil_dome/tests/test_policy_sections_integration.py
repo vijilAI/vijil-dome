@@ -18,10 +18,8 @@ import pytest
 import json
 import tempfile
 import os
-import asyncio
-from pathlib import Path
 
-from vijil_dome import Dome, create_dome_config
+from vijil_dome import Dome
 from vijil_dome.utils.policy_loader import load_policy_sections_from_file
 from vijil_dome.utils.policy_config_builder import build_dome_config_from_sections
 

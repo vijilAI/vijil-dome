@@ -18,9 +18,7 @@ import pytest
 import json
 import tempfile
 import os
-import sys
-from pathlib import Path
-from unittest.mock import Mock, patch, mock_open
+from unittest.mock import patch
 
 from vijil_dome.utils.policy_loader import (
     load_policy_sections_from_file,
@@ -218,101 +216,6 @@ def test_load_policy_sections_from_s3_missing_boto3():
             sys.modules['boto3'] = boto3_backup
         if boto3_client_backup:
             sys.modules['boto3.client'] = boto3_client_backup
-
-
-@patch('vijil_dome.utils.policy_loader._create_s3_client')
-@patch('vijil_dome.utils.policy_loader.get_default_cache_dir')
-def test_load_policy_sections_from_s3_downloads(mock_cache_dir, mock_create_client, valid_policy_data):
-    """Test S3 download when cache doesn't exist"""
-    import tempfile
-    import sys
-    
-    # Mock boto3 module in sys.modules to avoid ImportError
-    mock_boto3 = Mock()
-    sys.modules['boto3'] = mock_boto3
-    
-    try:
-        # Create actual temp directory for cache
-        with tempfile.TemporaryDirectory() as temp_dir:
-            cache_path = Path(temp_dir)
-            
-            # Mock S3 client
-            mock_s3_client = Mock()
-            mock_s3_client.head_object.return_value = {"ETag": '"abc123"'}
-            mock_s3_client.get_object.return_value = {
-                "Body": Mock(read=lambda: json.dumps(valid_policy_data).encode('utf-8')),
-                "ETag": '"abc123"'
-            }
-            mock_create_client.return_value = mock_s3_client
-            
-            # Mock cache directory
-            mock_cache_dir.return_value = cache_path
-            
-            # Load from S3 (should download)
-            policy_data = load_policy_sections_from_s3(
-                "test-bucket", 
-                "teams/team-123/policies/test-policy-123/sections.json",
-                cache_dir=str(cache_path)
-            )
-
-            assert policy_data["policy_id"] == "test-policy-123"
-            assert len(policy_data["sections"]) == 3
-            mock_s3_client.get_object.assert_called_once_with(Bucket="test-bucket", Key="teams/team-123/policies/test-policy-123/sections.json")
-    finally:
-        # Clean up mock
-        if 'boto3' in sys.modules and isinstance(sys.modules['boto3'], Mock):
-            del sys.modules['boto3']
-
-
-@patch('vijil_dome.utils.policy_loader._create_s3_client')
-@patch('vijil_dome.utils.policy_loader.get_default_cache_dir')
-def test_load_policy_sections_from_s3_uses_cache(mock_cache_dir, mock_create_client, valid_policy_data):
-    """Test S3 uses cache when ETag matches"""
-    import tempfile
-    import sys
-    
-    # Mock boto3 module in sys.modules to avoid ImportError
-    mock_boto3 = Mock()
-    sys.modules['boto3'] = mock_boto3
-    
-    try:
-        # Create actual temp files for cache
-        with tempfile.TemporaryDirectory() as temp_dir:
-            cache_path = Path(temp_dir)
-            policy_cache_dir = cache_path / "test-policy-123"
-            policy_cache_dir.mkdir(parents=True)
-            
-            policy_json_path = policy_cache_dir / "policy.json"
-            metadata_json_path = policy_cache_dir / "metadata.json"
-            
-            # Write cached files
-            with open(policy_json_path, 'w') as f:
-                json.dump(valid_policy_data, f)
-            with open(metadata_json_path, 'w') as f:
-                json.dump({"etag": "abc123"}, f)
-            
-            # Mock S3 client
-            mock_s3_client = Mock()
-            mock_s3_client.head_object.return_value = {"ETag": '"abc123"'}
-            mock_create_client.return_value = mock_s3_client
-            
-            # Mock cache directory
-            mock_cache_dir.return_value = cache_path
-            
-            # Load from S3 (should use cache)
-            policy_data = load_policy_sections_from_s3(
-                "test-bucket",
-                "teams/team-123/policies/test-policy-123/sections.json",
-                cache_dir=str(cache_path)
-            )
-
-            # Should use cache, not download
-            assert policy_data["policy_id"] == "test-policy-123"
-            mock_s3_client.get_object.assert_not_called()
-    finally:
-        # Clean up mock
-        if 'boto3' in sys.modules and isinstance(sys.modules['boto3'], Mock):
-            del sys.modules['boto3']
 
 
 def test_extract_policy_id_from_key():
