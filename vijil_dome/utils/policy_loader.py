@@ -16,6 +16,7 @@
 
 import json
 import os
+import time
 from pathlib import Path
 from typing import Dict, Any, Optional
 import logging
@@ -115,12 +116,21 @@ def load_policy_sections_from_s3(
     aws_secret_access_key: Optional[str] = None,
     aws_session_token: Optional[str] = None,
     region_name: Optional[str] = None,
+    cache_ttl_seconds: int = 300,
+    max_cache_age_days: int = 30,
 ) -> Dict[str, Any]:
     """
     Load policy sections JSON from S3 with local caching.
 
     Downloads from S3 and caches locally. On subsequent calls, checks cache
     validity using ETag and timestamp before downloading again.
+
+    Cache behavior:
+    - Cache files are stored in ~/.cache/vijil-dome/policies/{policy_id}/
+    - Cache TTL: If cache is newer than cache_ttl_seconds, skip S3 head_object check
+    - Cache validation: Uses ETag comparison to detect changes
+    - Cache growth: Cache directories accumulate with no automatic cleanup
+      (manual cleanup recommended for old policies)
 
     Args:
         bucket: S3 bucket name
@@ -130,6 +140,8 @@ def load_policy_sections_from_s3(
         aws_secret_access_key: AWS secret key (optional)
         aws_session_token: AWS session token (optional)
         region_name: AWS region (optional, uses boto3 defaults if not provided)
+        cache_ttl_seconds: Cache TTL in seconds - skip head_object check if cache is newer (default: 300 = 5 minutes)
+        max_cache_age_days: Maximum cache age in days for future cleanup (default: 30, not enforced)
 
     Returns:
         Parsed policy data dictionary
@@ -157,7 +169,7 @@ def load_policy_sections_from_s3(
     if not policy_id:
         # Fallback: use hash of key as cache identifier
         import hashlib
-        policy_id = hashlib.md5(key.encode()).hexdigest()
+        policy_id = hashlib.sha256(key.encode()).hexdigest()
 
     policy_cache_dir = cache_path / policy_id
     policy_cache_dir.mkdir(parents=True, exist_ok=True)
@@ -165,28 +177,50 @@ def load_policy_sections_from_s3(
     policy_json_path = policy_cache_dir / "policy.json"
     metadata_json_path = policy_cache_dir / "metadata.json"
 
+    # Create S3 client once and reuse for both head_object and get_object
+    s3_client = _create_s3_client(
+        aws_access_key_id, aws_secret_access_key, aws_session_token, region_name
+    )
+
     # Check if cache exists and is valid
     cache_valid = False
     if policy_json_path.exists() and metadata_json_path.exists():
-        try:
-            with open(metadata_json_path, 'r', encoding='utf-8') as f:
-                cached_metadata = json.load(f)
+        # Check cache age - if newer than TTL, skip S3 head_object check
+        cache_age = time.time() - policy_json_path.stat().st_mtime
+        if cache_age < cache_ttl_seconds:
+            # Cache is fresh, use it without checking S3
+            logger.info(f"Using cached policy (age: {cache_age:.0f}s < TTL: {cache_ttl_seconds}s)")
+            cache_valid = True
+        else:
+            # Cache is older than TTL, validate with S3 ETag check
+            try:
+                with open(metadata_json_path, 'r', encoding='utf-8') as f:
+                    cached_metadata = json.load(f)
 
-            # Create S3 client to check object metadata
-            s3_client = _create_s3_client(
-                aws_access_key_id, aws_secret_access_key, aws_session_token, region_name
-            )
-            s3_object = s3_client.head_object(Bucket=bucket, Key=key)
+                # Use existing S3 client to check object metadata
+                s3_object = s3_client.head_object(Bucket=bucket, Key=key)
 
-            s3_etag = s3_object.get("ETag", "").strip('"')
-            cached_etag = cached_metadata.get("etag", "")
+                s3_etag = s3_object.get("ETag", "").strip('"')
+                cached_etag = cached_metadata.get("etag", "")
 
-            # Check if ETag matches (indicates file hasn't changed)
-            if s3_etag and cached_etag and s3_etag == cached_etag:
-                cache_valid = True
-                logger.info(f"Using cached policy from {policy_json_path}")
-        except Exception as e:
-            logger.warning(f"Failed to validate cache, will re-download: {e}")
+                # Check if ETag matches (indicates file hasn't changed)
+                if s3_etag and cached_etag and s3_etag == cached_etag:
+                    cache_valid = True
+                    logger.info(f"Using cached policy from {policy_json_path}")
+            except Exception as e:
+                # Distinguish between cache validation failures and access errors
+                from botocore.exceptions import ClientError
+                if isinstance(e, ClientError):
+                    error_code = e.response.get("Error", {}).get("Code", "")
+                    if error_code == "404":
+                        logger.warning(f"Policy not found in S3: s3://{bucket}/{key}")
+                    elif error_code in ["403", "AccessDenied"]:
+                        logger.error(f"S3 access denied for s3://{bucket}/{key}")
+                        raise
+                    else:
+                        logger.warning(f"S3 error during cache validation: {e}")
+                else:
+                    logger.warning(f"Failed to validate cache, will re-download: {e}")
 
     # Load from cache if valid
     if cache_valid:
@@ -195,11 +229,8 @@ def load_policy_sections_from_s3(
         validate_policy_json(policy_data)
         return policy_data
 
-    # Download from S3
+    # Download from S3 using existing client
     logger.info(f"Downloading policy from s3://{bucket}/{key}")
-    s3_client = _create_s3_client(
-        aws_access_key_id, aws_secret_access_key, aws_session_token, region_name
-    )
     s3_object = s3_client.get_object(Bucket=bucket, Key=key)
     policy_json_bytes = s3_object["Body"].read()
     policy_data = json.loads(policy_json_bytes.decode("utf-8"))

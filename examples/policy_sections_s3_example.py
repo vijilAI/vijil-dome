@@ -12,57 +12,82 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 #
-# vijil and vijil-dome are trademarks owned by Vijil Inc.
+# vijil and vijil-dome are trademarks of Vijil Inc.
 
 """
-Example: Policy Sections from S3 Integration
+Example: Policy Sections Detector with S3 Support
 
-This example demonstrates how to load policy sections from S3 JSON files,
-cache them locally, and use Dome to check inputs/outputs against all
-sections in parallel with early exit.
+This example demonstrates how to use PolicySectionsDetector via config-driven
+approach to load policy sections from S3, cache them locally, and check
+inputs/outputs against all sections in parallel with early exit.
 
 Prerequisites:
 - Set AWS credentials (via environment variables, IAM role, or AWS credentials file)
 - Set NEBIUS_API_KEY environment variable (for PolicyGptOssSafeguard detector)
 - Have policy sections JSON file in S3 at: teams/{team_id}/policies/{policy_id}/sections.json
+- See vijil_dome/detectors/policies/sample_policy_sections.json for format reference
+
+Rationale:
+Policies should be split into 400-600 token sections for optimal performance.
+Each section is evaluated independently by PolicyGptOssSafeguard, allowing
+parallel execution with fast fail. This is more efficient than dumping everything
+into a single policy violation detector.
 
 The example shows:
-- Loading policy sections from S3 (with automatic caching)
-- Building Dome config from sections
-- Using convenience factory methods
+- Config-driven approach with policy_s3_bucket and policy_s3_key
+- Rate limiting with max_parallel_sections
+- S3 authentication parameters
 - Testing guardrails and identifying which sections triggered violations
 """
 
 import asyncio
 import os
+import sys
+from pathlib import Path
+
+# Add parent directory to path for imports
+sys.path.insert(0, str(Path(__file__).parent.parent))
+
 from vijil_dome import Dome
-from vijil_dome.utils.policy_loader import load_policy_sections_from_s3, load_policy_sections_from_file
-from vijil_dome.utils.policy_config_builder import build_dome_config_from_sections
+from vijil_dome.utils.policy_loader import load_policy_sections_from_file
 
 
-async def example_convenience_method_by_ids():
-    """Example 1: Using convenience method with team_id and policy_id"""
+async def example_s3_config():
+    """Example 1: Using PolicySectionsDetector with S3 via config"""
     print("\n" + "="*60)
-    print("Example 1: Convenience Method with team_id/policy_id")
+    print("Example 1: PolicySectionsDetector with S3 Config")
     print("="*60)
 
-    # Check for API key
     if not os.getenv("NEBIUS_API_KEY"):
         print("WARNING: NEBIUS_API_KEY not set. Policy detectors will fail.")
         print("Set it with: export NEBIUS_API_KEY='your-api-key'")
         return
 
     try:
-        # Create Dome instance using convenience method
-        # This constructs the S3 path: teams/{team_id}/policies/{policy_id}/sections.json
-        dome = Dome.create_from_s3_policy_by_ids(
-            bucket="my-policy-bucket",  # Replace with your bucket
-            team_id="550e8400-e29b-41d4-a716-446655440000",
-            policy_id="123e4567-e89b-12d3-a456-426614174000",
-            model_name="openai/gpt-oss-120b",
-            reasoning_effort="medium"
-        )
+        # Config-driven approach - S3 loading happens in detector
+        config = {
+            "input-guards": ["policy-input"],
+            "policy-input": {
+                "type": "policy",
+                "method": "policy-sections",
+                "policy_s3_bucket": "my-policy-bucket",  # Replace with your bucket
+                "policy_s3_key": "teams/550e8400-e29b-41d4-a716-446655440000/policies/123e4567-e89b-12d3-a456-426614174000/sections.json",
+                "applies_to": "input",
+                "max_parallel_sections": 10,  # Rate limiting
+                "model_name": "openai/gpt-oss-120b",
+                "reasoning_effort": "medium",
+                "hub_name": "nebius",
+                "timeout": 60,
+                "max_retries": 3,
+                # S3 auth params (optional - uses boto3 defaults if not provided)
+                # "aws_access_key_id": "...",
+                # "aws_secret_access_key": "...",
+                # "aws_session_token": "...",
+                # "region_name": "...",
+            }
+        }
 
+        dome = Dome(config)
         print("✓ Dome instance created successfully")
         print(f"✓ Input guardrail: {dome.input_guardrail is not None}")
         print(f"✓ Output guardrail: {dome.output_guardrail is not None}")
@@ -82,11 +107,13 @@ async def example_convenience_method_by_ids():
             if result.flagged:
                 print(f"Response: {result.response_string}")
                 # Check which sections triggered
-                for guard_name, guard_res in result.guard_exec_details.items():
+                for guard_name, guard_res in result.trace.items():
                     for detector_name, det_res in guard_res.details.items():
                         if det_res.hit:
-                            section_id = det_res.result.get("section_id", detector_name)
-                            print(f"  → Triggered by section: {section_id}")
+                            section_info = det_res.result.get("sections", [])
+                            violating_section = det_res.result.get("violating_section")
+                            if violating_section:
+                                print(f"  → Triggered by section: {violating_section.get('section_id')}")
 
     except Exception as e:
         print(f"Error: {e}")
@@ -94,10 +121,10 @@ async def example_convenience_method_by_ids():
         traceback.print_exc()
 
 
-async def example_convenience_method_full_path():
-    """Example 2: Using convenience method with full S3 key path"""
+async def example_rate_limiting():
+    """Example 2: Demonstrating max_parallel_sections for rate limiting"""
     print("\n" + "="*60)
-    print("Example 2: Convenience Method with Full S3 Path")
+    print("Example 2: Rate Limiting with max_parallel_sections")
     print("="*60)
 
     if not os.getenv("NEBIUS_API_KEY"):
@@ -105,77 +132,28 @@ async def example_convenience_method_full_path():
         return
 
     try:
-        dome = Dome.create_from_s3_policy(
-            bucket="my-policy-bucket",
-            key="teams/550e8400-e29b-41d4-a716-446655440000/policies/123e4567-e89b-12d3-a456-426614174000/sections.json",
-            model_name="openai/gpt-oss-120b",
-            reasoning_effort="medium"
-        )
+        config = {
+            "input-guards": ["policy-input"],
+            "policy-input": {
+                "type": "policy",
+                "method": "policy-sections",
+                "policy_s3_bucket": "my-policy-bucket",
+                "policy_s3_key": "teams/team-123/policies/policy-456/sections.json",
+                "applies_to": "input",
+                "max_parallel_sections": 5,  # Limit to 5 concurrent LLM calls
+                "model_name": "openai/gpt-oss-120b",
+                "reasoning_effort": "medium",
+                "hub_name": "nebius",
+            }
+        }
 
-        print("✓ Dome instance created successfully")
-
-        # Test output guardrail
-        test_outputs = [
-            "I'd be happy to help you with that!",
-            "You're an idiot and I hate you!",  # Should trigger moderation policy
-            "Here's the information you requested.",
-        ]
-
-        print("\nTesting output guardrails:")
-        for test_output in test_outputs:
-            result = await dome.async_guard_output(test_output)
-            print(f"\nOutput: '{test_output[:50]}...'")
-            print(f"Flagged: {result.flagged}")
-            if result.flagged:
-                print(f"Response: {result.response_string}")
-
-    except Exception as e:
-        print(f"Error: {e}")
-        import traceback
-        traceback.print_exc()
-
-
-async def example_manual_steps():
-    """Example 3: Manual steps - load, build config, create Dome"""
-    print("\n" + "="*60)
-    print("Example 3: Manual Steps")
-    print("="*60)
-
-    if not os.getenv("NEBIUS_API_KEY"):
-        print("WARNING: NEBIUS_API_KEY not set.")
-        return
-
-    try:
-        # Step 1: Load policy sections from S3
-        print("Step 1: Loading policy sections from S3...")
-        policy_data = load_policy_sections_from_s3(
-            bucket="my-policy-bucket",
-            key="teams/550e8400-e29b-41d4-a716-446655440000/policies/123e4567-e89b-12d3-a456-426614174000/sections.json"
-        )
-        print(f"✓ Loaded {len(policy_data['sections'])} sections")
-        print(f"  Policy: {policy_data.get('policy_name', 'Unknown')}")
-        print(f"  Policy ID: {policy_data.get('policy_id', 'Unknown')}")
-
-        # Step 2: Build Dome config
-        print("\nStep 2: Building Dome config...")
-        config = build_dome_config_from_sections(
-            policy_data,
-            model_name="openai/gpt-oss-120b",
-            reasoning_effort="medium"
-        )
-        print(f"✓ Config built")
-        print(f"  Input guards: {len(config.get('input-guards', []))}")
-        print(f"  Output guards: {len(config.get('output-guards', []))}")
-
-        # Step 3: Create Dome instance
-        print("\nStep 3: Creating Dome instance...")
         dome = Dome(config)
-        print("✓ Dome instance created")
+        print("✓ Dome instance created with max_parallel_sections=5")
+        print("  This limits concurrent LLM calls to avoid rate limits")
+        print("  Sections will be processed in batches of 5")
 
-        # Step 4: Use guardrails
-        print("\nStep 4: Testing guardrails...")
         result = await dome.async_guard_input("Test query")
-        print(f"✓ Test completed - Flagged: {result.flagged}")
+        print(f"\nTest completed - Flagged: {result.flagged}")
 
     except Exception as e:
         print(f"Error: {e}")
@@ -184,9 +162,9 @@ async def example_manual_steps():
 
 
 async def example_local_file():
-    """Example 4: Loading from local file (for testing/development)"""
+    """Example 3: Loading from local file (for testing/development)"""
     print("\n" + "="*60)
-    print("Example 4: Loading from Local File")
+    print("Example 3: Loading from Local File")
     print("="*60)
 
     if not os.getenv("NEBIUS_API_KEY"):
@@ -194,59 +172,37 @@ async def example_local_file():
         return
 
     try:
-        # Create a sample policy JSON file for testing
-        sample_policy = {
-            "version": "1.0",
-            "last_updated": "2025-01-15T10:30:00Z",
-            "etag": "test-etag",
-            "policy_id": "test-policy-123",
-            "policy_name": "Test Policy",
-            "source_file": "test_policy.pdf",
-            "sections": [
-                {
-                    "section_id": "test-section-1",
-                    "content": "# Test Policy\n\n## INSTRUCTIONS\nCheck if input contains test violations.\nReturn ONLY a single digit:\n- 0 = No violation\n- 1 = Violation detected\n\n## VIOLATES (1)\n- Contains word 'test-violation'\n\n## SAFE (0)\n- Normal queries\n\nContent: [INPUT]\nAnswer:",
-                    "applies_to": ["input"],
-                    "metadata": {
-                        "header": "Test Section",
-                        "level": 1,
-                        "order": 1
-                    }
-                }
-            ]
-        }
+        # Load sample sections file
+        sample_file = Path(__file__).parent.parent / "vijil_dome" / "detectors" / "policies" / "sample_policy_sections.json"
+        
+        if not sample_file.exists():
+            print(f"Sample file not found: {sample_file}")
+            return
 
-        import json
-        import tempfile
-        with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as f:
-            json.dump(sample_policy, f, indent=2)
-            temp_file = f.name
+        policy_data = load_policy_sections_from_file(str(sample_file))
+        print(f"✓ Loaded {len(policy_data['sections'])} sections from {sample_file}")
 
-        try:
-            # Load from local file
-            print(f"Loading from local file: {temp_file}")
-            policy_data = load_policy_sections_from_file(temp_file)
-            print(f"✓ Loaded {len(policy_data['sections'])} sections")
+        # Create config with direct sections
+        # Note: PolicySectionsDetector accepts policy_sections directly
+        # For this example, we'll use the config builder approach
+        from vijil_dome.utils.policy_config_builder import build_dome_config_from_sections
 
-            # Build config and create Dome
-            config = build_dome_config_from_sections(
-                policy_data,
-                model_name="openai/gpt-oss-120b",
-                reasoning_effort="medium"
-            )
-            dome = Dome(config)
+        config = build_dome_config_from_sections(
+            policy_data,
+            model_name="openai/gpt-oss-120b",
+            reasoning_effort="medium"
+        )
 
-            # Test
-            result = await dome.async_guard_input("This is a test-violation query")
-            print(f"\nTest result:")
-            print(f"  Input: 'This is a test-violation query'")
-            print(f"  Flagged: {result.flagged}")
-            if result.flagged:
-                print(f"  Response: {result.response_string}")
+        dome = Dome(config)
+        print("✓ Dome instance created")
 
-        finally:
-            # Cleanup
-            os.unlink(temp_file)
+        # Test
+        result = await dome.async_guard_input("This is a test-violation query")
+        print(f"\nTest result:")
+        print(f"  Input: 'This is a test-violation query'")
+        print(f"  Flagged: {result.flagged}")
+        if result.flagged:
+            print(f"  Response: {result.response_string}")
 
     except Exception as e:
         print(f"Error: {e}")
@@ -254,10 +210,10 @@ async def example_local_file():
         traceback.print_exc()
 
 
-async def example_cache_behavior():
-    """Example 5: Demonstrating cache behavior"""
+async def example_s3_auth():
+    """Example 4: Using S3 authentication parameters"""
     print("\n" + "="*60)
-    print("Example 5: Cache Behavior")
+    print("Example 4: S3 Authentication Parameters")
     print("="*60)
 
     if not os.getenv("NEBIUS_API_KEY"):
@@ -265,24 +221,31 @@ async def example_cache_behavior():
         return
 
     try:
-        bucket = "my-policy-bucket"
-        key = "teams/550e8400-e29b-41d4-a716-446655440000/policies/123e4567-e89b-12d3-a456-426614174000/sections.json"
+        # Config with explicit S3 auth params
+        config = {
+            "input-guards": ["policy-input"],
+            "policy-input": {
+                "type": "policy",
+                "method": "policy-sections",
+                "policy_s3_bucket": "my-policy-bucket",
+                "policy_s3_key": "teams/team-123/policies/policy-456/sections.json",
+                "applies_to": "input",
+                "model_name": "openai/gpt-oss-120b",
+                "reasoning_effort": "medium",
+                "hub_name": "nebius",
+                # S3 auth params
+                "aws_access_key_id": os.getenv("AWS_ACCESS_KEY_ID"),
+                "aws_secret_access_key": os.getenv("AWS_SECRET_ACCESS_KEY"),
+                "region_name": os.getenv("AWS_REGION", "us-east-1"),
+            }
+        }
 
-        print("First load (will download from S3):")
-        import time
-        start = time.time()
-        policy_data1 = load_policy_sections_from_s3(bucket, key)
-        elapsed1 = time.time() - start
-        print(f"  Time: {elapsed1:.2f}s")
-        print(f"  Sections: {len(policy_data1['sections'])}")
+        dome = Dome(config)
+        print("✓ Dome instance created with explicit S3 credentials")
+        print("  Note: If not provided, boto3 uses default credentials")
 
-        print("\nSecond load (should use cache):")
-        start = time.time()
-        policy_data2 = load_policy_sections_from_s3(bucket, key)
-        elapsed2 = time.time() - start
-        print(f"  Time: {elapsed2:.2f}s")
-        print(f"  Sections: {len(policy_data2['sections'])}")
-        print(f"  Cache speedup: {elapsed1/elapsed2:.1f}x faster")
+        result = await dome.async_guard_input("Test query")
+        print(f"\nTest completed - Flagged: {result.flagged}")
 
     except Exception as e:
         print(f"Error: {e}")
@@ -293,24 +256,22 @@ async def example_cache_behavior():
 async def main():
     """Run all examples"""
     print("\n" + "="*60)
-    print("Policy Sections from S3 Integration Examples")
+    print("Policy Sections Detector Examples")
     print("="*60)
 
-    # Note: These examples require actual S3 access and API keys
-    # Uncomment the examples you want to run:
-
-    # await example_convenience_method_by_ids()
-    # await example_convenience_method_full_path()
-    # await example_manual_steps()
+    # Run examples (uncomment to run)
+    # await example_s3_config()
+    # await example_rate_limiting()
     # await example_local_file()
-    # await example_cache_behavior()
+    # await example_s3_auth()
 
     print("\n" + "="*60)
     print("Note: Examples are commented out. Uncomment to run.")
     print("Make sure to:")
     print("  1. Set NEBIUS_API_KEY environment variable")
     print("  2. Configure AWS credentials")
-    print("  3. Update bucket/team_id/policy_id values")
+    print("  3. Update bucket/team_id/policy_id values in examples")
+    print("  4. See vijil_dome/detectors/policies/sample_policy_sections.json for format")
     print("="*60)
 
 

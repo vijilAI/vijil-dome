@@ -31,6 +31,7 @@ __all__ = [
     "secret_detector",
     "encoding_heuristics",
     "gpt_oss_safeguard_policy",
+    "policy_sections_detector",
 ]
 
 try:
