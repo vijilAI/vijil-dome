@@ -15,7 +15,8 @@
 # vijil and vijil-dome are trademarks owned by Vijil Inc.
 
 import logging
-from typing import Optional
+from functools import wraps
+from typing import Any, Optional
 from opentelemetry.sdk.trace import Tracer
 from opentelemetry.metrics import Meter
 from opentelemetry.instrumentation.logging import LoggingInstrumentor
@@ -24,6 +25,8 @@ from vijil_dome.guardrails.instrumentation.instrumentation import (
     instrument_with_tracer,
 )
 from vijil_dome import Dome
+from vijil_dome.guardrails import Guardrail, GuardrailResult
+from vijil_dome.integrations.vijil.telemetry import _set_darwin_span_attributes
 import socket
 
 
@@ -58,6 +61,70 @@ def instrument_logger(logger: logging.Logger):
         handler.setFormatter(formatter)
 
 
+def _add_darwin_detection_spans(
+    guardrail: Guardrail,
+    tracer: Tracer,
+    guardrail_name: str,
+) -> None:
+    """Wrap guardrail scan methods to emit Darwin-compatible detection spans.
+
+    Creates 'dome-detection' spans with structured attributes that Darwin's
+    TelemetryDetectionAdapter can query from Tempo traces.
+
+    Attributes set on each span:
+        - dome.guardrail: guardrail name (e.g., "dome-input", "dome-output")
+        - detection.label: "flagged" or "clean"
+        - detection.score: max detection score (0.0-1.0)
+        - detection.method: name of the triggered guard/detector
+        - team.id: team context (from kwargs)
+        - agent.id: agent context (from kwargs)
+
+    Args:
+        guardrail: The Guardrail instance to wrap.
+        tracer: OTEL tracer for span creation.
+        guardrail_name: Name prefix (e.g., "dome-input", "dome-output").
+    """
+    original_scan = guardrail.scan
+    original_async_scan = guardrail.async_scan
+
+    @wraps(original_scan)
+    def scan_with_darwin_spans(*args: Any, **kwargs: Any) -> Any:
+        # Extract team_id before passing to original scan (which doesn't accept it)
+        team_id = kwargs.pop("team_id", None)
+        agent_id = kwargs.get("agent_id")
+        with tracer.start_as_current_span("dome-detection") as span:
+            span.set_attribute("dome.guardrail", guardrail_name)
+            result = original_scan(*args, **kwargs)
+            if isinstance(result, GuardrailResult):
+                _set_darwin_span_attributes(
+                    span,
+                    result,
+                    agent_id=agent_id,
+                    team_id=team_id,
+                )
+            return result
+
+    @wraps(original_async_scan)
+    async def async_scan_with_darwin_spans(*args: Any, **kwargs: Any) -> Any:
+        # Extract team_id before passing to original scan (which doesn't accept it)
+        team_id = kwargs.pop("team_id", None)
+        agent_id = kwargs.get("agent_id")
+        with tracer.start_as_current_span("dome-detection") as span:
+            span.set_attribute("dome.guardrail", guardrail_name)
+            result = await original_async_scan(*args, **kwargs)
+            if isinstance(result, GuardrailResult):
+                _set_darwin_span_attributes(
+                    span,
+                    result,
+                    agent_id=agent_id,
+                    team_id=team_id,
+                )
+            return result
+
+    guardrail.scan = scan_with_darwin_spans  # type: ignore[method-assign]
+    guardrail.async_scan = async_scan_with_darwin_spans  # type: ignore[method-assign]
+
+
 def instrument_dome(
     dome: Dome,
     handler: Optional[logging.Handler],
@@ -73,7 +140,7 @@ def instrument_dome(
         logger.addHandler(handler)
         instrument_logger(logger)
 
-    # Add tracer
+    # Add tracer for detailed per-guard/per-detector spans
     if tracer:
         if dome.input_guardrail is not None:
             instrument_with_tracer(dome.input_guardrail, tracer, "Dome-Input-Guardrail")
@@ -83,8 +150,17 @@ def instrument_dome(
             )
 
     if meter:
-        # add monitors
+        # Add split metrics (dome-input-*, dome-output-*)
         if dome.input_guardrail is not None:
             instrument_with_monitors(dome.input_guardrail, meter, "dome-input")
         if dome.output_guardrail is not None:
             instrument_with_monitors(dome.output_guardrail, meter, "dome-output")
+
+    # Add Darwin-compatible detection spans at the guardrail level.
+    # These must be added AFTER monitors and tracer so the "dome-detection"
+    # span wraps the full scan chain (metrics + generic traces + original scan).
+    if tracer:
+        if dome.input_guardrail is not None:
+            _add_darwin_detection_spans(dome.input_guardrail, tracer, "dome-input")
+        if dome.output_guardrail is not None:
+            _add_darwin_detection_spans(dome.output_guardrail, tracer, "dome-output")
