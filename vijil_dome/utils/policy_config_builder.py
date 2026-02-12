@@ -163,11 +163,12 @@ def _build_guard_config(
         guard_config["methods"].append(config_key)
 
         # Build detector config
+        # Filter out metadata fields that shouldn't be passed to detector constructors
+        # These are used for tracking/logging but aren't detector parameters
         detector_config: Dict[str, Any] = {
             # Specify the actual detector method name
             "method": POLICY_GPT_OSS_SAFEGUARD_METHOD,
             "policy_content": section["content"],
-            "section_id": section_id,
             "model_name": model_name,
             "reasoning_effort": reasoning_effort,
             "hub_name": hub_name,
@@ -181,13 +182,8 @@ def _build_guard_config(
         if api_key is not None:
             detector_config["api_key"] = api_key
 
-        # Add section metadata if available
-        if "metadata" in section and isinstance(section["metadata"], dict):
-            metadata = section["metadata"]
-            if "header" in metadata:
-                detector_config["header"] = metadata["header"]
-        if policy_id:
-            detector_config["policy_id"] = policy_id
+        # Note: section_id, header, and policy_id are metadata fields that are
+        # filtered out here. They are not passed to PolicyGptOssSafeguard constructor.
 
         # Store config with unique key
         guard_config[config_key] = detector_config
