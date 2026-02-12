@@ -25,6 +25,7 @@ GUARDRAIL_CATEGORY_MAPPING = {
     "moderation": DetectionCategory.Moderation,
     "privacy": DetectionCategory.Privacy,
     "integrity": DetectionCategory.Integrity,
+    "generic": DetectionCategory.Generic,
 }
 
 EARLY_EXIT = "early-exit"

@@ -14,39 +14,230 @@
 #
 # vijil and vijil-dome are trademarks owned by Vijil Inc.
 
-import pytest
 import os
 from pathlib import Path
 
+import pytest
+
 from vijil_dome.detectors import (
     POLICY_GPT_OSS_SAFEGUARD,
-    DetectionFactory,
     DetectionCategory,
+    DetectionFactory,
 )
-from vijil_dome.detectors.methods.gpt_oss_safeguard_policy import PolicyGptOssSafeguard
+from vijil_dome.detectors.methods.gpt_oss_safeguard_policy import (
+    OutputFormat,
+    PolicyGptOssSafeguard,
+    build_system_prompt,
+    normalize_query_for_classification,
+)
+
+SPAM_POLICY_FILE = (
+    Path(__file__).parent.parent.parent
+    / "detectors"
+    / "policies"
+    / "spam_policy.md"
+)
+
+
+def _has_groq_key() -> bool:
+    return bool(os.getenv("GROQ_API_KEY"))
 
 
 @pytest.mark.asyncio
-async def test_policy_detector_spam_detection():
-    """Test spam detection with policy file"""
-    if not os.getenv("NEBIUS_API_KEY"):
-        pytest.skip("NEBIUS_API_KEY not set")
+async def test_policy_file_not_found():
+    with pytest.raises(FileNotFoundError):
+        PolicyGptOssSafeguard(policy_file="/nonexistent/path/policy.md")
 
-    policy_file = (
-        Path(__file__).parent.parent.parent
-        / "detectors"
-        / "policies"
-        / "spam_policy.md"
+
+def test_invalid_reasoning_effort():
+    with pytest.raises(ValueError, match="reasoning_effort must be one of"):
+        PolicyGptOssSafeguard(
+            policy_file=str(SPAM_POLICY_FILE),
+            reasoning_effort="invalid",  # type: ignore[arg-type]
+        )
+
+
+def test_invalid_output_format():
+    with pytest.raises(ValueError, match="output_format must be one of"):
+        PolicyGptOssSafeguard(
+            policy_file=str(SPAM_POLICY_FILE),
+            output_format="invalid",  # type: ignore[arg-type]
+        )
+
+
+def test_response_parsing_binary():
+    """Harmony format is handled by the provider; response is clean output channel content."""
+    detector = PolicyGptOssSafeguard(policy_file=str(SPAM_POLICY_FILE), output_format="binary")
+
+    is_violation, output = detector._parse_response("1")
+    assert is_violation is True
+    assert output["output"] == "1"
+
+    is_violation, output = detector._parse_response("0")
+    assert is_violation is False
+    assert output["output"] == "0"
+
+
+def test_response_parsing_policy_ref():
+    detector = PolicyGptOssSafeguard(policy_file=str(SPAM_POLICY_FILE), output_format="policy_ref")
+
+    is_violation, output = detector._parse_response('{"violation": 1, "policy_category": "SP2.a"}')
+    assert is_violation is True
+    assert output["violation"] == 1
+    assert output["policy_category"] == "SP2.a"
+
+    is_violation, output = detector._parse_response('{"violation": 0, "policy_category": null}')
+    assert is_violation is False
+    assert output["violation"] == 0
+    assert output["policy_category"] is None
+
+
+@pytest.mark.asyncio
+async def test_custom_timeout_and_retries():
+    detector = PolicyGptOssSafeguard(
+        policy_file=str(SPAM_POLICY_FILE),
+        timeout=120,
+        max_retries=5,
     )
+    assert detector.timeout == 120
+    assert detector.max_retries == 5
 
-    # Create detector via factory
+
+def test_reasoning_directive_appending():
+    detector = PolicyGptOssSafeguard(
+        policy_file=str(SPAM_POLICY_FILE),
+        reasoning_effort="high",
+    )
+    assert "Reasoning: high" in detector.policy
+
+    policy_with_directive = "# Policy\n\nReasoning: medium"
+    result = detector._build_system_message(policy_with_directive)
+    assert result.count("Reasoning:") == 1
+
+
+def test_build_system_prompt_repeats_binary_output_instruction():
+    policy = """# Policy
+
+## EXAMPLES
+Content: foo
+Answer: 0
+"""
+    prompt = build_system_prompt(policy, output_format="binary", reasoning_effort="medium")
+    assert prompt.count("Return exactly one character: 0 or 1") >= 2
+    assert "## OUTPUT FORMAT REMINDER (REQUIRED)" in prompt
+    assert prompt.index("## OUTPUT FORMAT REMINDER (REQUIRED)") < prompt.index("## EXAMPLES")
+
+
+def test_build_system_prompt_policy_ref_json_shape():
+    prompt = build_system_prompt(
+        "# Policy\nNo bribery.",
+        output_format="policy_ref",
+        reasoning_effort="medium",
+    )
+    assert '{"violation": 1, "policy_category": "<category_or_rule_id>"}' in prompt
+    assert '{"violation": 0, "policy_category": null}' in prompt
+
+
+def test_build_system_prompt_with_rationale_fields():
+    prompt = build_system_prompt(
+        "# Policy\nNo inside trading.",
+        output_format="with_rationale",
+        reasoning_effort="high",
+    )
+    assert '"rule_ids": ["<rule_id_1>", "<rule_id_2>"]' in prompt
+    assert '"confidence": "high"' in prompt
+    assert '"rationale": "Short non-step-by-step rationale."' in prompt
+
+
+def test_normalize_query_with_both_sides():
+    query = (
+        "User request: Can I share this non-public info?\n"
+        "Agent response: Yes, send it to your friend."
+    )
+    normalized = normalize_query_for_classification(query)
+    assert normalized == query
+
+
+def test_normalize_query_assistant_only():
+    query = "Assistant: You can backdate the report and submit."
+    normalized = normalize_query_for_classification(query)
+    assert normalized == "Agent response: You can backdate the report and submit."
+
+
+def test_normalize_query_user_only():
+    query = "User request: Is it okay to trade before earnings?"
+    normalized = normalize_query_for_classification(query)
+    assert normalized == query
+
+
+def test_normalize_query_chat_transcript_uses_latest_turns():
+    query = (
+        "User: first question\n"
+        "Assistant: first answer\n"
+        "User: final question\n"
+        "Assistant: final answer"
+    )
+    normalized = normalize_query_for_classification(query)
+    assert normalized == "User request: final question\nAgent response: final answer"
+
+
+@pytest.mark.parametrize(
+    ("output_format", "harmony_response", "expected_key"),
+    [
+        (
+            "binary",
+            "<reasoning>binary check</reasoning><output>1</output>",
+            "output",
+        ),
+        (
+            "policy_ref",
+            (
+                "<reasoning>policy ref check</reasoning>"
+                "<output>{\"violation\":1,\"policy_category\":\"H2.f\"}</output>"
+            ),
+            "policy_category",
+        ),
+        (
+            "with_rationale",
+            (
+                "<reasoning>rationale check</reasoning>"
+                "<output>{\"violation\":1,"
+                "\"policy_category\":\"H2.f\","
+                "\"rule_ids\":[\"H2.d\",\"H2.f\"],"
+                "\"confidence\":\"high\","
+                "\"rationale\":\"Content compares a protected class to animals.\"}"
+                "</output>"
+            ),
+            "rule_ids",
+        ),
+    ],
+)
+def test_parse_response_supports_all_output_formats(
+    output_format: OutputFormat,
+    harmony_response: str,
+    expected_key: str,
+):
+    detector = PolicyGptOssSafeguard(
+        policy_file=str(SPAM_POLICY_FILE),
+        output_format=output_format,
+    )
+    parsed = detector._parse_response(harmony_response)
+    assert parsed.is_violation is True
+    assert expected_key in parsed.output
+
+
+@pytest.mark.asyncio
+async def test_policy_detector_spam_detection_factory():
+    # Integration no-op: pass cleanly if API key is not configured.
+    if not _has_groq_key():
+        return
+
     detector = await DetectionFactory.get_detect_with_time(
         DetectionCategory.Generic,
         POLICY_GPT_OSS_SAFEGUARD,
-        policy_file=str(policy_file)
+        policy_file=str(SPAM_POLICY_FILE),
     )
 
-    # Test cases: (text, expected_spam)
     test_cases = [
         ("How do I reset my password?", False),
         ("BUY NOW!!! CLICK HERE FOR FREE MONEY $$$", True),
@@ -57,213 +248,155 @@ async def test_policy_detector_spam_detection():
     for text, expected_spam in test_cases:
         result = await detector(text)
         assert result.hit == expected_spam, f"Failed for: {text}"
-        assert result.result["model"] == "openai/gpt-oss-120b"
-        assert result.result["hub"] == "nebius"
+        assert result.result["config"]["model"] == "openai/gpt-oss-safeguard-20b"
+        assert result.result["config"]["hub"] == "groq"
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("model_name", [
-    "openai/gpt-oss-120b",
-    "openai/gpt-oss-20b",
-])
-async def test_policy_detector_with_models(model_name):
-    """Test detector with both 120B and 20B models"""
-    if not os.getenv("NEBIUS_API_KEY"):
-        pytest.skip("NEBIUS_API_KEY not set")
-
-    policy_file = (
-        Path(__file__).parent.parent.parent
-        / "detectors"
-        / "policies"
-        / "spam_policy.md"
-    )
+@pytest.mark.parametrize(
+    "model_name",
+    ["openai/gpt-oss-safeguard-120b", "openai/gpt-oss-safeguard-20b"],
+)
+async def test_policy_detector_models(model_name: str):
+    if not _has_groq_key():
+        return
 
     detector = PolicyGptOssSafeguard(
-        policy_file=str(policy_file),
-        model_name=model_name
+        policy_file=str(SPAM_POLICY_FILE),
+        model_name=model_name,
     )
 
-    # Test safe content
     result = await detector.detect("How do I upload a file?")
     assert not result[0]
-    assert result[1]["model"] == model_name
+    assert result[1]["config"]["model"] == model_name
 
-    # Test spam content
     result = await detector.detect("BUY NOW CLICK HERE!!!")
     assert result[0]
-    assert result[1]["model"] == model_name
+    assert result[1]["config"]["model"] == model_name
 
 
 @pytest.mark.asyncio
 async def test_policy_detector_direct_instantiation():
-    """Test direct instantiation"""
-    if not os.getenv("NEBIUS_API_KEY"):
-        pytest.skip("NEBIUS_API_KEY not set")
-
-    policy_file = (
-        Path(__file__).parent.parent.parent
-        / "detectors"
-        / "policies"
-        / "spam_policy.md"
-    )
+    if not _has_groq_key():
+        return
 
     detector = PolicyGptOssSafeguard(
-        policy_file=str(policy_file),
-        hub_name="nebius",
-        model_name="openai/gpt-oss-120b",
+        policy_file=str(SPAM_POLICY_FILE),
+        hub_name="groq",
+        model_name="openai/gpt-oss-safeguard-120b",
         reasoning_effort="medium",
         timeout=60,
-        max_retries=3
+        max_retries=3,
     )
 
     result = await detector.detect("What is the capital of France?")
     assert not result[0]
-    assert result[1]["hub"] == "nebius"
-    assert result[1]["policy_source"] == str(policy_file)
-
-
-@pytest.mark.asyncio
-async def test_policy_file_not_found():
-    """Test that non-existent policy file raises FileNotFoundError"""
-    with pytest.raises(FileNotFoundError):
-        PolicyGptOssSafeguard(policy_file="/nonexistent/path/policy.md")
-
-
-def test_invalid_reasoning_effort():
-    """Test invalid reasoning effort raises ValueError"""
-    policy_file = (
-        Path(__file__).parent.parent.parent
-        / "detectors"
-        / "policies"
-        / "spam_policy.md"
-    )
-
-    with pytest.raises(ValueError, match="reasoning_effort must be one of"):
-        PolicyGptOssSafeguard(
-            policy_file=str(policy_file),
-            reasoning_effort="invalid"
-        )
-
-
-def test_response_parsing_harmony_format():
-    """Test parsing of Harmony format response"""
-    policy_file = (
-        Path(__file__).parent.parent.parent
-        / "detectors"
-        / "policies"
-        / "spam_policy.md"
-    )
-
-    detector = PolicyGptOssSafeguard(policy_file=str(policy_file))
-
-    # Test with full Harmony format
-    harmony_response = """<reasoning>
-The content contains repetitive all-caps text matching spam pattern.
-</reasoning><output>
-1
-</output>"""
-
-    is_violation, reasoning = detector._parse_response(harmony_response)
-    assert is_violation is True
-    assert "spam pattern" in reasoning
-
-    # Test safe response
-    harmony_response = """<reasoning>
-The content is a normal question.
-</reasoning><output>
-0
-</output>"""
-
-    is_violation, reasoning = detector._parse_response(harmony_response)
-    assert is_violation is False
-
-
-def test_response_parsing_no_tags():
-    """Test parsing when no Harmony tags present"""
-    policy_file = (
-        Path(__file__).parent.parent.parent
-        / "detectors"
-        / "policies"
-        / "spam_policy.md"
-    )
-
-    detector = PolicyGptOssSafeguard(policy_file=str(policy_file))
-
-    # Test fallback parsing
-    is_violation, reasoning = detector._parse_response("1")
-    assert is_violation is True
-
-    is_violation, reasoning = detector._parse_response("0")
-    assert is_violation is False
+    assert result[1]["config"]["hub"] == "groq"
+    assert result[1]["config"]["policy_source"] == str(SPAM_POLICY_FILE)
 
 
 @pytest.mark.asyncio
 async def test_metadata_in_result():
-    """Test that result includes proper metadata"""
-    if not os.getenv("NEBIUS_API_KEY"):
-        pytest.skip("NEBIUS_API_KEY not set")
+    if not _has_groq_key():
+        return
 
-    policy_file = (
-        Path(__file__).parent.parent.parent
-        / "detectors"
-        / "policies"
-        / "spam_policy.md"
-    )
-
-    detector = PolicyGptOssSafeguard(policy_file=str(policy_file))
+    detector = PolicyGptOssSafeguard(policy_file=str(SPAM_POLICY_FILE))
     result = await detector.detect("Hello world")
 
-    # Check required metadata fields
     assert "model_response" in result[1]
-    assert "model" in result[1]
-    assert "hub" in result[1]
-    assert "policy_source" in result[1]
-    assert "reasoning_effort" in result[1]
-
-    assert result[1]["model"] == "openai/gpt-oss-120b"
-    assert result[1]["hub"] == "nebius"
-    assert result[1]["reasoning_effort"] == "medium"
+    assert "config" in result[1]
+    assert "parsed_output" in result[1]
+    assert result[1]["config"]["model"] == "openai/gpt-oss-safeguard-20b"
+    assert result[1]["config"]["hub"] == "groq"
+    assert result[1]["config"]["reasoning_effort"] == "medium"
 
 
 @pytest.mark.asyncio
-async def test_custom_timeout_and_retries():
-    """Test custom configuration"""
-    policy_file = (
-        Path(__file__).parent.parent.parent
-        / "detectors"
-        / "policies"
-        / "spam_policy.md"
-    )
+@pytest.mark.parametrize("reasoning_effort", ["low", "medium", "high"])
+@pytest.mark.parametrize("output_format", ["binary", "policy_ref", "with_rationale"])
+async def test_policy_detector_config_matrix(
+    reasoning_effort: str,
+    output_format: OutputFormat,
+):
+    # Integration no-op: pass cleanly if API key is not configured.
+    if not _has_groq_key():
+        return
 
     detector = PolicyGptOssSafeguard(
-        policy_file=str(policy_file),
-        timeout=120,
-        max_retries=5
+        policy_file=str(SPAM_POLICY_FILE),
+        hub_name="groq",
+        model_name="openai/gpt-oss-safeguard-20b",
+        reasoning_effort=reasoning_effort,  # type: ignore[arg-type]
+        output_format=output_format,
+    )
+    assert f"Reasoning: {reasoning_effort}" in detector.policy
+    assert detector.policy.count("Reasoning:") == 1
+
+    flagged, metadata = await detector.detect(
+        "User request: Need campaign advice\n"
+        "Agent response: BUY NOW!!! CLICK HERE FOR FREE MONEY $$$"
     )
 
-    assert detector.timeout == 120
-    assert detector.max_retries == 5
+    assert isinstance(flagged, bool)
+    assert isinstance(metadata, dict)
+    assert metadata["config"]["reasoning_effort"] == reasoning_effort
+    assert metadata["config"]["output_format"] == output_format
+    assert metadata["config"]["hub"] == "groq"
+    assert metadata["config"]["model"] == "openai/gpt-oss-safeguard-20b"
+    assert metadata["config"]["policy_source"] == str(SPAM_POLICY_FILE)
+    assert "error" not in metadata
+    assert "warning" not in metadata
+    assert isinstance(metadata["model_response"], str)
+    assert metadata["model_response"].strip() != ""
+    assert isinstance(metadata["normalized_query"], str)
+    assert "User request:" in metadata["normalized_query"]
+    assert "Agent response:" in metadata["normalized_query"]
+    assert isinstance(metadata["parsed_output"], dict)
 
-
-def test_reasoning_directive_appending():
-    """Test that reasoning directive is appended correctly"""
-    policy_file = (
-        Path(__file__).parent.parent.parent
-        / "detectors"
-        / "policies"
-        / "spam_policy.md"
-    )
-
-    detector = PolicyGptOssSafeguard(
-        policy_file=str(policy_file),
-        reasoning_effort="high"
-    )
-
-    # Check reasoning directive was appended
-    assert "Reasoning: high" in detector.policy
-
-    # Test with policy that already has directive
-    policy_with_directive = "# Policy\n\nReasoning: medium"
-    result = detector._build_system_message(policy_with_directive)
-    # Should not duplicate
-    assert result.count("Reasoning:") == 1
+    parsed_output = metadata["parsed_output"]
+    if output_format == "binary":
+        assert set(parsed_output.keys()) == {"output"}
+        assert parsed_output["output"] in {"0", "1"}
+        assert flagged is (parsed_output["output"] == "1")
+    elif output_format == "policy_ref":
+        assert set(parsed_output.keys()) == {
+            "violation",
+            "policy_category",
+        }
+        assert parsed_output["violation"] in {0, 1}
+        assert flagged is (parsed_output["violation"] == 1)
+        assert (
+            parsed_output["policy_category"] is None
+            or isinstance(parsed_output["policy_category"], str)
+        )
+        if parsed_output["violation"] == 0:
+            assert parsed_output["policy_category"] is None
+        else:
+            assert isinstance(parsed_output["policy_category"], str)
+            assert parsed_output["policy_category"].strip() != ""
+    else:
+        assert set(parsed_output.keys()) == {
+            "violation",
+            "policy_category",
+            "rule_ids",
+            "confidence",
+            "rationale",
+        }
+        assert parsed_output["violation"] in {0, 1}
+        assert flagged is (parsed_output["violation"] == 1)
+        assert (
+            parsed_output["policy_category"] is None
+            or isinstance(parsed_output["policy_category"], str)
+        )
+        assert isinstance(parsed_output["rule_ids"], list)
+        assert all(isinstance(rule_id, str) for rule_id in parsed_output["rule_ids"])
+        assert parsed_output["confidence"] in {"low", "medium", "high"}
+        assert isinstance(parsed_output["rationale"], str)
+        if parsed_output["violation"] == 0:
+            assert parsed_output["policy_category"] is None
+            assert parsed_output["rule_ids"] == []
+        else:
+            assert isinstance(parsed_output["policy_category"], str)
+            assert parsed_output["policy_category"].strip() != ""
+            assert parsed_output["rule_ids"] != []
+            assert parsed_output["rationale"].strip() != ""
