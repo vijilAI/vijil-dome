@@ -6,13 +6,13 @@ This guide explains how to use `policy-gpt-oss-safeguard` as:
 2. A Dome guardrail method in standard config format (`type = "generic"`)
 
 Source implementation:
-- `/Users/dzen/Spaces/vjl/vijil-dome/vijil_dome/detectors/methods/gpt_oss_safeguard_policy.py`
+- `vijil_dome/detectors/methods/gpt_oss_safeguard_policy.py`
 
 Example script:
-- `/Users/dzen/Spaces/vjl/vijil-dome/vijil_dome/integrations/examples/gpt_oss_safeguard_example.py`
+- `vijil_dome/integrations/examples/gpt_oss_safeguard_example.py`
 
 Config example:
-- `/Users/dzen/Spaces/vjl/vijil-dome/examples/gpt_oss_safeguard_guardrail.toml`
+- `examples/gpt_oss_safeguard_guardrail.toml`
 
 ## Prerequisites
 
@@ -84,7 +84,7 @@ result = await dome.async_guard_input("User request: ...\nAgent response: ...")
 ## Dome Config Pattern (TOML)
 
 Use:
-- `/Users/dzen/Spaces/vjl/vijil-dome/examples/gpt_oss_safeguard_guardrail.toml`
+- `examples/gpt_oss_safeguard_guardrail.toml`
 
 ```python
 from vijil_dome import Dome
@@ -122,7 +122,7 @@ Example output:
 ## Test Coverage
 
 Policy safeguard tests:
-- `/Users/dzen/Spaces/vjl/vijil-dome/vijil_dome/tests/detectors/test_gpt_oss_sg_policy.py`
+- `vijil_dome/tests/detectors/test_gpt_oss_sg_policy.py`
 
 Includes:
 1. 3x3 integration matrix: 3 reasoning levels x 3 output formats

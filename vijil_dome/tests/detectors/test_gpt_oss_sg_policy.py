@@ -65,35 +65,31 @@ def test_invalid_output_format():
         )
 
 
-def test_response_parsing_harmony_format():
-    detector = PolicyGptOssSafeguard(policy_file=str(SPAM_POLICY_FILE))
+def test_response_parsing_binary():
+    """Harmony format is handled by the provider; response is clean output channel content."""
+    detector = PolicyGptOssSafeguard(policy_file=str(SPAM_POLICY_FILE), output_format="binary")
 
-    harmony_response = """<reasoning>
-The content contains repetitive all-caps text matching spam pattern.
-</reasoning><output>
-1
-</output>"""
-
-    is_violation, reasoning = detector._parse_response(harmony_response)
+    is_violation, output = detector._parse_response("1")
     assert is_violation is True
-    assert "spam pattern" in reasoning
+    assert output["output"] == "1"
 
-    harmony_response = """<reasoning>
-The content is a normal question.
-</reasoning><output>
-0
-</output>"""
-
-    is_violation, _reasoning = detector._parse_response(harmony_response)
+    is_violation, output = detector._parse_response("0")
     assert is_violation is False
+    assert output["output"] == "0"
 
 
-def test_response_parsing_no_tags():
-    detector = PolicyGptOssSafeguard(policy_file=str(SPAM_POLICY_FILE))
-    is_violation, _reasoning = detector._parse_response("1")
+def test_response_parsing_policy_ref():
+    detector = PolicyGptOssSafeguard(policy_file=str(SPAM_POLICY_FILE), output_format="policy_ref")
+
+    is_violation, output = detector._parse_response('{"violation": 1, "policy_category": "SP2.a"}')
     assert is_violation is True
-    is_violation, _reasoning = detector._parse_response("0")
+    assert output["violation"] == 1
+    assert output["policy_category"] == "SP2.a"
+
+    is_violation, output = detector._parse_response('{"violation": 0, "policy_category": null}')
     assert is_violation is False
+    assert output["violation"] == 0
+    assert output["policy_category"] is None
 
 
 @pytest.mark.asyncio
@@ -359,19 +355,16 @@ async def test_policy_detector_config_matrix(
 
     parsed_output = metadata["parsed_output"]
     if output_format == "binary":
-        assert set(parsed_output.keys()) == {"output", "model_reasoning"}
+        assert set(parsed_output.keys()) == {"output"}
         assert parsed_output["output"] in {"0", "1"}
-        assert isinstance(parsed_output["model_reasoning"], str)
         assert flagged is (parsed_output["output"] == "1")
     elif output_format == "policy_ref":
         assert set(parsed_output.keys()) == {
             "violation",
             "policy_category",
-            "model_reasoning",
         }
         assert parsed_output["violation"] in {0, 1}
         assert flagged is (parsed_output["violation"] == 1)
-        assert isinstance(parsed_output["model_reasoning"], str)
         assert (
             parsed_output["policy_category"] is None
             or isinstance(parsed_output["policy_category"], str)
@@ -388,11 +381,9 @@ async def test_policy_detector_config_matrix(
             "rule_ids",
             "confidence",
             "rationale",
-            "model_reasoning",
         }
         assert parsed_output["violation"] in {0, 1}
         assert flagged is (parsed_output["violation"] == 1)
-        assert isinstance(parsed_output["model_reasoning"], str)
         assert (
             parsed_output["policy_category"] is None
             or isinstance(parsed_output["policy_category"], str)

@@ -41,9 +41,6 @@ POLICY_GPT_OSS_SAFEGUARD = "policy-gpt-oss-safeguard"
 OutputFormat = Literal["binary", "policy_ref", "with_rationale"]
 ReasoningEffort = Literal["low", "medium", "high"]
 
-REASONING_PATTERN = re.compile(r"<reasoning>(.*?)</reasoning>", re.DOTALL)
-OUTPUT_PATTERN = re.compile(r"<output>(.*?)</output>", re.DOTALL)
-
 CLASSIFIER_PREAMBLE = """## CRITICAL: YOU ARE A SAFETY CLASSIFIER, NOT AN ASSISTANT
 
 You may receive content in one of these formats:
@@ -112,19 +109,13 @@ Return ONLY JSON with: violation, policy_category, rule_ids, confidence, rationa
 @dataclass
 class ParsedResponse:
     is_violation: bool
-    reasoning: str
     output: Dict[str, Any]
     warning: Optional[str] = None
 
     def __iter__(self):
         # Backward-compatible unpacking used by existing tests/callers.
         yield self.is_violation
-        yield self.reasoning
-
-
-def extract_tag_content(text: str, pattern: re.Pattern[str]) -> str:
-    match = pattern.search(text)
-    return match.group(1).strip() if match else ""
+        yield self.output
 
 
 def parse_binary_output(output: str) -> tuple[bool, Optional[str]]:
@@ -440,27 +431,25 @@ class PolicyGptOssSafeguard(LlmBaseDetector):
         )
 
     def _parse_response(self, response_text: str) -> ParsedResponse:
-        reasoning = extract_tag_content(response_text, REASONING_PATTERN)
-        output_text = extract_tag_content(response_text, OUTPUT_PATTERN) or response_text.strip()
+        # Harmony format is handled by the inference provider (Groq, vLLM, etc.).
+        # The response text is already the output channel content — no tag parsing needed.
+        output_text = response_text.strip()
 
         if self.output_format == "binary":
             is_violation, warning = parse_binary_output(output_text)
-            output = {
+            output: Dict[str, Any] = {
                 "output": "1" if is_violation else "0",
-                "model_reasoning": reasoning,
             }
             if warning:
                 output["raw_output"] = output_text
         elif self.output_format == "policy_ref":
             is_violation, parsed_output, warning = parse_json_output(output_text)
             output = _canonicalize_policy_ref_output(parsed_output, is_violation)
-            output["model_reasoning"] = reasoning
         else:
             is_violation, parsed_output, warning = parse_json_output(output_text)
             output = _canonicalize_with_rationale_output(parsed_output, is_violation)
-            output["model_reasoning"] = reasoning
 
-        return ParsedResponse(is_violation, reasoning, output, warning)
+        return ParsedResponse(is_violation, output, warning)
 
     @property
     def config(self) -> Dict[str, Any]:
