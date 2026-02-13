@@ -8,6 +8,7 @@ from vijil_dome.integrations.strands.hooks import (
     DEFAULT_INPUT_BLOCKED_MESSAGE,
     DEFAULT_OUTPUT_BLOCKED_MESSAGE,
     _extract_last_user_text,
+    _extract_response_text,
 )
 
 
@@ -144,3 +145,113 @@ class TestInputGuarding:
         await provider._guard_input(event)
 
         assert event.agent.messages[0]["content"] == [{"text": custom_msg}]
+
+
+# ---------------------------------------------------------------------------
+# _extract_response_text
+# ---------------------------------------------------------------------------
+
+class TestExtractResponseText:
+    def test_extracts_text_from_response(self):
+        message = {"role": "assistant", "content": [{"text": "response text"}]}
+        assert _extract_response_text(message) == "response text"
+
+    def test_returns_none_for_no_text_blocks(self):
+        message = {"role": "assistant", "content": [{"toolUse": {"name": "search"}}]}
+        assert _extract_response_text(message) is None
+
+    def test_concatenates_multiple_text_blocks(self):
+        message = {
+            "role": "assistant",
+            "content": [{"text": "hello"}, {"text": "world"}],
+        }
+        assert _extract_response_text(message) == "hello world"
+
+
+# ---------------------------------------------------------------------------
+# Helpers for output guarding
+# ---------------------------------------------------------------------------
+
+def _make_after_event(response_text: str | None):
+    """Build an AfterModelCallEvent-shaped object."""
+    event = MagicMock()
+    event.agent = _make_agent([])
+    if response_text is not None:
+        event.stop_response = MagicMock()
+        event.stop_response.message = _make_message("assistant", response_text)
+    else:
+        event.stop_response = None
+    return event
+
+
+# ---------------------------------------------------------------------------
+# Output guarding
+# ---------------------------------------------------------------------------
+
+class TestOutputGuarding:
+    @pytest.fixture
+    def dome_mock(self):
+        dome = MagicMock()
+        dome.async_guard_input = AsyncMock()
+        dome.async_guard_output = AsyncMock()
+        return dome
+
+    @pytest.mark.asyncio
+    async def test_flagged_output_replaces_response(self, dome_mock):
+        scan_result = MagicMock()
+        scan_result.flagged = True
+        dome_mock.async_guard_output.return_value = scan_result
+
+        provider = DomeHookProvider(dome_mock, agent_id="a1", team_id="t1")
+
+        event = _make_after_event("unsafe response")
+
+        await provider._guard_output(event)
+
+        # The response content should be replaced with blocked message
+        assert event.stop_response.message["content"] == [
+            {"text": DEFAULT_OUTPUT_BLOCKED_MESSAGE}
+        ]
+        dome_mock.async_guard_output.assert_called_once_with(
+            "unsafe response", agent_id="a1"
+        )
+
+    @pytest.mark.asyncio
+    async def test_clean_output_passes_through(self, dome_mock):
+        scan_result = MagicMock()
+        scan_result.flagged = False
+        dome_mock.async_guard_output.return_value = scan_result
+
+        provider = DomeHookProvider(dome_mock)
+
+        event = _make_after_event("safe response")
+
+        await provider._guard_output(event)
+
+        # Message unchanged
+        assert event.stop_response.message["content"] == [{"text": "safe response"}]
+
+    @pytest.mark.asyncio
+    async def test_no_stop_response_skips_scan(self, dome_mock):
+        provider = DomeHookProvider(dome_mock)
+
+        event = _make_after_event(None)
+
+        await provider._guard_output(event)
+
+        dome_mock.async_guard_output.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_custom_output_blocked_message(self, dome_mock):
+        scan_result = MagicMock()
+        scan_result.flagged = True
+        dome_mock.async_guard_output.return_value = scan_result
+
+        custom_msg = "Custom output block"
+        provider = DomeHookProvider(dome_mock, output_blocked_message=custom_msg)
+
+        event = _make_after_event("bad output")
+
+        await provider._guard_output(event)
+
+        assert event.stop_response.message["content"] == [{"text": custom_msg}]
