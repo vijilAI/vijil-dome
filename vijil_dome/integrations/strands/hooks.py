@@ -28,6 +28,7 @@ Usage:
 """
 
 import logging
+from collections.abc import Sequence
 from typing import Any, Optional
 
 from vijil_dome import Dome
@@ -39,6 +40,7 @@ try:
         HookProvider,
         HookRegistry,
     )
+    from strands.types.content import Message
 except ImportError:
     raise RuntimeError(
         "Strands SDK is not installed. "
@@ -59,7 +61,7 @@ DEFAULT_OUTPUT_BLOCKED_MESSAGE = (
 )
 
 
-def _extract_last_user_text(messages: list[dict]) -> tuple[Optional[str], Optional[int]]:
+def _extract_last_user_text(messages: Sequence[Message]) -> tuple[Optional[str], Optional[int]]:
     """Find the last user message and extract its text.
 
     Returns:
@@ -80,7 +82,7 @@ def _extract_last_user_text(messages: list[dict]) -> tuple[Optional[str], Option
     return None, None
 
 
-def _extract_response_text(message: dict) -> Optional[str]:
+def _extract_response_text(message: Message) -> Optional[str]:
     """Extract text from a model response message."""
     parts = message.get("content", [])
     texts = [
@@ -124,7 +126,7 @@ class DomeHookProvider(HookProvider):
             return
 
         scan = await self.dome.async_guard_input(text, agent_id=self.agent_id)
-        if scan.flagged:
+        if not scan.is_safe():
             logger.warning("Dome blocked input: %s...", text[:80])
             event.agent.messages[idx]["content"] = [
                 {"text": self.input_blocked_message}
@@ -140,7 +142,7 @@ class DomeHookProvider(HookProvider):
             return
 
         scan = await self.dome.async_guard_output(text, agent_id=self.agent_id)
-        if scan.flagged:
+        if not scan.is_safe():
             logger.warning("Dome blocked output: %s...", text[:80])
             event.stop_response.message["content"] = [
                 {"text": self.output_blocked_message}

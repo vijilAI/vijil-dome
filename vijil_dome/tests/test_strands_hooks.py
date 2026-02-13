@@ -3,6 +3,8 @@
 import pytest
 from unittest.mock import AsyncMock, MagicMock
 
+from strands.hooks import AfterModelCallEvent, BeforeModelCallEvent, HookRegistry
+
 from vijil_dome.integrations.strands.hooks import (
     DomeHookProvider,
     DEFAULT_INPUT_BLOCKED_MESSAGE,
@@ -87,7 +89,7 @@ class TestInputGuarding:
     @pytest.mark.asyncio
     async def test_flagged_input_replaces_message(self, dome_mock):
         scan_result = MagicMock()
-        scan_result.flagged = True
+        scan_result.is_safe.return_value = False
         dome_mock.async_guard_input.return_value = scan_result
 
         provider = DomeHookProvider(dome_mock, agent_id="a1", team_id="t1")
@@ -106,7 +108,7 @@ class TestInputGuarding:
     @pytest.mark.asyncio
     async def test_clean_input_passes_through(self, dome_mock):
         scan_result = MagicMock()
-        scan_result.flagged = False
+        scan_result.is_safe.return_value = True
         dome_mock.async_guard_input.return_value = scan_result
 
         provider = DomeHookProvider(dome_mock)
@@ -133,7 +135,7 @@ class TestInputGuarding:
     @pytest.mark.asyncio
     async def test_custom_blocked_message(self, dome_mock):
         scan_result = MagicMock()
-        scan_result.flagged = True
+        scan_result.is_safe.return_value = False
         dome_mock.async_guard_input.return_value = scan_result
 
         custom_msg = "Custom block"
@@ -199,7 +201,7 @@ class TestOutputGuarding:
     @pytest.mark.asyncio
     async def test_flagged_output_replaces_response(self, dome_mock):
         scan_result = MagicMock()
-        scan_result.flagged = True
+        scan_result.is_safe.return_value = False
         dome_mock.async_guard_output.return_value = scan_result
 
         provider = DomeHookProvider(dome_mock, agent_id="a1", team_id="t1")
@@ -219,7 +221,7 @@ class TestOutputGuarding:
     @pytest.mark.asyncio
     async def test_clean_output_passes_through(self, dome_mock):
         scan_result = MagicMock()
-        scan_result.flagged = False
+        scan_result.is_safe.return_value = True
         dome_mock.async_guard_output.return_value = scan_result
 
         provider = DomeHookProvider(dome_mock)
@@ -244,7 +246,7 @@ class TestOutputGuarding:
     @pytest.mark.asyncio
     async def test_custom_output_blocked_message(self, dome_mock):
         scan_result = MagicMock()
-        scan_result.flagged = True
+        scan_result.is_safe.return_value = False
         dome_mock.async_guard_output.return_value = scan_result
 
         custom_msg = "Custom output block"
@@ -255,3 +257,33 @@ class TestOutputGuarding:
         await provider._guard_output(event)
 
         assert event.stop_response.message["content"] == [{"text": custom_msg}]
+
+
+# ---------------------------------------------------------------------------
+# Hook registration and protocol conformance
+# ---------------------------------------------------------------------------
+
+class TestHookRegistration:
+    def test_register_hooks_adds_both_callbacks(self):
+        dome = MagicMock()
+        provider = DomeHookProvider(dome)
+        registry = HookRegistry()
+
+        provider.register_hooks(registry)
+
+        # Both event types should have callbacks registered.
+        # Verify by creating events and checking callbacks exist.
+        before_event = BeforeModelCallEvent(agent=MagicMock())
+        after_event = AfterModelCallEvent(agent=MagicMock())
+
+        before_cbs = list(registry.get_callbacks_for(before_event))
+        after_cbs = list(registry.get_callbacks_for(after_event))
+        assert len(before_cbs) == 1
+        assert len(after_cbs) == 1
+
+    def test_provider_satisfies_hook_provider_protocol(self):
+        from strands.hooks import HookProvider
+
+        dome = MagicMock()
+        provider = DomeHookProvider(dome)
+        assert isinstance(provider, HookProvider)
