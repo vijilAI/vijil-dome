@@ -1,0 +1,146 @@
+"""Tests for Dome Strands adapter (DomeHookProvider)."""
+
+import pytest
+from unittest.mock import AsyncMock, MagicMock
+
+from vijil_dome.integrations.strands.hooks import (
+    DomeHookProvider,
+    DEFAULT_INPUT_BLOCKED_MESSAGE,
+    DEFAULT_OUTPUT_BLOCKED_MESSAGE,
+    _extract_last_user_text,
+)
+
+
+# ---------------------------------------------------------------------------
+# Helpers to build Strands-shaped objects without importing strands
+# ---------------------------------------------------------------------------
+
+def _make_message(role: str, text: str) -> dict:
+    """Build a Strands Message (TypedDict) with a single text content block."""
+    return {"role": role, "content": [{"text": text}]}
+
+
+def _make_agent(messages: list[dict]) -> MagicMock:
+    """Build a mock Agent with a messages list."""
+    agent = MagicMock()
+    agent.messages = messages
+    return agent
+
+
+def _make_before_event(messages: list[dict]):
+    """Build a BeforeModelCallEvent-shaped object."""
+    event = MagicMock()
+    event.agent = _make_agent(messages)
+    return event
+
+
+# ---------------------------------------------------------------------------
+# _extract_last_user_text
+# ---------------------------------------------------------------------------
+
+class TestExtractLastUserText:
+    def test_extracts_last_user_message(self):
+        messages = [
+            _make_message("user", "first"),
+            _make_message("assistant", "reply"),
+            _make_message("user", "second"),
+        ]
+        text, idx = _extract_last_user_text(messages)
+        assert text == "second"
+        assert idx == 2
+
+    def test_returns_none_for_no_user_messages(self):
+        messages = [_make_message("assistant", "hello")]
+        text, idx = _extract_last_user_text(messages)
+        assert text is None
+        assert idx is None
+
+    def test_returns_none_for_empty_messages(self):
+        text, idx = _extract_last_user_text([])
+        assert text is None
+        assert idx is None
+
+    def test_concatenates_multiple_text_blocks(self):
+        msg = {"role": "user", "content": [{"text": "hello"}, {"text": "world"}]}
+        text, idx = _extract_last_user_text([msg])
+        assert text == "hello world"
+
+    def test_skips_non_text_content_blocks(self):
+        msg = {"role": "user", "content": [{"toolUse": {}}, {"text": "actual text"}]}
+        text, idx = _extract_last_user_text([msg])
+        assert text == "actual text"
+
+
+# ---------------------------------------------------------------------------
+# Input guarding
+# ---------------------------------------------------------------------------
+
+class TestInputGuarding:
+    @pytest.fixture
+    def dome_mock(self):
+        dome = MagicMock()
+        dome.async_guard_input = AsyncMock()
+        dome.async_guard_output = AsyncMock()
+        return dome
+
+    @pytest.mark.asyncio
+    async def test_flagged_input_replaces_message(self, dome_mock):
+        scan_result = MagicMock()
+        scan_result.flagged = True
+        dome_mock.async_guard_input.return_value = scan_result
+
+        provider = DomeHookProvider(dome_mock, agent_id="a1", team_id="t1")
+
+        messages = [_make_message("user", "malicious prompt")]
+        event = _make_before_event(messages)
+
+        await provider._guard_input(event)
+
+        # The user message text should be replaced with blocked message
+        assert event.agent.messages[0]["content"] == [{"text": DEFAULT_INPUT_BLOCKED_MESSAGE}]
+        dome_mock.async_guard_input.assert_called_once_with(
+            "malicious prompt", agent_id="a1"
+        )
+
+    @pytest.mark.asyncio
+    async def test_clean_input_passes_through(self, dome_mock):
+        scan_result = MagicMock()
+        scan_result.flagged = False
+        dome_mock.async_guard_input.return_value = scan_result
+
+        provider = DomeHookProvider(dome_mock)
+
+        messages = [_make_message("user", "normal question")]
+        event = _make_before_event(messages)
+
+        await provider._guard_input(event)
+
+        # Message unchanged
+        assert event.agent.messages[0]["content"] == [{"text": "normal question"}]
+
+    @pytest.mark.asyncio
+    async def test_no_user_messages_skips_scan(self, dome_mock):
+        provider = DomeHookProvider(dome_mock)
+
+        messages = [_make_message("assistant", "hi")]
+        event = _make_before_event(messages)
+
+        await provider._guard_input(event)
+
+        dome_mock.async_guard_input.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_custom_blocked_message(self, dome_mock):
+        scan_result = MagicMock()
+        scan_result.flagged = True
+        dome_mock.async_guard_input.return_value = scan_result
+
+        custom_msg = "Custom block"
+        provider = DomeHookProvider(dome_mock, input_blocked_message=custom_msg)
+
+        messages = [_make_message("user", "bad")]
+        event = _make_before_event(messages)
+
+        await provider._guard_input(event)
+
+        assert event.agent.messages[0]["content"] == [{"text": custom_msg}]
