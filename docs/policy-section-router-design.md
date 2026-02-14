@@ -1,0 +1,235 @@
+# Policy Section Router Design
+
+**Author:** Pradeep
+**Date:** 2026-02-14
+**Status:** Proposal
+**Repo:** vijil-dome
+
+---
+
+## 1. Problem
+
+When a policy document has N sections (e.g., Coca-Cola Code of Conduct has 20), we currently run the GPT-OSS-Safeguard detector against **every section** for each query. If any section flags a violation, we report a violation.
+
+20 sections = 20 detector LLM calls per query.
+
+Most sections are irrelevant to any given query. A question about stock tips has nothing to do with workplace harassment, money laundering, or gift policies — yet we check all 20. The detector model is the dominant cost and latency driver, not the routing.
+
+### 1.1 Why not just check the whole policy at once?
+
+Large policy documents exceed what a single LLM call can reliably evaluate. Splitting into sections and checking individually gives better detection quality — but at the cost of N calls.
+
+### 1.2 The hard cases
+
+Simple keyword matching fails for indirect references:
+
+| Query | Relevant section | Why keywords fail |
+|-------|-----------------|-------------------|
+| "Colleague mentioned Q3 numbers look great, should I adjust my 401k?" | `insider_trading` | No overlap with tags: `stock, shares, trading, acquisition, merger, securities` |
+| "Can I hire my cousin for the summer internship?" | `conflicts_of_interest` | "hire" and "cousin" don't match: `conflict, interest, relative, disclose, approval` |
+| "A vendor offered us World Cup tickets" | `gifts_and_entertainment` | "vendor" and "World Cup tickets" don't match: `gift, meal, entertainment, hospitality` |
+
+The connection is **conceptual**, not lexical. The router must understand what a policy section *covers*, not just what words appear in its tags.
+
+## 2. Goal
+
+Add a routing layer that selects 3-5 relevant sections **before** running the detector. The router itself must be cheap — adding an LLM call for routing partially defeats the purpose of saving detector calls.
+
+### 2.1 Targets
+
+- Reduce mean detector calls per query from N (~20) to 3-5
+- Router latency: < 5ms (no API calls on hot path)
+- Detection quality: no regression in precision/recall vs all-sections baseline
+- Graceful degradation: if routing is uncertain, fall back to more sections (not fewer)
+
+## 3. Current State
+
+### 3.1 Production flow (no router)
+
+```
+Query → run detector on ALL N sections → any flagged? → result
+```
+
+Each section is checked by `PolicyGptOssSafeguard` via `litellm.acompletion()`. Sections run in parallel (bounded by semaphore), but every section gets a full LLM call.
+
+### 3.2 Existing experimental router (`experiments/policy_router/`)
+
+A hybrid router exists locally (not pushed to remote) that combines:
+
+1. **Keyword scoring** — token overlap between query and policy tags/ID. Weights: ID token overlap (+0.5), exact tag phrase match (+1.25), tag token overlap (+0.6).
+2. **LLM routing** — small model (llama-3.1-8b-instant via Groq) classifies which policies apply from a list of IDs + descriptions.
+3. **Merge** — LLM results + strong keyword matches, with fallback rules.
+
+**Limitations of the experimental router:**
+- Keyword matching uses only 5-10 manually authored tags per section — too sparse for indirect references
+- LLM routing adds 200-500ms latency per query — not cheap enough to justify for every request
+- Policy descriptions in the LLM prompt are thin (one line each) — insufficient for the model to reason about oblique cases
+
+### 3.3 Manifest format
+
+Each policy section is described in `manifest.yaml`:
+
+```yaml
+- id: insider_trading
+  file: 17_insider_trading.md
+  name: "We Do Not Trade on Inside Information"
+  tags: [stock, shares, trading, acquisition, merger, securities, inside information]
+  description: "No trading or tipping based on material non-public information."
+```
+
+7 tags and a one-line description are not enough to capture all the ways a query can relate to insider trading.
+
+## 4. Proposed Solution: Offline Enrichment + Fast Runtime Matching
+
+Move the intelligence to **build time**. Use a large LLM once (per policy version) to generate rich metadata. At runtime, match against this enriched metadata using fast text-matching techniques — no LLM call needed.
+
+### 4.1 Build time: Enrichment (once per policy version)
+
+For each policy section, call an LLM (e.g., gpt-4o) with the full section text and generate:
+
+**Expanded tags (30-50 terms):** Synonyms, related concepts, euphemisms, indirect indicators — everything that could signal relevance to this section.
+
+**Scenarios (10-15):** Realistic queries that should trigger this section, including oblique/indirect cases where the lexical connection is weak.
+
+**Risk intents (3-5):** Abstract descriptions of what *behavior* triggers this policy, not what words.
+
+Example enrichment for `insider_trading`:
+
+```yaml
+insider_trading:
+  # Original tags (kept)
+  tags: [stock, shares, trading, acquisition, merger, securities, inside information]
+
+  # Expanded tags — generated by LLM from full policy text
+  expanded_tags:
+    - investment advice, 401k, portfolio, retirement fund, brokerage
+    - quarterly earnings, revenue numbers, Q3, Q4, annual report
+    - overheard meeting, executive conversation, board meeting, all-hands
+    - tip off, tell family, tell friend, tell spouse, share information
+    - pending deal, upcoming announcement, layoffs, restructuring
+    - material non-public, confidential financial, trading window
+    - buy before news, sell before news, front-run
+
+  # Risk intents — what behavior this policy governs
+  risk_intents:
+    - "Acting on confidential company information for personal financial gain"
+    - "Sharing non-public business information with anyone who might trade on it"
+    - "Making investment decisions based on internal knowledge unavailable to the public"
+
+  # Scenarios — realistic queries, including oblique cases
+  scenarios:
+    - "Colleague mentioned Q3 numbers look amazing, should I adjust my 401k?"
+    - "I overheard execs discussing a merger, can I tell my spouse?"
+    - "My brother needs money — can I tell him about the deal so he can invest?"
+    - "I know about upcoming layoffs, should I sell my shares?"
+    - "A friend at the company told me about a big partnership, should I invest?"
+    - "I learned about a product launch at an all-hands, is it OK to buy options?"
+    - "Should I move my retirement savings given what I know about next quarter?"
+```
+
+**Cost:** ~20 LLM calls (one per section), ~$0.50 total. Regenerate only when policy content changes.
+
+### 4.2 Runtime: Two fast signals, merged
+
+#### Signal 1: Enriched keyword matching (microseconds)
+
+Same token-overlap scoring as the existing `_route_keywords`, but matching against 50+ expanded tags instead of 7. No code change to the algorithm — just richer input data.
+
+"401k" now matches `insider_trading`. "cousin" + "hire" now matches `conflicts_of_interest`. "vendor" + "tickets" now matches `gifts_and_entertainment`.
+
+#### Signal 2: BM25 over scenario corpus (sub-millisecond)
+
+At router init, index all generated scenarios (~300 documents for 20 policies) into a BM25 index. At query time, score the query against all scenarios, aggregate scores by section ID, return top-k.
+
+```python
+from rank_bm25 import BM25Okapi
+
+# Build time: tokenize scenarios
+corpus_tokens = [tokenize(scenario) for scenario in all_scenarios]
+bm25 = BM25Okapi(corpus_tokens)
+
+# Runtime: score query against scenarios
+scores = bm25.get_scores(tokenize(query))
+# Group by section_id, sum scores, rank
+```
+
+BM25 handles partial overlap and term frequency naturally. A query about "Q3 numbers" and "401k" will score high against the pre-generated scenario "Colleague mentioned Q3 numbers look amazing, should I adjust my 401k?" even without exact keyword match.
+
+#### Merge
+
+Union of:
+- Keyword matches above threshold (from expanded tags)
+- BM25 top-k sections
+
+Deduplicate, cap at `max_sections` (default: 4-5). If both signals return low confidence, widen to more sections rather than fewer (bias toward recall).
+
+### 4.3 Optional: LLM fallback for ambiguous cases
+
+The experimental router's LLM call can be retained as a **fallback** — invoked only when keyword + BM25 both return low-confidence results. The `llm_on_ambiguous_only` flag already exists in the router code. This makes the LLM call a rare path, not the hot path.
+
+## 5. Architecture
+
+```
+                          BUILD TIME (once per policy version)
+                          ┌──────────────────────────────────┐
+                          │  Policy section markdown files   │
+                          │            ↓                     │
+                          │  LLM enrichment (gpt-4o)         │
+                          │            ↓                     │
+                          │  manifest.enriched.yaml          │
+                          │  (expanded_tags + scenarios)     │
+                          └──────────────────────────────────┘
+
+                          RUNTIME (per query)
+┌─────────┐
+│  Query   │
+└────┬─────┘
+     │
+     ├──→ keyword_score(query, section.expanded_tags)  ──→ scores[]     [μs]
+     │
+     ├──→ bm25_score(query, scenario_index)            ──→ scores[]     [<1ms]
+     │
+     └──→ merge(keyword_scores, bm25_scores, top_k=5)  ──→ section_ids
+                                                               │
+                              ┌────────────┬──────────┬────────┘
+                              ↓            ↓          ↓
+                        detect(s1)   detect(s3)  detect(s7)     [parallel]
+                              │            │          │
+                              └────────────┴──────────┘
+                                   any flagged? → result
+```
+
+## 6. Impact
+
+| Metric | Before | After |
+|--------|--------|-------|
+| Detector calls per query | 20 (all sections) | 3-5 (routed) |
+| Router latency per query | 0 | < 5ms (keyword + BM25) |
+| Router API calls per query | 0 | 0 |
+| One-time build cost | 0 | ~$0.50 (enrichment LLM calls) |
+| New runtime dependency | — | `rank_bm25` (pure Python) |
+
+## 7. Implementation Steps
+
+1. **Enrichment script** — reads manifest + policy markdown files, calls LLM, writes `manifest.enriched.yaml` with expanded tags, risk intents, and scenarios per section
+2. **Extend `PolicySpec` dataclass** — add optional `expanded_tags`, `risk_intents`, `scenarios` fields (backward-compatible with existing manifests)
+3. **`BM25ScenarioIndex` class** — builds BM25 index from all scenarios at init, returns section IDs with aggregated scores for a query
+4. **Update `_route_keywords`** — match against `expanded_tags` when available, fall back to `tags`
+5. **Section selector** — merges keyword + BM25 scores, returns top-k section IDs
+6. **Wire into detection flow** — filter section list through selector before fan-out to `PolicyGptOssSafeguard`
+7. **Eval** — compare routing precision/recall and detection quality (F1) against all-sections baseline on labeled dataset
+
+## 8. Open Questions
+
+- **`max_sections` default?** 3 is aggressive (risk missing relevant sections). 5 is safer but saves less. Needs eval data to tune.
+- **Enrichment quality validation?** How do we verify the LLM-generated tags and scenarios are good? Manual review? Automated checks against eval set?
+- **Policy version coupling?** Enriched metadata must be regenerated when policy content changes. Checksum-based staleness detection? Or just regenerate on every build?
+- **Where does enrichment script live?** In dome (next to the router) or vijil-core (next to the policy loader)?
+- **Embedding similarity as third signal?** Adds robustness for truly novel queries but requires a vector store or in-memory numpy. Worth the complexity?
+
+## 9. Relationship to Existing Code
+
+- **`experiments/policy_router/router.py`** — existing hybrid router. Keyword matching logic can be reused directly; LLM routing becomes the optional fallback path.
+- **`experiments/policy_router/runtime/multi_policy_detector.py`** — existing orchestrator. Fan-out and aggregation logic stays the same; only the section selection input changes.
+- **`experiments/policy_router/runtime/policies/coca_cola/manifest.yaml`** — existing manifest. Enriched manifest extends this format with new optional fields.
+- **`experiments/policy_router/runtime/PRODUCTION_DESIGN.md`** — existing production design. This proposal addresses section 7.3 (Build Artifacts) and section 18 (Open Questions, embeddings-based routing).
