@@ -331,7 +331,6 @@ class PolicySectionsDetector(DetectionMethod):
                         task_idx = next(
                             td["task_idx"] for td in batch_task_data if td["task"] == task
                         )
-                        section_idx = batch_start + task_idx
                         section_meta = batch_metadata[task_idx]
 
                         batch_results.append({
