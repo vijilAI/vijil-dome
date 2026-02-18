@@ -128,7 +128,11 @@ config = {
 }
 ```
 
-Dome includes nearly 20 prebuilt guardrails and supports building your own!
+Dome includes 20+ prebuilt guardrails and supports building your own!
+
+For policy-based GPT-OSS safeguard usage (direct detector + TOML config pattern), see:
+- `vijil_dome/integrations/examples/gpt_oss_safeguard_README.md`
+- `examples/gpt_oss_safeguard_guardrail.toml`
 
 👉 For the full list of guardrail methods, advanced config options, and extensibility, check out the [Docs](https://docs.vijil.ai/dome/intro.html).
 

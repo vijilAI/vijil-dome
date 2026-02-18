@@ -1,0 +1,36 @@
+[guardrail]
+input-guards = ["policy-input"]
+output-guards = ["policy-output"]
+input-early-exit = true
+output-early-exit = true
+input-run-parallel = false
+output-run-parallel = false
+
+[policy-input]
+type = "generic"
+early-exit = true
+methods = ["policy-gpt-oss-safeguard"]
+
+[policy-input.policy-gpt-oss-safeguard]
+# Use an absolute path in production.
+policy_file = "/ABSOLUTE/PATH/TO/your_policy.md"
+hub_name = "groq"
+model_name = "openai/gpt-oss-safeguard-20b"
+output_format = "policy_ref" # binary | policy_ref | with_rationale
+reasoning_effort = "medium"  # low | medium | high
+timeout = 60
+max_retries = 3
+
+[policy-output]
+type = "generic"
+early-exit = true
+methods = ["policy-gpt-oss-safeguard"]
+
+[policy-output.policy-gpt-oss-safeguard]
+policy_file = "/ABSOLUTE/PATH/TO/your_policy.md"
+hub_name = "groq"
+model_name = "openai/gpt-oss-safeguard-20b"
+output_format = "policy_ref"
+reasoning_effort = "medium"
+timeout = 60
+max_retries = 3

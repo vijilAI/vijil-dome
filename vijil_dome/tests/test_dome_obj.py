@@ -16,6 +16,7 @@
 
 import pytest
 import os
+from pathlib import Path
 from vijil_dome import Dome, create_dome_config
 
 TEST_CONFIG = {
@@ -155,8 +156,6 @@ async def test_toml_config():
     assert dome.input_guardrail.run_in_parallel
     assert not dome.input_guardrail.early_exit
 
-    assert dome.agent_id is None
-
     with_id_toml_path = os.path.join(dir_path, "sample_configs", "with_id.toml")
     dome = Dome(dome_config=with_id_toml_path)
     assert dome.agent_id == "sample-agent-001"
@@ -175,3 +174,52 @@ async def test_toml_config():
 
     assert dome.input_guardrail.run_in_parallel
     assert not dome.input_guardrail.early_exit
+
+
+def test_toml_config_generic_policy_guard(tmp_path):
+    policy_path = (
+        Path(__file__).resolve().parent.parent
+        / "detectors"
+        / "policies"
+        / "spam_policy.md"
+    )
+    assert policy_path.exists()
+
+    toml_path = tmp_path / "policy_guard_config.toml"
+    toml_path.write_text(
+        "\n".join(
+            [
+                "[guardrail]",
+                'input-guards = ["policy-input"]',
+                "output-guards = []",
+                "",
+                "[policy-input]",
+                'type = "generic"',
+                'methods = ["policy-gpt-oss-safeguard"]',
+                "",
+                "[policy-input.policy-gpt-oss-safeguard]",
+                f'policy_file = "{policy_path}"',
+                'hub_name = "groq"',
+                'model_name = "openai/gpt-oss-safeguard-20b"',
+                'output_format = "policy_ref"',
+                'reasoning_effort = "medium"',
+                "timeout = 10",
+                "max_retries = 1",
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    dome = Dome(dome_config=str(toml_path))
+    assert len(dome.input_guardrail.guard_list) == 1
+    policy_guard = dome.input_guardrail.guard_list[0]
+    assert policy_guard.guard_name == "policy-input"
+    assert len(policy_guard.detector_list) == 1
+
+    detector = policy_guard.detector_list[0]
+    assert detector.__class__.__name__ == "PolicyGptOssSafeguard"
+    assert detector.output_format == "policy_ref"
+    assert detector.reasoning_effort == "medium"
+
+    assert dome.agent_id is None
