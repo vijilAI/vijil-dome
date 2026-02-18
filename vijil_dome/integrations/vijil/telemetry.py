@@ -60,38 +60,53 @@ def _extract_detection_score(result: Union[GuardrailResult, GuardResult]) -> flo
 
     elif isinstance(result, GuardResult):
         for detector_name, detection in result.details.items():
-            if hasattr(detection, "result") and isinstance(detection.result, dict):
-                score = detection.result.get("score", 0.0)
-                if isinstance(score, (int, float)):
-                    max_score = max(max_score, float(score))
+            if hasattr(detection, "hit") and detection.hit:
+                if hasattr(detection, "result") and isinstance(detection.result, dict):
+                    score = detection.result.get("score", 0.0)
+                    if isinstance(score, (int, float)):
+                        max_score = max(max_score, float(score))
 
     return max_score
 
 
-def _extract_detection_method(result: Union[GuardrailResult, GuardResult]) -> str:
-    """Extract the name of the first triggered guard/detector.
+def _extract_highest_scoring_method(result: Union[GuardrailResult, GuardResult]) -> str:
+    """Extract the name of the guard/detector with the highest detection score.
 
-    Darwin uses this to understand which detection method flagged the input,
-    enabling targeted mutations for specific vulnerability types.
+    Finds the detection with the highest score and returns its name,
+    ensuring alignment between detection.score and detection.method
+    span attributes.
 
     Args:
         result: The scan result from a guard or guardrail.
 
     Returns:
-        The name of the triggered guard/detector, or "unknown" if none.
+        The name of the highest-scoring guard/detector, or "unknown" if none.
     """
+    best_name = "unknown"
+    best_score = 0.0
+
     if isinstance(result, GuardrailResult):
         for guard_name, guard_result in result.guard_exec_details.items():
             if guard_result.triggered:
-                return guard_name
+                for detector_name, detection in guard_result.details.items():
+                    if hasattr(detection, "hit") and detection.hit:
+                        if hasattr(detection, "result") and isinstance(detection.result, dict):
+                            score = detection.result.get("score", 0.0)
+                            if isinstance(score, (int, float)) and float(score) > best_score:
+                                best_score = float(score)
+                                best_name = guard_name
 
     elif isinstance(result, GuardResult):
         if result.triggered:
             for detector_name, detection in result.details.items():
                 if hasattr(detection, "hit") and detection.hit:
-                    return detector_name
+                    if hasattr(detection, "result") and isinstance(detection.result, dict):
+                        score = detection.result.get("score", 0.0)
+                        if isinstance(score, (int, float)) and float(score) > best_score:
+                            best_score = float(score)
+                            best_name = detector_name
 
-    return "unknown"
+    return best_name
 
 
 def _set_darwin_span_attributes(
@@ -124,5 +139,5 @@ def _set_darwin_span_attributes(
     score = _extract_detection_score(result)
     span.set_attribute("detection.score", score)
 
-    method = _extract_detection_method(result)
+    method = _extract_highest_scoring_method(result)
     span.set_attribute("detection.method", method)

@@ -5,8 +5,7 @@ Verifies that instrument_dome() emits Darwin span attributes
 alongside the existing split metrics.
 """
 
-import asyncio
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -14,7 +13,7 @@ from vijil_dome.guardrails import GuardrailResult, GuardResult
 from vijil_dome.detectors import DetectionTimingResult
 from vijil_dome.integrations.vijil.telemetry import (
     _extract_detection_score,
-    _extract_detection_method,
+    _extract_highest_scoring_method,
     _set_darwin_span_attributes,
 )
 
@@ -128,20 +127,20 @@ class TestExtractDetectionScore:
         assert score == 0.0
 
 
-# --- Tests: _extract_detection_method ---
+# --- Tests: _extract_highest_scoring_method ---
 
 
-class TestExtractDetectionMethod:
+class TestExtractHighestScoringMethod:
     def test_returns_first_triggered_guard_name(
         self, flagged_guardrail_result: GuardrailResult
     ):
-        method = _extract_detection_method(flagged_guardrail_result)
+        method = _extract_highest_scoring_method(flagged_guardrail_result)
         assert method == "prompt-injection"
 
     def test_returns_unknown_when_nothing_triggered(
         self, clean_guardrail_result: GuardrailResult
     ):
-        method = _extract_detection_method(clean_guardrail_result)
+        method = _extract_highest_scoring_method(clean_guardrail_result)
         assert method == "unknown"
 
     def test_returns_detector_name_for_guard_result(self):
@@ -152,7 +151,7 @@ class TestExtractDetectionMethod:
                 "the-hit": _make_detection(hit=True, score=0.9),
             },
         )
-        method = _extract_detection_method(guard)
+        method = _extract_highest_scoring_method(guard)
         assert method == "the-hit"
 
 
