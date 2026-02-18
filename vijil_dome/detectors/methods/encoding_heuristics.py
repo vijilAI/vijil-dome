@@ -347,10 +347,11 @@ class EncodingHeuristicsDetector(DetectionMethod):
         # Default thresholds tuned for both jailbreak AND DoS resistance.
         # See DOME-43: Previous thresholds allowed DoS-encoded requests through.
         #
-        # Threshold calibration (whitespace_spacing_score):
-        # - Normal English sentences: ~19-24% (must PASS)
-        # - Character-spaced DoS attacks: ~100% (must BLOCK)
-        # - Safe threshold: 0.30 (30%) gives margin above normal text
+        # Threshold calibration for excessive_whitespace:
+        # The fraction is actual_spaces / expected_spaces (where expected = chars - 1).
+        # - Normal English sentences: ~10-25% depending on word length distribution
+        # - Character-spaced DoS attacks (e.g., "H e l l o"): ~100%
+        # - Threshold 0.30 (30%) gives margin above normal text while blocking DoS
         self.threshold_map = threshold_map or {
             "base64": 0.5,
             "rot13": 0.5,

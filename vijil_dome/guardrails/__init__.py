@@ -329,7 +329,7 @@ class Guardrail:
             guard_results[guard.guard_name] = guard_scan_result
             if guard_scan_result.triggered:
                 response_string = (
-                    self.blocked_response_string + guard_scan_result.response
+                    self.blocked_response_string + "\n" + guard_scan_result.response
                 )
                 flagged = True
                 if self.early_exit:
@@ -387,7 +387,7 @@ class Guardrail:
                 guard_results[task_name] = task_result
                 if task_result.triggered:
                     response_string = (
-                        self.blocked_response_string + task_result.response
+                        self.blocked_response_string + "\n" + task_result.response
                     )
                     flagged = True
                     for p in pending:
