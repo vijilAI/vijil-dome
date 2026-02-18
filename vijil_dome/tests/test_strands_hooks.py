@@ -3,6 +3,8 @@
 import pytest
 from unittest.mock import AsyncMock, MagicMock
 
+pytest.importorskip("strands", reason="strands-agents not installed")
+
 from strands.hooks import AfterModelCallEvent, BeforeModelCallEvent, HookRegistry
 
 from vijil_dome.integrations.strands.hooks import (
@@ -92,7 +94,7 @@ class TestInputGuarding:
         scan_result.is_safe.return_value = False
         dome_mock.async_guard_input.return_value = scan_result
 
-        provider = DomeHookProvider(dome_mock, agent_id="a1", team_id="t1")
+        provider = DomeHookProvider(dome_mock, agent_id="a1")
 
         messages = [_make_message("user", "malicious prompt")]
         event = _make_before_event(messages)
@@ -204,7 +206,7 @@ class TestOutputGuarding:
         scan_result.is_safe.return_value = False
         dome_mock.async_guard_output.return_value = scan_result
 
-        provider = DomeHookProvider(dome_mock, agent_id="a1", team_id="t1")
+        provider = DomeHookProvider(dome_mock, agent_id="a1")
 
         event = _make_after_event("unsafe response")
 

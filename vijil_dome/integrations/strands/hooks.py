@@ -24,7 +24,7 @@ Usage:
     from vijil_dome.integrations.strands import DomeHookProvider
 
     dome = Dome(config)
-    agent = Agent(hooks=[DomeHookProvider(dome, agent_id="...", team_id="...")])
+    agent = Agent(hooks=[DomeHookProvider(dome, agent_id="...")])
 """
 
 import logging
@@ -105,13 +105,11 @@ class DomeHookProvider(HookProvider):
         self,
         dome: Dome,
         agent_id: str = "",
-        team_id: str = "",
         input_blocked_message: str = DEFAULT_INPUT_BLOCKED_MESSAGE,
         output_blocked_message: str = DEFAULT_OUTPUT_BLOCKED_MESSAGE,
     ):
         self.dome = dome
         self.agent_id = agent_id
-        self.team_id = team_id
         self.input_blocked_message = input_blocked_message
         self.output_blocked_message = output_blocked_message
 
