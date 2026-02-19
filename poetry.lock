@@ -303,6 +303,48 @@ files = [
 numpy = {version = ">=1.19.0", markers = "python_version >= \"3.9\""}
 
 [[package]]
+name = "boto3"
+version = "1.42.51"
+description = "The AWS SDK for Python"
+optional = true
+python-versions = ">=3.9"
+groups = ["main"]
+markers = "extra == \"strands\""
+files = [
+    {file = "boto3-1.42.51-py3-none-any.whl", hash = "sha256:c3e75ab1c4df6b1049aecfae56d15f5ff99d68ec6a05f24741bab08ad5d5406e"},
+    {file = "boto3-1.42.51.tar.gz", hash = "sha256:a010376cdc2432faa6c3338f04591142a1374da1b7eba94b80c0c7f1b525eff7"},
+]
+
+[package.dependencies]
+botocore = ">=1.42.51,<1.43.0"
+jmespath = ">=0.7.1,<2.0.0"
+s3transfer = ">=0.16.0,<0.17.0"
+
+[package.extras]
+crt = ["botocore[crt] (>=1.21.0,<2.0a0)"]
+
+[[package]]
+name = "botocore"
+version = "1.42.51"
+description = "Low-level, data-driven core of boto 3."
+optional = true
+python-versions = ">=3.9"
+groups = ["main"]
+markers = "extra == \"strands\""
+files = [
+    {file = "botocore-1.42.51-py3-none-any.whl", hash = "sha256:216c4c148f37f882c7239fce1d8023acdc664643952ce1d6827c7edc829903d3"},
+    {file = "botocore-1.42.51.tar.gz", hash = "sha256:d7b03905b8066c25dd5bde1b7dc4af15ebdbaa313abbb2543db179b1d5efae3d"},
+]
+
+[package.dependencies]
+jmespath = ">=0.7.1,<2.0.0"
+python-dateutil = ">=2.1,<3.0.0"
+urllib3 = {version = ">=1.25.4,<2.2.0 || >2.2.0,<3", markers = "python_version >= \"3.10\""}
+
+[package.extras]
+crt = ["awscrt (==0.31.2)"]
+
+[[package]]
 name = "cachetools"
 version = "6.2.2"
 description = "Extensible memoizing collections and decorators"
@@ -1641,6 +1683,19 @@ files = [
 ]
 
 [[package]]
+name = "jmespath"
+version = "1.1.0"
+description = "JSON Matching Expressions"
+optional = true
+python-versions = ">=3.9"
+groups = ["main"]
+markers = "extra == \"strands\""
+files = [
+    {file = "jmespath-1.1.0-py3-none-any.whl", hash = "sha256:a5663118de4908c91729bea0acadca56526eb2698e83de10cd116ae0f4e97c64"},
+    {file = "jmespath-1.1.0.tar.gz", hash = "sha256:472c87d80f36026ae83c6ddd0f1d05d4e510134ed462851fd5f754c8c3cbb88d"},
+]
+
+[[package]]
 name = "joblib"
 version = "1.4.2"
 description = "Lightweight pipelining with Python functions"
@@ -2553,7 +2608,7 @@ description = "OpenTelemetry Python API"
 optional = true
 python-versions = ">=3.9"
 groups = ["main"]
-markers = "extra == \"opentelemetry\""
+markers = "extra == \"opentelemetry\" or extra == \"strands\""
 files = [
     {file = "opentelemetry_api-1.34.1-py3-none-any.whl", hash = "sha256:b7df4cb0830d5a6c29ad0c0691dbae874d8daefa934b8b1d642de48323d32a8c"},
     {file = "opentelemetry_api-1.34.1.tar.gz", hash = "sha256:64f0bd06d42824843731d05beea88d4d4b6ae59f9fe347ff7dfa2cc14233bbb3"},
@@ -2688,7 +2743,7 @@ description = "Instrumentation Tools & Auto Instrumentation for OpenTelemetry Py
 optional = true
 python-versions = ">=3.9"
 groups = ["main"]
-markers = "extra == \"opentelemetry\""
+markers = "extra == \"opentelemetry\" or extra == \"strands\""
 files = [
     {file = "opentelemetry_instrumentation-0.55b1-py3-none-any.whl", hash = "sha256:cbb1496b42bc394e01bc63701b10e69094e8564e281de063e4328d122cc7a97e"},
     {file = "opentelemetry_instrumentation-0.55b1.tar.gz", hash = "sha256:2dc50aa207b9bfa16f70a1a0571e011e737a9917408934675b89ef4d5718c87b"},
@@ -2743,7 +2798,7 @@ description = "Thread context propagation support for OpenTelemetry"
 optional = true
 python-versions = ">=3.9"
 groups = ["main"]
-markers = "extra == \"opentelemetry\""
+markers = "extra == \"opentelemetry\" or extra == \"strands\""
 files = [
     {file = "opentelemetry_instrumentation_threading-0.55b1-py3-none-any.whl", hash = "sha256:f865542b32b219c8fd01deb03b8c3c9ba2eb3f0501ae303338403fd2242962c7"},
     {file = "opentelemetry_instrumentation_threading-0.55b1.tar.gz", hash = "sha256:4ed68502e7ed017bfc10b1f9e508cc5ccaea0e46ac1010f7f2541ab9c6eacd92"},
@@ -2812,7 +2867,7 @@ description = "OpenTelemetry Python SDK"
 optional = true
 python-versions = ">=3.9"
 groups = ["main"]
-markers = "extra == \"opentelemetry\""
+markers = "extra == \"opentelemetry\" or extra == \"strands\""
 files = [
     {file = "opentelemetry_sdk-1.34.1-py3-none-any.whl", hash = "sha256:308effad4059562f1d92163c61c8141df649da24ce361827812c40abb2a1e96e"},
     {file = "opentelemetry_sdk-1.34.1.tar.gz", hash = "sha256:8091db0d763fcd6098d4781bbc80ff0971f94e260739aa6afe6fd379cdf3aa4d"},
@@ -2830,7 +2885,7 @@ description = "OpenTelemetry Semantic Conventions"
 optional = true
 python-versions = ">=3.9"
 groups = ["main"]
-markers = "extra == \"opentelemetry\""
+markers = "extra == \"opentelemetry\" or extra == \"strands\""
 files = [
     {file = "opentelemetry_semantic_conventions-0.55b1-py3-none-any.whl", hash = "sha256:5da81dfdf7d52e3d37f8fe88d5e771e191de924cfff5f550ab0b8f7b2409baed"},
     {file = "opentelemetry_semantic_conventions-0.55b1.tar.gz", hash = "sha256:ef95b1f009159c28d7a7849f5cbc71c4c34c845bb514d66adfdf1b3fff3598b3"},
@@ -4187,6 +4242,25 @@ files = [
 pyasn1 = ">=0.1.3"
 
 [[package]]
+name = "s3transfer"
+version = "0.16.0"
+description = "An Amazon S3 Transfer Manager"
+optional = true
+python-versions = ">=3.9"
+groups = ["main"]
+markers = "extra == \"strands\""
+files = [
+    {file = "s3transfer-0.16.0-py3-none-any.whl", hash = "sha256:18e25d66fed509e3868dc1572b3f427ff947dd2c56f844a5bf09481ad3f3b2fe"},
+    {file = "s3transfer-0.16.0.tar.gz", hash = "sha256:8e990f13268025792229cd52fa10cb7163744bf56e719e0b9cb925ab79abf920"},
+]
+
+[package.dependencies]
+botocore = ">=1.37.4,<2.0a.0"
+
+[package.extras]
+crt = ["botocore[crt] (>=1.37.4,<2.0a.0)"]
+
+[[package]]
 name = "safetensors"
 version = "0.4.5"
 description = ""
@@ -4754,6 +4828,52 @@ typing-extensions = {version = ">=4.10.0", markers = "python_version < \"3.13\""
 full = ["httpx (>=0.27.0,<0.29.0)", "itsdangerous", "jinja2", "python-multipart (>=0.0.18)", "pyyaml"]
 
 [[package]]
+name = "strands-agents"
+version = "1.26.0"
+description = "A model-driven approach to building AI agents in just a few lines of code"
+optional = true
+python-versions = ">=3.10"
+groups = ["main"]
+markers = "extra == \"strands\""
+files = [
+    {file = "strands_agents-1.26.0-py3-none-any.whl", hash = "sha256:23175519ac2285566936a3a248cd67b92c831a3417a1d92b64bc2a677c942ad8"},
+    {file = "strands_agents-1.26.0.tar.gz", hash = "sha256:29a297ba4db53007deba2dd7f1caa6a803a4b7e90ab6b82972cf2c753021479f"},
+]
+
+[package.dependencies]
+boto3 = ">=1.26.0,<2.0.0"
+botocore = ">=1.29.0,<2.0.0"
+docstring-parser = ">=0.15,<1.0"
+jsonschema = ">=4.0.0,<5.0.0"
+mcp = ">=1.11.0,<2.0.0"
+opentelemetry-api = ">=1.30.0,<2.0.0"
+opentelemetry-instrumentation-threading = ">=0.51b0,<1.00b0"
+opentelemetry-sdk = ">=1.30.0,<2.0.0"
+pydantic = ">=2.4.0,<3.0.0"
+typing-extensions = ">=4.13.2,<5.0.0"
+watchdog = ">=6.0.0,<7.0.0"
+
+[package.extras]
+a2a = ["a2a-sdk (>=0.3.0,<0.4.0)", "a2a-sdk[sql] (>=0.3.0,<0.4.0)", "fastapi (>=0.115.12,<1.0.0)", "httpx (>=0.28.1,<1.0.0)", "starlette (>=0.46.2,<1.0.0)", "uvicorn (>=0.34.2,<1.0.0)"]
+all = ["a2a-sdk (>=0.3.0,<0.4.0)", "a2a-sdk[sql] (>=0.3.0,<0.4.0)", "anthropic (>=0.21.0,<1.0.0)", "boto3-stubs[sagemaker-runtime] (>=1.26.0,<2.0.0)", "fastapi (>=0.115.12,<1.0.0)", "google-genai (>=1.32.0,<2.0.0)", "httpx (>=0.28.1,<1.0.0)", "litellm (>=1.75.9,<2.0.0)", "llama-api-client (>=0.1.0,<1.0.0)", "mistralai (>=1.8.2)", "ollama (>=0.4.8,<1.0.0)", "openai (>=1.68.0,<1.110.0)", "openai (>=1.68.0,<2.0.0)", "opentelemetry-exporter-otlp-proto-http (>=1.30.0,<2.0.0)", "sphinx (>=5.0.0,<10.0.0)", "sphinx-autodoc-typehints (>=1.12.0,<4.0.0)", "sphinx-rtd-theme (>=1.0.0,<4.0.0)", "starlette (>=0.46.2,<1.0.0)", "uvicorn (>=0.34.2,<1.0.0)", "writer-sdk (>=2.2.0,<3.0.0)"]
+anthropic = ["anthropic (>=0.21.0,<1.0.0)"]
+bidi = ["aws-sdk-bedrock-runtime ; python_version >= \"3.12\"", "prompt-toolkit (>=3.0.0,<4.0.0)", "pyaudio (>=0.2.13,<1.0.0)", "smithy-aws-core (>=0.0.1) ; python_version >= \"3.12\""]
+bidi-all = ["a2a-sdk (>=0.3.0,<0.4.0)", "a2a-sdk[sql] (>=0.3.0,<0.4.0)", "aws-sdk-bedrock-runtime ; python_version >= \"3.12\"", "fastapi (>=0.115.12,<1.0.0)", "google-genai (>=1.32.0,<2.0.0)", "httpx (>=0.28.1,<1.0.0)", "opentelemetry-exporter-otlp-proto-http (>=1.30.0,<2.0.0)", "prompt-toolkit (>=3.0.0,<4.0.0)", "pyaudio (>=0.2.13,<1.0.0)", "smithy-aws-core (>=0.0.1) ; python_version >= \"3.12\"", "sphinx (>=5.0.0,<10.0.0)", "sphinx-autodoc-typehints (>=1.12.0,<4.0.0)", "sphinx-rtd-theme (>=1.0.0,<4.0.0)", "starlette (>=0.46.2,<1.0.0)", "uvicorn (>=0.34.2,<1.0.0)", "websockets (>=15.0.0,<17.0.0)"]
+bidi-gemini = ["google-genai (>=1.32.0,<2.0.0)"]
+bidi-openai = ["websockets (>=15.0.0,<17.0.0)"]
+dev = ["commitizen (>=4.4.0,<5.0.0)", "hatch (>=1.0.0,<2.0.0)", "moto (>=5.1.0,<6.0.0)", "mypy (>=1.15.0,<2.0.0)", "pre-commit (>=3.2.0,<4.6.0)", "pytest (>=9.0.0,<10.0.0)", "pytest-asyncio (>=1.0.0,<1.4.0)", "pytest-cov (>=7.0.0,<8.0.0)", "pytest-timeout (>=2.0.0,<3.0.0)", "pytest-xdist (>=3.0.0,<4.0.0)", "ruff (>=0.13.0,<0.15.0)", "tenacity (>=9.0.0,<10.0.0)"]
+docs = ["sphinx (>=5.0.0,<10.0.0)", "sphinx-autodoc-typehints (>=1.12.0,<4.0.0)", "sphinx-rtd-theme (>=1.0.0,<4.0.0)"]
+gemini = ["google-genai (>=1.32.0,<2.0.0)"]
+litellm = ["litellm (>=1.75.9,<2.0.0)", "openai (>=1.68.0,<1.110.0)"]
+llamaapi = ["llama-api-client (>=0.1.0,<1.0.0)"]
+mistral = ["mistralai (>=1.8.2)"]
+ollama = ["ollama (>=0.4.8,<1.0.0)"]
+openai = ["openai (>=1.68.0,<2.0.0)"]
+otel = ["opentelemetry-exporter-otlp-proto-http (>=1.30.0,<2.0.0)"]
+sagemaker = ["boto3-stubs[sagemaker-runtime] (>=1.26.0,<2.0.0)", "openai (>=1.68.0,<2.0.0)"]
+writer = ["writer-sdk (>=2.2.0,<3.0.0)"]
+
+[[package]]
 name = "sympy"
 version = "1.14.0"
 description = "Computer algebra system (CAS) in Python"
@@ -5302,6 +5422,50 @@ files = [
 colorama = {version = ">=0.4.6", markers = "sys_platform == \"win32\" and python_version >= \"3.7\""}
 
 [[package]]
+name = "watchdog"
+version = "6.0.0"
+description = "Filesystem events monitoring"
+optional = true
+python-versions = ">=3.9"
+groups = ["main"]
+markers = "extra == \"strands\""
+files = [
+    {file = "watchdog-6.0.0-cp310-cp310-macosx_10_9_universal2.whl", hash = "sha256:d1cdb490583ebd691c012b3d6dae011000fe42edb7a82ece80965b42abd61f26"},
+    {file = "watchdog-6.0.0-cp310-cp310-macosx_10_9_x86_64.whl", hash = "sha256:bc64ab3bdb6a04d69d4023b29422170b74681784ffb9463ed4870cf2f3e66112"},
+    {file = "watchdog-6.0.0-cp310-cp310-macosx_11_0_arm64.whl", hash = "sha256:c897ac1b55c5a1461e16dae288d22bb2e412ba9807df8397a635d88f671d36c3"},
+    {file = "watchdog-6.0.0-cp311-cp311-macosx_10_9_universal2.whl", hash = "sha256:6eb11feb5a0d452ee41f824e271ca311a09e250441c262ca2fd7ebcf2461a06c"},
+    {file = "watchdog-6.0.0-cp311-cp311-macosx_10_9_x86_64.whl", hash = "sha256:ef810fbf7b781a5a593894e4f439773830bdecb885e6880d957d5b9382a960d2"},
+    {file = "watchdog-6.0.0-cp311-cp311-macosx_11_0_arm64.whl", hash = "sha256:afd0fe1b2270917c5e23c2a65ce50c2a4abb63daafb0d419fde368e272a76b7c"},
+    {file = "watchdog-6.0.0-cp312-cp312-macosx_10_13_universal2.whl", hash = "sha256:bdd4e6f14b8b18c334febb9c4425a878a2ac20efd1e0b231978e7b150f92a948"},
+    {file = "watchdog-6.0.0-cp312-cp312-macosx_10_13_x86_64.whl", hash = "sha256:c7c15dda13c4eb00d6fb6fc508b3c0ed88b9d5d374056b239c4ad1611125c860"},
+    {file = "watchdog-6.0.0-cp312-cp312-macosx_11_0_arm64.whl", hash = "sha256:6f10cb2d5902447c7d0da897e2c6768bca89174d0c6e1e30abec5421af97a5b0"},
+    {file = "watchdog-6.0.0-cp313-cp313-macosx_10_13_universal2.whl", hash = "sha256:490ab2ef84f11129844c23fb14ecf30ef3d8a6abafd3754a6f75ca1e6654136c"},
+    {file = "watchdog-6.0.0-cp313-cp313-macosx_10_13_x86_64.whl", hash = "sha256:76aae96b00ae814b181bb25b1b98076d5fc84e8a53cd8885a318b42b6d3a5134"},
+    {file = "watchdog-6.0.0-cp313-cp313-macosx_11_0_arm64.whl", hash = "sha256:a175f755fc2279e0b7312c0035d52e27211a5bc39719dd529625b1930917345b"},
+    {file = "watchdog-6.0.0-cp39-cp39-macosx_10_9_universal2.whl", hash = "sha256:e6f0e77c9417e7cd62af82529b10563db3423625c5fce018430b249bf977f9e8"},
+    {file = "watchdog-6.0.0-cp39-cp39-macosx_10_9_x86_64.whl", hash = "sha256:90c8e78f3b94014f7aaae121e6b909674df5b46ec24d6bebc45c44c56729af2a"},
+    {file = "watchdog-6.0.0-cp39-cp39-macosx_11_0_arm64.whl", hash = "sha256:e7631a77ffb1f7d2eefa4445ebbee491c720a5661ddf6df3498ebecae5ed375c"},
+    {file = "watchdog-6.0.0-pp310-pypy310_pp73-macosx_10_15_x86_64.whl", hash = "sha256:c7ac31a19f4545dd92fc25d200694098f42c9a8e391bc00bdd362c5736dbf881"},
+    {file = "watchdog-6.0.0-pp310-pypy310_pp73-macosx_11_0_arm64.whl", hash = "sha256:9513f27a1a582d9808cf21a07dae516f0fab1cf2d7683a742c498b93eedabb11"},
+    {file = "watchdog-6.0.0-pp39-pypy39_pp73-macosx_10_15_x86_64.whl", hash = "sha256:7a0e56874cfbc4b9b05c60c8a1926fedf56324bb08cfbc188969777940aef3aa"},
+    {file = "watchdog-6.0.0-pp39-pypy39_pp73-macosx_11_0_arm64.whl", hash = "sha256:e6439e374fc012255b4ec786ae3c4bc838cd7309a540e5fe0952d03687d8804e"},
+    {file = "watchdog-6.0.0-py3-none-manylinux2014_aarch64.whl", hash = "sha256:7607498efa04a3542ae3e05e64da8202e58159aa1fa4acddf7678d34a35d4f13"},
+    {file = "watchdog-6.0.0-py3-none-manylinux2014_armv7l.whl", hash = "sha256:9041567ee8953024c83343288ccc458fd0a2d811d6a0fd68c4c22609e3490379"},
+    {file = "watchdog-6.0.0-py3-none-manylinux2014_i686.whl", hash = "sha256:82dc3e3143c7e38ec49d61af98d6558288c415eac98486a5c581726e0737c00e"},
+    {file = "watchdog-6.0.0-py3-none-manylinux2014_ppc64.whl", hash = "sha256:212ac9b8bf1161dc91bd09c048048a95ca3a4c4f5e5d4a7d1b1a7d5752a7f96f"},
+    {file = "watchdog-6.0.0-py3-none-manylinux2014_ppc64le.whl", hash = "sha256:e3df4cbb9a450c6d49318f6d14f4bbc80d763fa587ba46ec86f99f9e6876bb26"},
+    {file = "watchdog-6.0.0-py3-none-manylinux2014_s390x.whl", hash = "sha256:2cce7cfc2008eb51feb6aab51251fd79b85d9894e98ba847408f662b3395ca3c"},
+    {file = "watchdog-6.0.0-py3-none-manylinux2014_x86_64.whl", hash = "sha256:20ffe5b202af80ab4266dcd3e91aae72bf2da48c0d33bdb15c66658e685e94e2"},
+    {file = "watchdog-6.0.0-py3-none-win32.whl", hash = "sha256:07df1fdd701c5d4c8e55ef6cf55b8f0120fe1aef7ef39a1c6fc6bc2e606d517a"},
+    {file = "watchdog-6.0.0-py3-none-win_amd64.whl", hash = "sha256:cbafb470cf848d93b5d013e2ecb245d4aa1c8fd0504e863ccefa32445359d680"},
+    {file = "watchdog-6.0.0-py3-none-win_ia64.whl", hash = "sha256:a1914259fa9e1454315171103c6a30961236f508b9b623eae470268bbcc6a22f"},
+    {file = "watchdog-6.0.0.tar.gz", hash = "sha256:9ddf7c82fda3ae8e24decda1338ede66e1c99883db93711d8fb941eaa2d8c282"},
+]
+
+[package.extras]
+watchmedo = ["PyYAML (>=3.10)"]
+
+[[package]]
 name = "weasel"
 version = "0.4.1"
 description = "Weasel: A small and easy workflow system"
@@ -5622,8 +5786,9 @@ embeddings = ["annoy"]
 google = ["google-api-python-client"]
 langchain = []
 opentelemetry = ["opentelemetry-api", "opentelemetry-exporter-gcp-monitoring", "opentelemetry-exporter-gcp-trace", "opentelemetry-exporter-otlp", "opentelemetry-exporter-otlp-proto-common", "opentelemetry-exporter-otlp-proto-grpc", "opentelemetry-exporter-otlp-proto-http", "opentelemetry-instrumentation", "opentelemetry-instrumentation-asyncio", "opentelemetry-instrumentation-logging", "opentelemetry-instrumentation-threading", "opentelemetry-propagator-gcp", "opentelemetry-proto", "opentelemetry-resourcedetector-gcp", "opentelemetry-sdk", "opentelemetry-semantic-conventions"]
+strands = ["strands-agents"]
 
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.11,<3.14"
-content-hash = "ef771290bf6eb3d38772169d3060041d965fa03fef5b93a994b4182727c7e192"
+content-hash = "0b30334d27ea6cd335cae63dc429e9642eac543b8988cfd81a3513805b2731f9"
