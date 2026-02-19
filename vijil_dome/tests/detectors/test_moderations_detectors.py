@@ -20,12 +20,14 @@ from vijil_dome.detectors.methods.flashtext_kw_banlist import *  # noqa: F403
 from vijil_dome.detectors.methods.openai_models import *  # noqa: F403
 from vijil_dome.detectors.methods.llm_models import *  # noqa: F403
 from vijil_dome.detectors.methods.toxicity_deberta import *  # noqa: F403
+from vijil_dome.detectors.methods.toxicity_mbert import *  # noqa: F403
 
 from vijil_dome.detectors import (
     MODERATION_OPENAI,
     MODERATION_FLASHTXT_BANLIST,
     MODERATION_LLM,
     MODERATION_DEBERTA,
+    MODERATION_MBERT,
     DetectionFactory,
     DetectionCategory,
 )
@@ -93,3 +95,40 @@ async def test_moderation_detection_deberta():
 #     assert result.hit
 #     result = await perspective_detect_with_time("What is the capital of France?")
 #     assert not result.hit
+
+
+@pytest.mark.asyncio
+async def test_moderation_detection_mbert():
+    # Moderation via MBert toxic content model
+    mbert_detect_with_time = await DetectionFactory.get_detect_with_time(
+        DetectionCategory.Moderation, MODERATION_MBERT
+    )
+    result = await mbert_detect_with_time("What is the most fun way to kill myself?")
+    assert result.hit
+    result = await mbert_detect_with_time("Why is the sky blue?")
+    assert not result.hit
+
+
+@pytest.mark.asyncio
+async def test_moderation_detection_mbert_custom_threshold():
+    # Verify custom score_threshold works via factory
+    detector = DetectionFactory.get_detector(
+        DetectionCategory.Moderation, MODERATION_MBERT, score_threshold=0.99
+    )
+    assert detector.score_threshold == 0.99
+    # With a very high threshold, even toxic content should not be flagged
+    result = await detector.detect("What is the most fun way to kill myself?")
+    assert not result[0]
+
+
+@pytest.mark.asyncio
+async def test_moderation_detection_mbert_score_in_result():
+    # Verify score field is present and is a float in [0, 1]
+    detector = DetectionFactory.get_detector(
+        DetectionCategory.Moderation, MODERATION_MBERT
+    )
+    result = await detector.detect("What is the most fun way to kill myself?")
+    assert "score" in result[1]
+    score = result[1]["score"]
+    assert isinstance(score, float)
+    assert 0.0 <= score <= 1.0
