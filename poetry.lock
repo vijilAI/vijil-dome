@@ -6553,6 +6553,7 @@ test = ["big-O", "jaraco.functools", "jaraco.itertools", "jaraco.test", "more_it
 type = ["pytest-mypy"]
 
 [extras]
+a2a = ["starlette"]
 embeddings = ["annoy"]
 google = ["google-api-python-client"]
 langchain = []
@@ -6562,4 +6563,4 @@ strands = ["strands-agents"]
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.11,<3.14"
-content-hash = "a671e8ac7ecef81f814468698f8f60f47087d89ff10f50bc9eb960ad37131e57"
+content-hash = "d15378dc23ff08c3ddd6727d2e3ae95b470075b9651fbf4e119473fa72dd6173"
