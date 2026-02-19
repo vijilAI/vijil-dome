@@ -189,7 +189,9 @@ async def test_guardrail_parallel_early_exit():
 
     # Verify the guardrail was flagged
     assert result.flagged is True
-    assert "Blocked by input guardrail" in result.guardrail_response_message
+    # Check for the new default blocked message pattern (DOME-44)
+    # which uses LLM-safe refusal phrases recognized by Diamond
+    assert "I'm not able to" in result.guardrail_response_message
 
 
 @pytest.mark.asyncio
