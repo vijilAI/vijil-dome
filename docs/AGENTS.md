@@ -9,7 +9,7 @@ This file provides detailed guidance for AI agents (Claude Code, etc.) when work
 - **Input Guards** - Detect prompt injections, jailbreaks, toxicity before agent processing
 - **Output Guards** - Detect unsafe outputs, mask PII, filter harmful content
 - **Detection Methods** - ~20 prebuilt detectors using HuggingFace, LLMs, heuristics
-- **Framework Integrations** - Google ADK, LangChain, MCP, OpenTelemetry
+- **Framework Integrations** - Google ADK, LangChain, MCP, Strands, OpenTelemetry
 
 ## Architecture
 
@@ -48,6 +48,7 @@ vijil_dome/
 │   ├── adk/                   # Google ADK callbacks
 │   ├── langchain/             # LangChain runnable
 │   ├── mcp/                   # MCP wrapper
+│   ├── strands/               # Strands agent hooks
 │   └── vijil/                 # Vijil platform integration
 │
 └── instrumentation/           # Observability
@@ -165,6 +166,18 @@ poetry run pytest vijil_dome/tests/detectors/test_security_detectors.py -v
 - **ADK**: Use `DomeCallback` for before/after model hooks
 - **LangChain**: Use `DomeRunnable` in chains
 - **MCP**: Use `DomeMCPWrapper` for tool wrapping
+- **Strands**: Use `DomeHookProvider` for before/after model hooks
+
+### Strands Integration
+
+```python
+from vijil_dome import Dome
+from vijil_dome.integrations.strands import DomeHookProvider
+from strands import Agent
+
+dome = Dome(config)
+agent = Agent(hooks=[DomeHookProvider(dome, agent_id="my-agent")])
+```
 
 ## Relationship to Other Repos
 
