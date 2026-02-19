@@ -222,9 +222,14 @@ class TestSetDarwinSpanAttributes:
         span.set_attribute.assert_any_call("detection.score", 0.01)
 
 
+import importlib.util
+_otel_available = importlib.util.find_spec("opentelemetry") is not None
+
+
 # --- Tests: _add_darwin_detection_spans integration ---
 
 
+@pytest.mark.skipif(not _otel_available, reason="opentelemetry not installed")
 class TestAddDarwinDetectionSpans:
     """Test that _add_darwin_detection_spans wraps scan correctly."""
 
