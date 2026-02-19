@@ -17,7 +17,7 @@
 from vijil_dome.detectors import (
     PI_MBERT,
     PRIVACY_PRESIDIO,
-    MODERATION_DEBERTA,
+    MODERATION_MBERT,
     MODERATION_FLASHTXT_BANLIST,
 )
 
@@ -35,7 +35,7 @@ class DefaultGuardrailConfig:
             "moderation_default": {
                 "type": "moderation",
                 "exit-early": True,
-                "methods": [MODERATION_DEBERTA, MODERATION_FLASHTXT_BANLIST],
+                "methods": [MODERATION_MBERT, MODERATION_FLASHTXT_BANLIST],
             }
         }
 

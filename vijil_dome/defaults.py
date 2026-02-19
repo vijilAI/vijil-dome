@@ -18,7 +18,7 @@ from vijil_dome.detectors import (
     ENCODING_HEURISTICS,
     PI_MBERT,
     PRIVACY_PRESIDIO,
-    MODERATION_DEBERTA,
+    MODERATION_MBERT,
     MODERATION_FLASHTXT_BANLIST,
 )
 
@@ -34,7 +34,7 @@ class DefaultDomeConfig:
         self.moderation_default = {
             "moderation_default": {
                 "type": "moderation",
-                "methods": [MODERATION_FLASHTXT_BANLIST, MODERATION_DEBERTA],
+                "methods": [MODERATION_FLASHTXT_BANLIST, MODERATION_MBERT],
             }
         }
 
