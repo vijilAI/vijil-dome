@@ -30,6 +30,7 @@ MODERATION_OPENAI = "moderations-oai-api"
 MODERATION_LLM = "moderation-prompt-engineering"
 MODERATION_PERSPECTIVE = "moderation-perspective-api"
 MODERATION_DEBERTA = "moderation-deberta"
+MODERATION_MBERT = "moderation-mbert"
 
 PRIVACY_PRESIDIO = "privacy-presidio"
 DETECT_SECRETS = "detect-secrets"
@@ -50,6 +51,7 @@ FACTCHECK_ROBERTA = "fact-check-roberta"
 FACTCHECK_LLM = "fact-check-llm"
 
 GENERIC_LLM = "generic-llm"
+POLICY_GPT_OSS_SAFEGUARD = "policy-gpt-oss-safeguard"
 
 # Define types for detection results and data
 DetectorType = Dict["type", str]

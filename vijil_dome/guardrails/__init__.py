@@ -194,7 +194,7 @@ class Guard:
                             query_string, agent_id=agent_id
                         )
                 except TimeoutError:
-                    logger.warn(
+                    logger.warning(
                         f"Detection method {detector.__class__.__name__} timed out."
                     )
                     result = DetectionTimingResult(
@@ -223,29 +223,36 @@ class Guard:
                 )
 
             for task in done:
-                task_name = task.result()["name"]
-                task_result = task.result()["result"]
-                if not task.cancelled() and not task.exception():
-                    if task_result.hit:
-                        response_string = (
-                            self.blocked_response_string
-                            + task_result.result.get("response_string", "")
+                if task.cancelled():
+                    continue
+                if task.exception():
+                    logger.warning(
+                        f"Task {task.get_name()} raised exception: {task.exception()}"
+                    )
+                    continue
+                result = task.result()
+                task_name = result["name"]
+                task_result = result["result"]
+                if task_result.hit:
+                    response_string = (
+                        self.blocked_response_string
+                        + task_result.result.get("response_string", "")
+                    )
+                    flagged = True
+                    for p in pending:
+                        p.cancel()
+                    break
+                if not flagged:
+                    if "response_string" not in task_result.result:
+                        logger.warning(
+                            f"No response string was found from result in task {task.get_name()}"
                         )
-                        flagged = True
-                        for p in pending:
-                            p.cancel()
-                        break
-                    if not flagged:
-                        if "response_string" not in task_result.result:
-                            logger.warn(
-                                f"No response string was found from result in task {task.get_name()}"
+                    else:
+                        if task_result.result["response_string"] != query_string:
+                            response_string = task_result.result.get(
+                                "response_string", ""
                             )
-                        else:
-                            if task_result.result["response_string"] != query_string:
-                                response_string = task_result.result.get(
-                                    "response_string", ""
-                                )
-                    detector_results[task_name] = task_result
+                detector_results[task_name] = task_result
             tasks = pending
         exec_time = time.time() - st_time
         detection_score = max(
@@ -376,21 +383,28 @@ class Guardrail:
                 )
 
             for task in done:
-                task_name = task.result()["name"]
-                task_result = task.result()["result"]
+                if task.cancelled():
+                    continue
+                if task.exception():
+                    logger.warning(
+                        f"Task {task.get_name()} raised exception: {task.exception()}"
+                    )
+                    continue
+                result = task.result()
+                task_name = result["name"]
+                task_result = result["result"]
                 guard_results[task_name] = task_result
-                if not task.cancelled() and not task.exception():
-                    if task_result.triggered:
-                        response_string = (
-                            self.blocked_response_string + task_result.response
-                        )
-                        flagged = True
-                        for p in pending:
-                            p.cancel()
-                        break
-                    if not flagged:
-                        if task_result.response != query_string:
-                            response_string = task_result.response
+                if task_result.triggered:
+                    response_string = (
+                        self.blocked_response_string + task_result.response
+                    )
+                    flagged = True
+                    for p in pending:
+                        p.cancel()
+                    break
+                if not flagged:
+                    if task_result.response != query_string:
+                        response_string = task_result.response
             tasks = pending
         exec_time = time.time() - st_time
         detection_score = max(

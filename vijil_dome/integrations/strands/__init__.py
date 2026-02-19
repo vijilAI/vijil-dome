@@ -14,28 +14,14 @@
 #
 # vijil and vijil-dome are trademarks owned by Vijil Inc.
 
-# Exposing all method files for ease of import
+from vijil_dome.integrations.strands.hooks import (
+    DEFAULT_INPUT_BLOCKED_MESSAGE,
+    DEFAULT_OUTPUT_BLOCKED_MESSAGE,
+    DomeHookProvider,
+)
+
 __all__ = [
-    "factcheck_roberta",
-    "flashtext_kw_banlist",
-    "hhem_hallucination",
-    "jb_perplexity_heuristics",
-    "llm_models",
-    "openai_models",
-    "pi_hf_deberta",
-    "pi_hf_mbert",
-    "pii_presidio",
-    "toxicity_deberta",
-    "toxicity_mbert",
-    "embedding_models",
-    "secret_detector",
-    "encoding_heuristics",
-    "gpt_oss_safeguard_policy",
+    "DomeHookProvider",
+    "DEFAULT_INPUT_BLOCKED_MESSAGE",
+    "DEFAULT_OUTPUT_BLOCKED_MESSAGE",
 ]
-
-try:
-    import googleapiclient  # noqa: F401
-
-    __all__.append("perspective")
-except ImportError:
-    pass

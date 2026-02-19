@@ -13,29 +13,3 @@
 # limitations under the License.
 #
 # vijil and vijil-dome are trademarks owned by Vijil Inc.
-
-# Exposing all method files for ease of import
-__all__ = [
-    "factcheck_roberta",
-    "flashtext_kw_banlist",
-    "hhem_hallucination",
-    "jb_perplexity_heuristics",
-    "llm_models",
-    "openai_models",
-    "pi_hf_deberta",
-    "pi_hf_mbert",
-    "pii_presidio",
-    "toxicity_deberta",
-    "toxicity_mbert",
-    "embedding_models",
-    "secret_detector",
-    "encoding_heuristics",
-    "gpt_oss_safeguard_policy",
-]
-
-try:
-    import googleapiclient  # noqa: F401
-
-    __all__.append("perspective")
-except ImportError:
-    pass
