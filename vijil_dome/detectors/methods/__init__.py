@@ -26,6 +26,7 @@ __all__ = [
     "pi_hf_mbert",
     "pii_presidio",
     "toxicity_deberta",
+    "toxicity_mbert",
     "embedding_models",
     "secret_detector",
     "encoding_heuristics",
