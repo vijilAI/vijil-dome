@@ -16,9 +16,10 @@
 
 """Dome A2A Integration — Starlette/FastAPI middleware for A2A JSON-RPC.
 
-Intercepts incoming A2A requests, extracts user messages from JSON-RPC
-envelopes, and runs them through Dome's input guardrail. Blocked requests
-receive a valid A2A JSON-RPC refusal response.
+Intercepts incoming A2A requests and outgoing responses, running them through
+Dome's input and output guardrails respectively. Blocked requests receive a
+valid A2A JSON-RPC refusal response. Streaming (SSE) responses are not scanned
+for outputs; a warning is logged when they are encountered.
 
 Usage:
     from vijil_dome import Dome
@@ -36,7 +37,7 @@ from typing import Optional
 try:
     from starlette.middleware.base import BaseHTTPMiddleware
     from starlette.requests import Request
-    from starlette.responses import JSONResponse
+    from starlette.responses import JSONResponse, Response
 except ImportError:
     raise RuntimeError(
         "starlette is required for A2A middleware integration. "
@@ -114,20 +115,23 @@ def a2a_blocked_response(request_id: Optional[str], message: str = DEFAULT_BLOCK
 
 
 class DomeA2AMiddleware(BaseHTTPMiddleware):
-    """Starlette middleware that applies Dome input guardrails to A2A requests.
+    """Starlette middleware that applies Dome guardrails to A2A requests and responses.
 
-    Scans user messages extracted from A2A JSON-RPC envelopes. Blocked requests
-    receive a valid A2A JSON-RPC refusal response.
+    Scans user messages extracted from A2A JSON-RPC envelopes through the input
+    guardrail. Blocked requests receive a valid A2A JSON-RPC refusal response.
+    Non-streaming responses are also scanned through the output guardrail.
+    Streaming (SSE) responses skip output scanning with a logged warning.
 
     Telemetry (split metrics + Darwin spans) is handled upstream by
     ``instrument_dome()`` — this middleware only orchestrates the scan.
 
     Args:
         app: The ASGI application to wrap.
-        dome: A configured ``Dome`` instance with an input guardrail.
+        dome: A configured ``Dome`` instance.
         agent_id: Agent identifier for telemetry attribution.
         team_id: Team identifier for telemetry attribution.
         blocked_message: Custom refusal message (optional).
+        scan_timeout: Seconds to wait for each guardrail scan before passing through.
 
     Usage::
 
@@ -140,6 +144,7 @@ class DomeA2AMiddleware(BaseHTTPMiddleware):
             dome=dome,
             agent_id="my-agent-id",
             team_id="my-team-id",
+            scan_timeout=15.0,
         )
     """
 
@@ -150,12 +155,56 @@ class DomeA2AMiddleware(BaseHTTPMiddleware):
         agent_id: str = "",
         team_id: str = "",
         blocked_message: str = DEFAULT_BLOCKED_MESSAGE,
+        scan_timeout: float = 30.0,
     ):
         super().__init__(app)
         self.dome = dome
         self.agent_id = agent_id
         self.team_id = team_id
         self.blocked_message = blocked_message
+        self.scan_timeout = scan_timeout
+
+    async def _scan_input(self, user_message: str) -> bool:
+        """Run input guardrail. Returns True if the message should be blocked."""
+        if self.dome.input_guardrail is None:
+            return False
+        try:
+            scan = await asyncio.wait_for(
+                self.dome.input_guardrail.async_scan(
+                    user_message,
+                    agent_id=self.agent_id,
+                    team_id=self.team_id,
+                ),
+                timeout=self.scan_timeout,
+            )
+        except asyncio.TimeoutError:
+            logger.warning(
+                "Dome input scan timed out after %.1fs, passing request through",
+                self.scan_timeout,
+            )
+            return False
+        return scan.flagged
+
+    async def _scan_output(self, response_text: str) -> bool:
+        """Run output guardrail. Returns True if the response should be blocked."""
+        if self.dome.output_guardrail is None:
+            return False
+        try:
+            scan = await asyncio.wait_for(
+                self.dome.output_guardrail.async_scan(
+                    response_text,
+                    agent_id=self.agent_id,
+                    team_id=self.team_id,
+                ),
+                timeout=self.scan_timeout,
+            )
+        except asyncio.TimeoutError:
+            logger.warning(
+                "Dome output scan timed out after %.1fs, passing response through",
+                self.scan_timeout,
+            )
+            return False
+        return scan.flagged
 
     async def dispatch(self, request: Request, call_next):  # type: ignore[override]
         if request.method != "POST":
@@ -173,28 +222,48 @@ class DomeA2AMiddleware(BaseHTTPMiddleware):
             return await call_next(request)
 
         user_message = extract_a2a_message(body)
-        if user_message and self.dome.input_guardrail is not None:
-            try:
-                scan = await asyncio.wait_for(
-                    self.dome.input_guardrail.async_scan(
-                        user_message,
-                        agent_id=self.agent_id,
-                        team_id=self.team_id,
-                    ),
-                    timeout=30.0,
-                )
-            except asyncio.TimeoutError:
-                logger.warning("Dome scan timed out after 30s, passing request through")
-                return await call_next(request)
-            if scan.flagged:
-                logger.warning("Dome blocked A2A request: %s...", user_message[:80])
-                return JSONResponse(
-                    content=a2a_blocked_response(body.get("id"), self.blocked_message)
-                )
+        if user_message and await self._scan_input(user_message):
+            logger.warning("Dome blocked A2A request: %s...", user_message[:80])
+            return JSONResponse(
+                content=a2a_blocked_response(body.get("id"), self.blocked_message)
+            )
 
         # Replay consumed body bytes for downstream handlers
         async def receive():
             return {"type": "http.request", "body": body_bytes}
         request._receive = receive  # type: ignore[attr-defined]
 
-        return await call_next(request)
+        response = await call_next(request)
+
+        # Output scanning: buffer non-streaming JSON responses only
+        response_content_type = response.headers.get("content-type", "")
+        if self.dome.output_guardrail is not None and user_message:
+            if "text/event-stream" in response_content_type:
+                logger.warning(
+                    "Dome output scanning skipped for SSE streaming response"
+                )
+            elif "application/json" in response_content_type:
+                response_body = b""
+                async for chunk in response.body_iterator:
+                    response_body += chunk if isinstance(chunk, bytes) else chunk.encode()
+                try:
+                    response_text = response_body.decode("utf-8", errors="replace")
+                    if await self._scan_output(response_text):
+                        logger.warning(
+                            "Dome blocked A2A response: %s...", response_text[:80]
+                        )
+                        return JSONResponse(
+                            content=a2a_blocked_response(
+                                body.get("id"), self.blocked_message
+                            )
+                        )
+                except Exception as e:
+                    logger.warning("Dome output scan failed, passing response through: %s", e)
+                return Response(
+                    content=response_body,
+                    status_code=response.status_code,
+                    headers=dict(response.headers),
+                    media_type=response.media_type,
+                )
+
+        return response
