@@ -7,6 +7,7 @@ Verifies that:
   the existing split metrics.
 """
 
+import importlib.util
 from unittest.mock import MagicMock
 
 import pytest
@@ -222,7 +223,6 @@ class TestSetDarwinSpanAttributes:
         span.set_attribute.assert_any_call("detection.score", 0.01)
 
 
-import importlib.util
 _otel_available = importlib.util.find_spec("opentelemetry") is not None
 
 
