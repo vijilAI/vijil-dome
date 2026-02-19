@@ -223,7 +223,7 @@ class TestSetDarwinSpanAttributes:
         span.set_attribute.assert_any_call("detection.score", 0.01)
 
 
-_otel_available = importlib.util.find_spec("opentelemetry") is not None
+_otel_available = importlib.util.find_spec("opentelemetry.sdk") is not None
 
 
 # --- Tests: _add_darwin_detection_spans integration ---
