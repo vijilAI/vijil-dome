@@ -26,6 +26,7 @@ GUARDRAIL_CATEGORY_MAPPING = {
     "privacy": DetectionCategory.Privacy,
     "integrity": DetectionCategory.Integrity,
     "generic": DetectionCategory.Generic,
+    "policy": DetectionCategory.Policy,
 }
 
 EARLY_EXIT = "early-exit"
@@ -76,9 +77,20 @@ def create_guard(guard_name: str, guard_config_dict: dict) -> Guard:
             detector_config_dict = guard_config_dict[detector_name]
         else:
             detector_config_dict = {}
+        
+        # Support 'method' field in config to override the detector method name
+        # This allows multiple instances of the same detector with different configs
+        actual_method_name = detector_config_dict.get("method", detector_name)
+        
+        # Remove 'method' field from config dict before passing to detector constructor
+        # (it's used for detector identification, not a constructor parameter)
+        filtered_config = {
+            k: v for k, v in detector_config_dict.items() if k != "method"
+        }
+        
         detector_list.append(
             create_detector_for_guard(
-                detector_name, guard_config_dict["type"], detector_config_dict
+                actual_method_name, guard_config_dict["type"], filtered_config
             )
         )
     return Guard(guard_name, detector_list, guard_fail_policy, guard_parallel_policy)
