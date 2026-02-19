@@ -38,6 +38,8 @@ class GuardResult(BaseModel):
     details: Dict[str, DetectionTimingResult]
     exec_time: float
     response: str
+    detection_score: float = 0.0
+    triggered_methods: List[str] = []
 
     def __str__(self):
         result_dict = {
@@ -57,6 +59,8 @@ class GuardrailResult(BaseModel):
     guardrail_response_message: str
     exec_time: float
     guard_exec_details: Dict[str, GuardResult]
+    detection_score: float = 0.0
+    triggered_methods: List[str] = []
 
     def __str__(self):
         result_dict = {
@@ -134,11 +138,22 @@ class Guard:
                         "response_string"
                     ]  # For guards with passthroughs
         exec_time = time.time() - st_time
+        detection_score = max(
+            (
+                float(d.result.get("score", 0.0))
+                for d in detector_results.values()
+                if d.hit and isinstance(d.result, dict) and isinstance(d.result.get("score"), (int, float))
+            ),
+            default=0.0,
+        )
+        triggered_methods = [name for name, d in detector_results.items() if d.hit]
         return GuardResult(
             triggered=flagged,
             details=detector_results,
             exec_time=exec_time,
             response=response_string,
+            detection_score=detection_score,
+            triggered_methods=triggered_methods,
         )
 
     # Parallel Guard
@@ -233,11 +248,22 @@ class Guard:
                     detector_results[task_name] = task_result
             tasks = pending
         exec_time = time.time() - st_time
+        detection_score = max(
+            (
+                float(d.result.get("score", 0.0))
+                for d in detector_results.values()
+                if d.hit and isinstance(d.result, dict) and isinstance(d.result.get("score"), (int, float))
+            ),
+            default=0.0,
+        )
+        triggered_methods = [name for name, d in detector_results.items() if d.hit]
         return GuardResult(
             triggered=flagged,
             details=detector_results,
             exec_time=exec_time,
             response=response_string,
+            detection_score=detection_score,
+            triggered_methods=triggered_methods,
         )
 
     # Sync method that runs the regular guard or parallel guard based on config
@@ -302,11 +328,23 @@ class Guardrail:
                 if guard_scan_result.response != query_string:
                     response_string = guard_scan_result.response
         exec_time = time.time() - st_time
+        detection_score = max(
+            (gr.detection_score for gr in guard_results.values() if gr.triggered),
+            default=0.0,
+        )
+        triggered_methods = [
+            method
+            for gr in guard_results.values()
+            if gr.triggered
+            for method in gr.triggered_methods
+        ]
         return GuardrailResult(
             flagged=flagged,
             guardrail_response_message=response_string,
             exec_time=exec_time,
             guard_exec_details=guard_results,
+            detection_score=detection_score,
+            triggered_methods=triggered_methods,
         )
 
     # Parallel guard
@@ -355,11 +393,23 @@ class Guardrail:
                             response_string = task_result.response
             tasks = pending
         exec_time = time.time() - st_time
+        detection_score = max(
+            (gr.detection_score for gr in guard_results.values() if gr.triggered),
+            default=0.0,
+        )
+        triggered_methods = [
+            method
+            for gr in guard_results.values()
+            if gr.triggered
+            for method in gr.triggered_methods
+        ]
         return GuardrailResult(
             flagged=flagged,
             guardrail_response_message=response_string,
             exec_time=exec_time,
             guard_exec_details=guard_results,
+            detection_score=detection_score,
+            triggered_methods=triggered_methods,
         )
 
     # Sync method that runs the regular guard or parallel guard based on config

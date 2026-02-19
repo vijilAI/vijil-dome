@@ -1,8 +1,10 @@
 """Tests for Darwin-compatible telemetry instrumentation.
 
-Verifies that instrument_dome() emits Darwin span attributes
-(detection.label, detection.score, detection.method, team.id, agent.id)
-alongside the existing split metrics.
+Verifies that:
+- GuardResult and GuardrailResult expose detection_score and triggered_methods
+- instrument_dome() emits Darwin span attributes (detection.label,
+  detection.score, detection.methods, team.id, agent.id) alongside
+  the existing split metrics.
 """
 
 from unittest.mock import MagicMock
@@ -11,14 +13,10 @@ import pytest
 
 from vijil_dome.guardrails import GuardrailResult, GuardResult
 from vijil_dome.detectors import DetectionTimingResult
-from vijil_dome.integrations.vijil.telemetry import (
-    _extract_detection_score,
-    _extract_highest_scoring_method,
-    _set_darwin_span_attributes,
-)
+from vijil_dome.integrations.vijil.telemetry import _set_darwin_span_attributes
 
 
-# --- Fixtures: realistic GuardrailResult objects ---
+# --- Fixtures: realistic GuardrailResult objects with native fields ---
 
 
 def _make_detection(hit: bool, score: float) -> DetectionTimingResult:
@@ -30,24 +28,34 @@ def _make_detection(hit: bool, score: float) -> DetectionTimingResult:
 
 
 def _make_guard_result(
-    triggered: bool, detections: dict[str, DetectionTimingResult]
+    triggered: bool,
+    detections: dict[str, DetectionTimingResult],
+    detection_score: float = 0.0,
+    triggered_methods: list[str] | None = None,
 ) -> GuardResult:
     return GuardResult(
         triggered=triggered,
         details=detections,
         exec_time=0.1,
         response="blocked" if triggered else "",
+        detection_score=detection_score,
+        triggered_methods=triggered_methods or [],
     )
 
 
 def _make_guardrail_result(
-    flagged: bool, guard_details: dict[str, GuardResult]
+    flagged: bool,
+    guard_details: dict[str, GuardResult],
+    detection_score: float = 0.0,
+    triggered_methods: list[str] | None = None,
 ) -> GuardrailResult:
     return GuardrailResult(
         flagged=flagged,
         guard_exec_details=guard_details,
         exec_time=0.2,
         guardrail_response_message="blocked" if flagged else "",
+        detection_score=detection_score,
+        triggered_methods=triggered_methods or [],
     )
 
 
@@ -63,6 +71,8 @@ def flagged_guardrail_result() -> GuardrailResult:
                     "deberta-v3": _make_detection(hit=True, score=0.95),
                     "mbert": _make_detection(hit=False, score=0.15),
                 },
+                detection_score=0.95,
+                triggered_methods=["deberta-v3"],
             ),
             "toxicity": _make_guard_result(
                 triggered=False,
@@ -71,6 +81,8 @@ def flagged_guardrail_result() -> GuardrailResult:
                 },
             ),
         },
+        detection_score=0.95,
+        triggered_methods=["deberta-v3"],
     )
 
 
@@ -90,69 +102,64 @@ def clean_guardrail_result() -> GuardrailResult:
     )
 
 
-# --- Tests: _extract_detection_score ---
+# --- Tests: native fields on GuardResult ---
 
 
-class TestExtractDetectionScore:
-    def test_returns_max_score_from_triggered_guard(
-        self, flagged_guardrail_result: GuardrailResult
-    ):
-        score = _extract_detection_score(flagged_guardrail_result)
-        assert score == 0.95
+class TestGuardResultNativeFields:
+    def test_detection_score_defaults_to_zero(self):
+        guard = _make_guard_result(
+            triggered=False,
+            detections={"det": _make_detection(hit=False, score=0.1)},
+        )
+        assert guard.detection_score == 0.0
 
-    def test_returns_zero_when_nothing_flagged(
-        self, clean_guardrail_result: GuardrailResult
-    ):
-        score = _extract_detection_score(clean_guardrail_result)
-        assert score == 0.0
+    def test_triggered_methods_defaults_empty(self):
+        guard = _make_guard_result(
+            triggered=False,
+            detections={"det": _make_detection(hit=False, score=0.1)},
+        )
+        assert guard.triggered_methods == []
 
-    def test_handles_guard_result_directly(self):
+    def test_stores_score_and_methods(self):
         guard = _make_guard_result(
             triggered=True,
-            detections={"det1": _make_detection(hit=True, score=0.7)},
+            detections={"deberta": _make_detection(hit=True, score=0.9)},
+            detection_score=0.9,
+            triggered_methods=["deberta"],
         )
-        score = _extract_detection_score(guard)
-        assert score == 0.7
+        assert guard.detection_score == 0.9
+        assert guard.triggered_methods == ["deberta"]
 
-    def test_handles_missing_score_key(self):
-        guard = _make_guard_result(
-            triggered=True,
-            detections={
-                "det1": DetectionTimingResult(
-                    hit=True, result={"label": "flagged"}, exec_time=0.01
-                )
-            },
-        )
-        score = _extract_detection_score(guard)
-        assert score == 0.0
-
-
-# --- Tests: _extract_highest_scoring_method ---
-
-
-class TestExtractHighestScoringMethod:
-    def test_returns_first_triggered_guard_name(
-        self, flagged_guardrail_result: GuardrailResult
-    ):
-        method = _extract_highest_scoring_method(flagged_guardrail_result)
-        assert method == "prompt-injection"
-
-    def test_returns_unknown_when_nothing_triggered(
-        self, clean_guardrail_result: GuardrailResult
-    ):
-        method = _extract_highest_scoring_method(clean_guardrail_result)
-        assert method == "unknown"
-
-    def test_returns_detector_name_for_guard_result(self):
+    def test_multiple_triggered_methods(self):
         guard = _make_guard_result(
             triggered=True,
             detections={
-                "not-hit": _make_detection(hit=False, score=0.1),
-                "the-hit": _make_detection(hit=True, score=0.9),
+                "det-a": _make_detection(hit=True, score=0.8),
+                "det-b": _make_detection(hit=True, score=0.6),
             },
+            detection_score=0.8,
+            triggered_methods=["det-a", "det-b"],
         )
-        method = _extract_highest_scoring_method(guard)
-        assert method == "the-hit"
+        assert len(guard.triggered_methods) == 2
+        assert "det-a" in guard.triggered_methods
+        assert "det-b" in guard.triggered_methods
+
+
+# --- Tests: native fields on GuardrailResult ---
+
+
+class TestGuardrailResultNativeFields:
+    def test_detection_score_defaults_to_zero(self, clean_guardrail_result):
+        assert clean_guardrail_result.detection_score == 0.0
+
+    def test_triggered_methods_defaults_empty(self, clean_guardrail_result):
+        assert clean_guardrail_result.triggered_methods == []
+
+    def test_flagged_result_carries_score(self, flagged_guardrail_result):
+        assert flagged_guardrail_result.detection_score == 0.95
+
+    def test_flagged_result_carries_methods(self, flagged_guardrail_result):
+        assert "deberta-v3" in flagged_guardrail_result.triggered_methods
 
 
 # --- Tests: _set_darwin_span_attributes ---
@@ -174,7 +181,8 @@ class TestSetDarwinSpanAttributes:
         span.set_attribute.assert_any_call("agent.id", "agent-123")
         span.set_attribute.assert_any_call("detection.label", "flagged")
         span.set_attribute.assert_any_call("detection.score", 0.95)
-        span.set_attribute.assert_any_call("detection.method", "prompt-injection")
+        span.set_attribute.assert_any_call("detection.method", "deberta-v3")
+        span.set_attribute.assert_any_call("detection.methods", ["deberta-v3"])
 
     def test_sets_clean_label_on_unflagged_result(
         self, clean_guardrail_result: GuardrailResult
@@ -184,7 +192,11 @@ class TestSetDarwinSpanAttributes:
 
         span.set_attribute.assert_any_call("detection.label", "clean")
         span.set_attribute.assert_any_call("detection.score", 0.0)
-        span.set_attribute.assert_any_call("detection.method", "unknown")
+
+        # No methods should be set when nothing triggered
+        call_keys = [call.args[0] for call in span.set_attribute.call_args_list]
+        assert "detection.method" not in call_keys
+        assert "detection.methods" not in call_keys
 
     def test_skips_team_and_agent_when_not_provided(
         self, flagged_guardrail_result: GuardrailResult
@@ -192,10 +204,22 @@ class TestSetDarwinSpanAttributes:
         span = MagicMock()
         _set_darwin_span_attributes(span, flagged_guardrail_result)
 
-        # Should NOT have called set_attribute with team.id or agent.id
         call_keys = [call.args[0] for call in span.set_attribute.call_args_list]
         assert "team.id" not in call_keys
         assert "agent.id" not in call_keys
+
+    def test_perturbation_changing_score_does_not_affect_label(
+        self, flagged_guardrail_result: GuardrailResult
+    ):
+        """Changing detection_score must not flip detection.label."""
+        low_score_result = flagged_guardrail_result.model_copy(
+            update={"detection_score": 0.01}
+        )
+        span = MagicMock()
+        _set_darwin_span_attributes(span, low_score_result)
+
+        span.set_attribute.assert_any_call("detection.label", "flagged")
+        span.set_attribute.assert_any_call("detection.score", 0.01)
 
 
 # --- Tests: _add_darwin_detection_spans integration ---
@@ -209,11 +233,9 @@ class TestAddDarwinDetectionSpans:
             _add_darwin_detection_spans,
         )
 
-        # Create a mock guardrail with scan methods
         guardrail = MagicMock()
         guardrail.scan = MagicMock(return_value=flagged_guardrail_result)
 
-        # Create a mock tracer that returns a context-managed span
         mock_span = MagicMock()
         mock_span.__enter__ = MagicMock(return_value=mock_span)
         mock_span.__exit__ = MagicMock(return_value=False)
@@ -221,23 +243,16 @@ class TestAddDarwinDetectionSpans:
         mock_tracer = MagicMock()
         mock_tracer.start_as_current_span.return_value = mock_span
 
-        # Apply the wrapper
         _add_darwin_detection_spans(guardrail, mock_tracer, "dome-input")
-
-        # Call the wrapped scan
         result = guardrail.scan("test input", agent_id="a1", team_id="t1")
 
-        # Verify span was created
         mock_tracer.start_as_current_span.assert_called_once_with("dome-detection")
-
-        # Verify Darwin attributes were set
         mock_span.set_attribute.assert_any_call("dome.guardrail", "dome-input")
         mock_span.set_attribute.assert_any_call("detection.label", "flagged")
         mock_span.set_attribute.assert_any_call("detection.score", 0.95)
         mock_span.set_attribute.assert_any_call("agent.id", "a1")
         mock_span.set_attribute.assert_any_call("team.id", "t1")
 
-        # Verify the result is passed through
         assert result is flagged_guardrail_result
 
     @pytest.mark.asyncio
@@ -246,7 +261,6 @@ class TestAddDarwinDetectionSpans:
             _add_darwin_detection_spans,
         )
 
-        # Create a mock guardrail with async scan
         guardrail = MagicMock()
 
         async def mock_async_scan(*args, **kwargs):
@@ -254,7 +268,6 @@ class TestAddDarwinDetectionSpans:
 
         guardrail.async_scan = mock_async_scan
 
-        # Create a mock tracer
         mock_span = MagicMock()
         mock_span.__enter__ = MagicMock(return_value=mock_span)
         mock_span.__exit__ = MagicMock(return_value=False)
@@ -262,13 +275,9 @@ class TestAddDarwinDetectionSpans:
         mock_tracer = MagicMock()
         mock_tracer.start_as_current_span.return_value = mock_span
 
-        # Apply the wrapper
         _add_darwin_detection_spans(guardrail, mock_tracer, "dome-output")
-
-        # Call the wrapped async scan
         result = await guardrail.async_scan("test output", agent_id="a2", team_id="t2")
 
-        # Verify span was created
         mock_tracer.start_as_current_span.assert_called_once_with("dome-detection")
         mock_span.set_attribute.assert_any_call("dome.guardrail", "dome-output")
         mock_span.set_attribute.assert_any_call("detection.label", "flagged")
