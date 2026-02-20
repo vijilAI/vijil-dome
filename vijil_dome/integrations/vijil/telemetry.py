@@ -24,7 +24,7 @@ can query from Tempo traces.
 from typing import Optional, Union, TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from opentelemetry.sdk.trace import Span
+    from opentelemetry.trace.span import Span
 
 from vijil_dome.guardrails import GuardrailResult, GuardResult
 
