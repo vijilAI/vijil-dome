@@ -31,6 +31,27 @@ import os
 
 logger = logging.getLogger("vijil.dome")
 
+ENTITY_TYPE_LABELS = {
+    "PHONE_NUMBER": "Phone Number",
+    "EMAIL_ADDRESS": "Email Address",
+    "PERSON": "Person",
+    "CREDIT_CARD": "Credit Card",
+    "US_SSN": "SSN",
+    "IP_ADDRESS": "IP Address",
+    "LOCATION": "Location",
+    "DATE_TIME": "Date/Time",
+    "URL": "URL",
+    "IBAN_CODE": "IBAN",
+    "CRYPTO": "Crypto Wallet",
+    "NRP": "Nationality/Religion/Political Group",
+    "MEDICAL_LICENSE": "Medical License",
+    "US_BANK_NUMBER": "Bank Account",
+    "US_DRIVER_LICENSE": "Driver's License",
+    "US_PASSPORT": "Passport",
+}
+
+_VALID_REDACTION_STYLES = ("labeled", "masked")
+
 
 @register_method(DetectionCategory.Privacy, PRIVACY_PRESIDIO)
 class PresidioDetector(DetectionMethod):
@@ -39,7 +60,14 @@ class PresidioDetector(DetectionMethod):
         score_threshold: float = 0.5,
         anonymize: bool = True,
         allow_list_files: Optional[List[str]] = None,
+        redaction_style: str = "labeled",
     ) -> None:
+        if redaction_style not in _VALID_REDACTION_STYLES:
+            raise ValueError(
+                f"Invalid redaction_style '{redaction_style}'. "
+                f"Must be one of: {', '.join(_VALID_REDACTION_STYLES)}"
+            )
+
         self.allow_list = []
         self.anonymizer = None
         self.anonymization_operators = None
@@ -62,11 +90,20 @@ class PresidioDetector(DetectionMethod):
             )
             self.anonymize = anonymize
 
+            self.redaction_style = redaction_style
             if self.anonymize:
                 self.anonymizer = AnonymizerEngine()
-                self.anonymization_operators = {
-                    "DEFAULT": OperatorConfig("replace", {"new_value": "<REDACTED>"}),
-                }
+                if redaction_style == "masked":
+                    self.anonymization_operators = {
+                        "DEFAULT": OperatorConfig(
+                            "mask",
+                            {
+                                "masking_char": "*",
+                                "chars_to_mask": 100,
+                                "from_end": False,
+                            },
+                        ),
+                    }
             self.blocked_response_string = f"Method:{PRIVACY_PRESIDIO}"
 
         except Exception as e:
@@ -99,10 +136,30 @@ class PresidioDetector(DetectionMethod):
                     )
                 )
 
+            # For labeled style, build operators dynamically so every
+            # detected entity type gets a human-readable label — even
+            # types not present in ENTITY_TYPE_LABELS.
+            operators = self.anonymization_operators
+            if self.redaction_style == "labeled":
+                operators = {}
+                for result in analysis_result:
+                    et = result.entity_type
+                    if et not in operators:
+                        label = ENTITY_TYPE_LABELS.get(
+                            et, et.replace("_", " ").title()
+                        )
+                        operators[et] = OperatorConfig(
+                            "replace",
+                            {"new_value": f"[REDACTED - {label}]"},
+                        )
+                operators["DEFAULT"] = OperatorConfig(
+                    "replace", {"new_value": "[REDACTED]"}
+                )
+
             sanitized_query = self.anonymizer.anonymize(
                 text=query_string,
                 analyzer_results=results_for_anonymization,
-                operators=self.anonymization_operators,
+                operators=operators,
             )
 
             # If anonymized is enabled, PIIs aren't flagged but only sanitized.

@@ -78,3 +78,50 @@ async def test_secret_detection():
     )
     result = await secret_detector.detect_with_time(string_with_key)
     assert result.hit
+
+
+@pytest.mark.asyncio
+async def test_labeled_redaction_style():
+    pii_detector = DetectionFactory.get_detector(
+        DetectionCategory.Privacy,
+        PRIVACY_PRESIDIO,
+        redaction_style="labeled",
+    )
+    query = "Email me at dwayne.johnson@gmail.com or call 555-123-4567"
+    result = await pii_detector.detect_with_time(query)
+    assert "[REDACTED - Email Address]" in result.result["response_string"]
+    assert "[REDACTED - Phone Number]" in result.result["response_string"]
+
+
+@pytest.mark.asyncio
+async def test_masked_redaction_style():
+    pii_detector = DetectionFactory.get_detector(
+        DetectionCategory.Privacy,
+        PRIVACY_PRESIDIO,
+        redaction_style="masked",
+    )
+    query = "Email me at dwayne.johnson@gmail.com"
+    result = await pii_detector.detect_with_time(query)
+    response = result.result["response_string"]
+    assert "dwayne.johnson@gmail.com" not in response
+    assert "***" in response
+
+
+@pytest.mark.asyncio
+async def test_default_redaction_style_is_labeled():
+    pii_detector = DetectionFactory.get_detector(
+        DetectionCategory.Privacy,
+        PRIVACY_PRESIDIO,
+    )
+    query = "Email me at dwayne.johnson@gmail.com"
+    result = await pii_detector.detect_with_time(query)
+    assert "[REDACTED - Email Address]" in result.result["response_string"]
+
+
+def test_invalid_redaction_style():
+    with pytest.raises(ValueError, match="Invalid redaction_style"):
+        DetectionFactory.get_detector(
+            DetectionCategory.Privacy,
+            PRIVACY_PRESIDIO,
+            redaction_style="unknown",
+        )
