@@ -24,8 +24,9 @@ from vijil_dome.detectors import (
     register_method,
     DetectionCategory,
     DetectionResult,
+    BatchDetectionResult,
 )
-from typing import Optional
+from typing import List, Optional
 from transformers import pipeline
 from torch.nn.functional import softmax
 from vijil_dome.detectors.utils.hf_model import HFBaseModel
@@ -86,6 +87,20 @@ class BaseDebertaPromptInjectionModel(HFBaseModel):
     async def detect(self, query_string: str) -> DetectionResult:
         logger.info(f"Detecting using {self.__class__.__name__}...")
         return self.sync_detect(query_string)
+
+    async def detect_batch(self, inputs: List[str]) -> BatchDetectionResult:
+        preds = self.classifier(inputs)
+        results = []
+        for query_string, pred in zip(inputs, preds):
+            # Batch pipeline returns list of dicts; single returns list of list of dicts
+            item = pred[0] if isinstance(pred, list) else pred
+            flagged = item["label"] != "SAFE"
+            results.append((flagged, {
+                "type": type(self),
+                "predictions": [item],
+                "response_string": self.response_string if flagged else query_string,
+            }))
+        return results
 
 
 @register_method(DetectionCategory.Security, PI_DEBERTA_V3_BASE)

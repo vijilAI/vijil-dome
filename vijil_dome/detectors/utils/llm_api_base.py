@@ -14,12 +14,13 @@
 #
 # vijil and vijil-dome are trademarks owned by Vijil Inc.
 
+import asyncio
 import os
 from abc import ABC, abstractmethod
-from typing import Optional
+from typing import List, Optional
 from litellm import ModelResponse
 
-from vijil_dome.detectors import DetectionResult, DetectionMethod
+from vijil_dome.detectors import DetectionResult, BatchDetectionResult, DetectionMethod
 
 
 class LlmBaseDetector(DetectionMethod, ABC):
@@ -63,6 +64,10 @@ class LlmBaseDetector(DetectionMethod, ABC):
     @abstractmethod
     async def detect(self, query_string: str) -> DetectionResult:
         pass
+
+    async def detect_batch(self, inputs: List[str]) -> BatchDetectionResult:
+        tasks = [self.detect(query) for query in inputs]
+        return list(await asyncio.gather(*tasks))
 
 
 class LlmBaseDetectorWithContext(LlmBaseDetector):
