@@ -14,7 +14,7 @@
 #
 # vijil and vijil-dome are trademarks owned by Vijil Inc.
 
-from vijil_dome.detectors import DetectionMethod, DetectionTimingResult, BatchDetectionTimingResult
+from vijil_dome.detectors import DetectionMethod, DetectionTimingResult
 import asyncio
 from asyncio import Task  # noqa: F401
 import concurrent.futures

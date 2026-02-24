@@ -103,7 +103,7 @@ class BatchScanResult(BaseModel):
     def __getitem__(self, index: int) -> ScanResult:
         return self.items[index]
 
-    def __iter__(self) -> Iterator[ScanResult]:
+    def __iter__(self) -> Iterator[ScanResult]:  # type: ignore[override]
         return iter(self.items)
 
     def all_safe(self) -> bool:

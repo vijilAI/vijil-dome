@@ -15,19 +15,16 @@
 # vijil and vijil-dome are trademarks owned by Vijil Inc.
 
 import pytest
-import asyncio
-from unittest.mock import AsyncMock
 
-from vijil_dome import Dome, create_dome_config, BatchScanResult
+from vijil_dome import Dome, BatchScanResult
 from vijil_dome.Dome import ScanResult
 from vijil_dome.detectors import (
     DetectionMethod,
     DetectionResult,
-    BatchDetectionResult,
     BatchDetectionTimingResult,
     DetectionTimingResult,
 )
-from vijil_dome.guardrails import Guard, Guardrail, GuardResult, BatchGuardResult, BatchGuardrailResult
+from vijil_dome.guardrails import Guard, Guardrail, BatchGuardResult, BatchGuardrailResult
 
 
 # ---------------------------------------------------------------------------
