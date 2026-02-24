@@ -76,6 +76,11 @@ class GuardResult(BaseModel):
         return self.__str__()
 
 
+class BatchGuardResult(BaseModel):
+    items: List[GuardResult]
+    exec_time: float
+
+
 class GuardrailResult(BaseModel):
     flagged: bool
     guardrail_response_message: str
@@ -95,6 +100,11 @@ class GuardrailResult(BaseModel):
 
     def __repr__(self):
         return self.__str__()
+
+
+class BatchGuardrailResult(BaseModel):
+    items: List[GuardrailResult]
+    exec_time: float
 
 
 # Enable detectors that have blocking sync_detect methods to run on another thread
@@ -316,6 +326,69 @@ class Guard:
         else:
             return await self.sequential_guard(query_string, agent_id=agent_id)
 
+    # Batch guard - processes all inputs through all detectors
+    async def sequential_guard_batch(
+        self, inputs: List[str], agent_id: Optional[str] = None
+    ) -> BatchGuardResult:
+        st_time = time.time()
+        n = len(inputs)
+        item_flagged = [False] * n
+        item_response = list(inputs)
+        item_detector_results: List[Dict[str, DetectionTimingResult]] = [{} for _ in range(n)]
+
+        for detector in self.detector_list:
+            batch_timing = await detector.detect_batch_with_time(inputs, agent_id=agent_id)
+            detector_name = type(detector).__name__
+
+            for i, det_result in enumerate(batch_timing.results):
+                item_detector_results[i][detector_name] = det_result
+                if det_result.hit:
+                    item_response[i] = (
+                        self.blocked_response_string
+                        + det_result.result["response_string"]
+                    )
+                    item_flagged[i] = True
+                elif not item_flagged[i]:
+                    if det_result.result.get("response_string") != inputs[i]:
+                        item_response[i] = det_result.result.get(
+                            "response_string", inputs[i]
+                        )
+
+        items = []
+        for i in range(n):
+            detection_score = max(
+                (
+                    float(d.result.get("score", 0.0))
+                    for d in item_detector_results[i].values()
+                    if d.hit and isinstance(d.result, dict) and isinstance(d.result.get("score"), (int, float))
+                ),
+                default=0.0,
+            )
+            triggered_methods = [
+                name for name, d in item_detector_results[i].items() if d.hit
+            ]
+            items.append(GuardResult(
+                triggered=item_flagged[i],
+                details=item_detector_results[i],
+                exec_time=0.0,
+                response=item_response[i],
+                detection_score=detection_score,
+                triggered_methods=triggered_methods,
+            ))
+
+        exec_time = time.time() - st_time
+        return BatchGuardResult(items=items, exec_time=exec_time)
+
+    async def async_scan_batch(
+        self, inputs: List[str], executor=None, agent_id: Optional[str] = None
+    ) -> BatchGuardResult:
+        return await self.sequential_guard_batch(inputs, agent_id=agent_id)
+
+    def scan_batch(
+        self, inputs: List[str], executor=None, agent_id: Optional[str] = None
+    ) -> BatchGuardResult:
+        return asyncio.run(self.async_scan_batch(inputs, executor, agent_id=agent_id))
+
 
 class Guardrail:
     def __init__(
@@ -474,6 +547,69 @@ class Guardrail:
         else:
             logger.info(f'Scanning "{query_string}" through guards sequentially.')
             return await self.sequential_guard(query_string, agent_id=agent_id)
+
+    # Batch guardrail - processes all inputs through all guards
+    async def sequential_guard_batch(
+        self, inputs: List[str], agent_id: Optional[str] = None
+    ) -> BatchGuardrailResult:
+        st_time = time.time()
+        n = len(inputs)
+        item_flagged = [False] * n
+        item_response = list(inputs)
+        item_guard_results: List[Dict[str, GuardResult]] = [{} for _ in range(n)]
+
+        for guard in self.guard_list:
+            batch_guard_result = await guard.async_scan_batch(
+                inputs, self.executor, agent_id=agent_id
+            )
+            for i, guard_result in enumerate(batch_guard_result.items):
+                item_guard_results[i][guard.guard_name] = guard_result
+                if guard_result.triggered:
+                    item_response[i] = (
+                        self.blocked_response_string + guard_result.response
+                    )
+                    item_flagged[i] = True
+                elif not item_flagged[i]:
+                    if guard_result.response != inputs[i]:
+                        item_response[i] = guard_result.response
+
+        items = []
+        for i in range(n):
+            detection_score = max(
+                (
+                    gr.detection_score
+                    for gr in item_guard_results[i].values()
+                    if gr.triggered
+                ),
+                default=0.0,
+            )
+            triggered_methods = [
+                method
+                for gr in item_guard_results[i].values()
+                if gr.triggered
+                for method in gr.triggered_methods
+            ]
+            items.append(GuardrailResult(
+                flagged=item_flagged[i],
+                guardrail_response_message=item_response[i],
+                exec_time=0.0,
+                guard_exec_details=item_guard_results[i],
+                detection_score=detection_score,
+                triggered_methods=triggered_methods,
+            ))
+
+        exec_time = time.time() - st_time
+        return BatchGuardrailResult(items=items, exec_time=exec_time)
+
+    async def async_scan_batch(
+        self, inputs: List[str], agent_id: Optional[str] = None
+    ) -> BatchGuardrailResult:
+        return await self.sequential_guard_batch(inputs, agent_id=agent_id)
+
+    def scan_batch(
+        self, inputs: List[str], agent_id: Optional[str] = None
+    ) -> BatchGuardrailResult:
+        return asyncio.run(self.async_scan_batch(inputs, agent_id=agent_id))
 
 
 # A generic Guardrail Config Class

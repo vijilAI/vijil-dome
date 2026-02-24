@@ -19,7 +19,7 @@ import json
 import logging
 from enum import Enum, auto
 from abc import ABC, abstractmethod
-from typing import Type, Dict, Tuple, Callable, Coroutine, Any, Optional
+from typing import Type, Dict, List, Tuple, Callable, Coroutine, Any, Optional
 from collections import defaultdict
 from pydantic import BaseModel
 
@@ -58,6 +58,7 @@ DetectorType = Dict["type", str]
 Hit = bool
 HitData = Dict[str, Any]
 DetectionResult = Tuple[Hit, HitData]
+BatchDetectionResult = List[DetectionResult]
 
 
 class DetectionCategory(Enum):
@@ -95,6 +96,11 @@ class DetectionTimingResult(BaseModel):
         return self.__str__()
 
 
+class BatchDetectionTimingResult(BaseModel):
+    results: List[DetectionTimingResult]
+    exec_time: float  # total wall-clock for entire batch
+
+
 class DetectionMethod(ABC):
     """
     Abstract base class for all detection methods.
@@ -124,6 +130,40 @@ class DetectionMethod(ABC):
         logging.info(f"{sanitized_result}")
 
         return detection_result
+
+    async def detect_batch(self, inputs: List[str]) -> BatchDetectionResult:
+        """
+        Process a batch of inputs. Default implementation loops over detect().
+        Subclasses can override for optimized batch processing.
+        """
+        results = []
+        for query_string in inputs:
+            result = await self.detect(query_string)
+            results.append(result)
+        return results
+
+    async def detect_batch_with_time(
+        self, inputs: List[str], agent_id: Optional[str] = None
+    ) -> BatchDetectionTimingResult:
+        """
+        Timing wrapper for batch detection. Calls detect_batch and wraps
+        each result in DetectionTimingResult.
+        """
+        start_time = time.time()
+        batch_results = await self.detect_batch(inputs)
+        total_time = round((time.time() - start_time) * 1000, 3)
+
+        timing_results = []
+        for result in batch_results:
+            timing_results.append(
+                DetectionTimingResult(
+                    hit=result[0], result=result[1], exec_time=0.0
+                )
+            )
+
+        return BatchDetectionTimingResult(
+            results=timing_results, exec_time=total_time
+        )
 
     def setDetectorHyperParams(self, **params):
         """

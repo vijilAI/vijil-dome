@@ -21,10 +21,11 @@ from vijil_dome.detectors import (
     register_method,
     DetectionCategory,
     DetectionResult,
+    BatchDetectionResult,
 )
 from transformers import pipeline
 from vijil_dome.detectors.utils.hf_model import HFBaseModel
-from typing import Optional
+from typing import List, Optional
 
 logger = logging.getLogger("vijil.dome")
 
@@ -82,3 +83,21 @@ class MBertPromptInjectionModel(HFBaseModel):
     async def detect(self, query_string: str) -> DetectionResult:
         logger.info(f"Detecting using {self.__class__.__name__}...")
         return self.sync_detect(query_string)
+
+    async def detect_batch(self, inputs: List[str]) -> BatchDetectionResult:
+        preds = self.classifier(inputs)
+        results = []
+        for query_string, pred in zip(inputs, preds):
+            item = pred[0] if isinstance(pred, list) else pred
+            if item["label"] in (1, "1", "LABEL_1"):
+                injection_score = item["score"]
+            else:
+                injection_score = 1.0 - item["score"]
+            flagged = injection_score >= self.score_threshold
+            results.append((flagged, {
+                "type": type(self),
+                "score": injection_score,
+                "predictions": [item],
+                "response_string": self.response_string if flagged else query_string,
+            }))
+        return results

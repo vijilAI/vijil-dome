@@ -14,7 +14,7 @@
 #
 # vijil and vijil-dome are trademarks owned by Vijil Inc.
 
-from vijil_dome.guardrails import Guardrail, GuardrailConfig
+from vijil_dome.guardrails import Guardrail, GuardrailConfig, BatchGuardrailResult
 from vijil_dome.guardrails.config_parser import (
     convert_dict_to_guardrails,
     convert_toml_to_guardrails,
@@ -24,7 +24,7 @@ from vijil_dome.integrations.vijil.evaluate import (
     get_config_from_vijil_evaluation,
 )
 from openai import OpenAI
-from typing import Union, Dict, Optional, Callable
+from typing import Union, Dict, List, Optional, Callable, Iterator
 from .defaults import get_default_config
 from pydantic import BaseModel
 
@@ -91,6 +91,26 @@ class ScanResult(BaseModel):
 
     def __repr__(self):
         return self.__str__()
+
+
+class BatchScanResult(BaseModel):
+    items: List[ScanResult]
+    exec_time: float
+
+    def __len__(self) -> int:
+        return len(self.items)
+
+    def __getitem__(self, index: int) -> ScanResult:
+        return self.items[index]
+
+    def __iter__(self) -> Iterator[ScanResult]:  # type: ignore[override]
+        return iter(self.items)
+
+    def all_safe(self) -> bool:
+        return all(item.is_safe() for item in self.items)
+
+    def any_flagged(self) -> bool:
+        return any(item.flagged for item in self.items)
 
 
 class Dome:
@@ -211,6 +231,67 @@ class Dome:
             trace=result.guard_exec_details,
             exec_time=result.exec_time,
         )
+
+    @staticmethod
+    def _empty_batch_result(inputs: List[str]) -> "BatchScanResult":
+        return BatchScanResult(
+            items=[
+                ScanResult(
+                    flagged=False, response_string=s, trace={}, exec_time=0.0
+                )
+                for s in inputs
+            ],
+            exec_time=0.0,
+        )
+
+    def _batch_guardrail_to_scan(
+        self, batch_result: BatchGuardrailResult
+    ) -> "BatchScanResult":
+        items = []
+        for gr in batch_result.items:
+            items.append(ScanResult(
+                flagged=gr.flagged,
+                response_string=gr.guardrail_response_message,
+                trace=gr.guard_exec_details,
+                exec_time=gr.exec_time,
+            ))
+        return BatchScanResult(items=items, exec_time=batch_result.exec_time)
+
+    def guard_input_batch(
+        self, inputs: List[str], *, agent_id: Optional[str] = None
+    ) -> "BatchScanResult":
+        if self.input_guardrail is None:
+            return self._empty_batch_result(inputs)
+        result = self.input_guardrail.scan_batch(inputs, agent_id=agent_id)
+        return self._batch_guardrail_to_scan(result)
+
+    async def async_guard_input_batch(
+        self, inputs: List[str], *, agent_id: Optional[str] = None
+    ) -> "BatchScanResult":
+        if self.input_guardrail is None:
+            return self._empty_batch_result(inputs)
+        result = await self.input_guardrail.async_scan_batch(
+            inputs, agent_id=agent_id
+        )
+        return self._batch_guardrail_to_scan(result)
+
+    def guard_output_batch(
+        self, inputs: List[str], *, agent_id: Optional[str] = None
+    ) -> "BatchScanResult":
+        if self.output_guardrail is None:
+            return self._empty_batch_result(inputs)
+        result = self.output_guardrail.scan_batch(inputs, agent_id=agent_id)
+        return self._batch_guardrail_to_scan(result)
+
+    async def async_guard_output_batch(
+        self, inputs: List[str], *, agent_id: Optional[str] = None
+    ) -> "BatchScanResult":
+        if self.output_guardrail is None:
+            return self._empty_batch_result(inputs)
+        result = await self.output_guardrail.async_scan_batch(
+            inputs, agent_id=agent_id
+        )
+        return self._batch_guardrail_to_scan(result)
 
     def apply_decorator(self, decoration_method: Callable) -> None:
         # Replace the default guard input and output functions with the decorated versions

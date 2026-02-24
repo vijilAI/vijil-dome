@@ -14,7 +14,7 @@
 #
 # vijil and vijil-dome are trademarks owned by Vijil Inc.
 
-from litellm import completion as litellm_completion
+from litellm import acompletion as litellm_acompletion
 
 from vijil_dome.detectors import (
     MODERATION_LLM,
@@ -62,7 +62,7 @@ class GenericLLMDetector(LlmBaseDetector):
 
     async def detect(self, query_string: str) -> DetectionResult:
         llm_prompt = self.sys_prompt_template.substitute(query_string=query_string)
-        llm_response = litellm_completion(
+        llm_response = await litellm_acompletion(
             model=self.model_name,
             messages=[{"role": "system", "content": llm_prompt}],
             api_key=self.api_key,
@@ -111,7 +111,7 @@ class LlmModerations(LlmBaseDetector):
             toxic=True,
             pii=False,
         )
-        llm_response = litellm_completion(
+        llm_response = await litellm_acompletion(
             model=self.model_name,
             messages=[{"role": "system", "content": content}],
             api_key=self.api_key,
@@ -158,7 +158,7 @@ class LlmSecurity(LlmBaseDetector):
             toxic=False,
             pii=False,
         )
-        llm_response = litellm_completion(
+        llm_response = await litellm_acompletion(
             model=self.model_name,
             messages=[{"role": "system", "content": content}],
             api_key=self.api_key,
@@ -202,7 +202,7 @@ class LlmHallucination(LlmBaseDetectorWithContext):
                 "No context provided for LLM-Based Hallucination detection!"
             )
         content = format_llm_hallucination_prompt(self.context, query_string)
-        llm_response = litellm_completion(
+        llm_response = await litellm_acompletion(
             model=self.model_name,
             messages=[{"role": "system", "content": content}],
             api_key=self.api_key,
@@ -244,7 +244,7 @@ class LlmFactcheck(LlmBaseDetectorWithContext):
         if self.context is None:
             raise ValueError("No context provided for LLM-Based fact-check")
         content = format_llm_factcheck_prompt(self.context, query_string)
-        llm_response = litellm_completion(
+        llm_response = await litellm_acompletion(
             model=self.model_name,
             messages=[{"role": "system", "content": content}],
             api_key=self.api_key,
