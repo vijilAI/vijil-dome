@@ -15,7 +15,7 @@
 # vijil and vijil-dome are trademarks owned by Vijil Inc.
 
 from typing import Optional
-from litellm import moderation as litellm_moderation
+from litellm import amoderation as litellm_amoderation
 
 from vijil_dome.detectors import (
     MODERATION_OPENAI,
@@ -42,7 +42,7 @@ class OpenAIModerations(LlmBaseDetector):
         self.score_threshold_dict = score_threshold_dict
 
     async def detect(self, query_string: str) -> DetectionResult:
-        oai_response = litellm_moderation(input=query_string)
+        oai_response = await litellm_amoderation(input=query_string)
         oai_moderation = oai_response.results
         if not oai_moderation or len(oai_moderation) == 0:
             raise ValueError("No moderation results returned from OpenAI")
