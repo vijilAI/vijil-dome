@@ -99,8 +99,8 @@ class MBertToxicContentModel(HFBaseModel):
         # Multi-window: batch all chunks, any-positive with max score
         all_preds = self.classifier(chunks)
         max_score = 0.0
-        for pred in all_preds:
-            item = pred[0] if isinstance(pred, list) else pred  # type: ignore[assignment]
+        for window_pred in all_preds:
+            item = window_pred[0] if isinstance(window_pred, list) else window_pred
             score = self._extract_toxic_score(item)
             if score > max_score:
                 max_score = score
