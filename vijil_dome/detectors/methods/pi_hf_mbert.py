@@ -96,8 +96,8 @@ class MBertPromptInjectionModel(HFBaseModel):
         # Multi-window: batch all chunks, any-positive with max score
         all_preds = self.classifier(chunks)
         max_score = 0.0
-        for pred in all_preds:
-            item = pred[0] if isinstance(pred, list) else pred
+        for window_pred in all_preds:
+            item = window_pred[0] if isinstance(window_pred, list) else window_pred  # type: ignore[assignment]
             score = self._extract_injection_score(item)
             if score > max_score:
                 max_score = score
@@ -117,7 +117,7 @@ class MBertPromptInjectionModel(HFBaseModel):
 
     async def detect_batch(self, inputs: List[str]) -> BatchDetectionResult:
         # Phase 1: chunk each input, build flat list + per-input ranges
-        flat_chunks = []
+        flat_chunks: List[str] = []
         ranges = []
         for text in inputs:
             chunks = chunk_text(
