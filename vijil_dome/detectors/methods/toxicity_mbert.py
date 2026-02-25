@@ -25,6 +25,7 @@ from vijil_dome.detectors import (
 )
 from transformers import pipeline
 from vijil_dome.detectors.utils.hf_model import HFBaseModel
+from vijil_dome.detectors.utils.sliding_window import chunk_text
 from typing import List, Optional
 
 logger = logging.getLogger("vijil.dome")
@@ -41,7 +42,8 @@ class MBertToxicContentModel(HFBaseModel):
         self,
         score_threshold: float = 0.5,
         truncation: bool = True,
-        max_length: int = 512,
+        max_length: int = 8192,
+        window_stride: int = 4096,
     ):
         try:
             super().__init__(
@@ -50,6 +52,8 @@ class MBertToxicContentModel(HFBaseModel):
             )
 
             self.score_threshold = score_threshold
+            self.max_length = max_length
+            self.window_stride = window_stride
             self.classifier = pipeline(
                 "text-classification",
                 model=self.model,
@@ -67,20 +71,47 @@ class MBertToxicContentModel(HFBaseModel):
             )
             raise
 
+    def _extract_toxic_score(self, item):
+        if item["label"] in ("toxic", "LABEL_1", 1, "1"):
+            return item["score"]
+        return 1.0 - item["score"]
+
     def sync_detect(
         self, query_string: str, agent_id: Optional[str] = None
     ) -> DetectionResult:
-        pred = self.classifier(query_string)
-        if pred[0]["label"] in ("toxic", "LABEL_1", 1, "1"):
-            toxic_score = pred[0]["score"]
-        else:
-            toxic_score = 1.0 - pred[0]["score"]
-        flagged = toxic_score >= self.score_threshold
+        chunks = chunk_text(
+            query_string, self.tokenizer, self.max_length, self.window_stride
+        )
+        num_windows = len(chunks)
+
+        if num_windows == 1:
+            pred = self.classifier(query_string)
+            toxic_score = self._extract_toxic_score(pred[0])
+            flagged = toxic_score >= self.score_threshold
+            return flagged, {
+                "type": type(self),
+                "score": toxic_score,
+                "predictions": pred,
+                "response_string": self.response_string if flagged else query_string,
+                "num_windows": 1,
+            }
+
+        # Multi-window: batch all chunks, any-positive with max score
+        all_preds = self.classifier(chunks)
+        max_score = 0.0
+        for pred in all_preds:
+            item = pred[0] if isinstance(pred, list) else pred
+            score = self._extract_toxic_score(item)
+            if score > max_score:
+                max_score = score
+
+        flagged = max_score >= self.score_threshold
         return flagged, {
             "type": type(self),
-            "score": toxic_score,
-            "predictions": pred,
+            "score": max_score,
+            "predictions": all_preds,
             "response_string": self.response_string if flagged else query_string,
+            "num_windows": num_windows,
         }
 
     async def detect(self, query_string: str) -> DetectionResult:
@@ -88,19 +119,37 @@ class MBertToxicContentModel(HFBaseModel):
         return self.sync_detect(query_string)
 
     async def detect_batch(self, inputs: List[str]) -> BatchDetectionResult:
-        preds = self.classifier(inputs)
+        # Phase 1: chunk each input, build flat list + per-input ranges
+        flat_chunks = []
+        ranges = []
+        for text in inputs:
+            chunks = chunk_text(
+                text, self.tokenizer, self.max_length, self.window_stride
+            )
+            start = len(flat_chunks)
+            flat_chunks.extend(chunks)
+            ranges.append((start, len(flat_chunks)))
+
+        # Phase 2: single pipeline call on all chunks
+        all_preds = self.classifier(flat_chunks)
+
+        # Phase 3: re-aggregate per input using any-positive with max score
         results = []
-        for query_string, pred in zip(inputs, preds):
-            item = pred[0] if isinstance(pred, list) else pred
-            if item["label"] in ("toxic", "LABEL_1", 1, "1"):
-                toxic_score = item["score"]
-            else:
-                toxic_score = 1.0 - item["score"]
-            flagged = toxic_score >= self.score_threshold
+        for query_string, (start, end) in zip(inputs, ranges):
+            chunk_preds = all_preds[start:end]
+            num_windows = end - start
+            max_score = 0.0
+            for pred in chunk_preds:
+                item = pred[0] if isinstance(pred, list) else pred
+                score = self._extract_toxic_score(item)
+                if score > max_score:
+                    max_score = score
+            flagged = max_score >= self.score_threshold
             results.append((flagged, {
                 "type": type(self),
-                "score": toxic_score,
-                "predictions": [item],
+                "score": max_score,
+                "predictions": chunk_preds,
                 "response_string": self.response_string if flagged else query_string,
+                "num_windows": num_windows,
             }))
         return results
