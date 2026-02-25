@@ -24,9 +24,12 @@ HuggingFace pipeline.
 
 from __future__ import annotations
 
+import logging
 from typing import List
 
 from transformers import PreTrainedTokenizerBase
+
+logger = logging.getLogger("vijil.dome")
 
 
 def needs_chunking(
@@ -70,11 +73,27 @@ def chunk_text(
         A list of text chunks.  If the input fits in a single window the
         list contains just the original *text* (fast path — no re-encoding).
     """
+    if stride <= 0:
+        raise ValueError(f"stride must be positive, got {stride}")
+    if max_length <= special_token_overhead:
+        raise ValueError(
+            f"max_length ({max_length}) must be greater than "
+            f"special_token_overhead ({special_token_overhead})"
+        )
+
+    usable = max_length - special_token_overhead
+    if stride >= usable:
+        logger.warning(
+            "stride (%d) >= usable window size (%d); windows will not overlap "
+            "and content at boundaries may be missed",
+            stride,
+            usable,
+        )
+
     if not text:
         return [text]
 
     token_ids = tokenizer.encode(text, add_special_tokens=False)
-    usable = max_length - special_token_overhead
 
     if len(token_ids) <= usable:
         return [text]

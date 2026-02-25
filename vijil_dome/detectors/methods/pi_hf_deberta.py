@@ -49,6 +49,25 @@ class BaseDebertaPromptInjectionModel(HFBaseModel):
         max_length: int = 512,
         window_stride: int = 256,
     ):
+        """
+        Parameters
+        ----------
+        model_identifier:
+            HuggingFace model name or path.
+        response_method:
+            Method name used in blocked response strings.
+        model_dir:
+            Local model directory name under ``methods/models/``.
+        truncation:
+            Whether to truncate inputs exceeding *max_length*.
+        max_length:
+            Maximum tokens per window (DeBERTa supports up to 512).
+        window_stride:
+            Step size in tokens between sliding windows for inputs that
+            exceed *max_length*. Must be positive and ideally less than
+            *max_length* to ensure overlapping coverage. Default 256
+            (half of *max_length*) balances thoroughness and speed.
+        """
         try:
             model_path = os.path.join(
                 os.path.dirname(__file__),
@@ -201,6 +220,19 @@ class PromptGuardSecurityModel(HFBaseModel):
         max_length: int = 512,
         window_stride: int = 256,
     ):
+        """
+        Parameters
+        ----------
+        score_threshold:
+            Jailbreak probability above which input is flagged.
+        truncation:
+            Whether to truncate inputs exceeding *max_length*.
+        max_length:
+            Maximum tokens per window (PromptGuard supports up to 512).
+        window_stride:
+            Step size in tokens between sliding windows for inputs that
+            exceed *max_length*. Default 256 (half of *max_length*).
+        """
         try:
             model_path = os.path.join(
                 os.path.dirname(__file__), "models", "promptguard"

@@ -45,6 +45,21 @@ class MBertToxicContentModel(HFBaseModel):
         max_length: int = 8192,
         window_stride: int = 4096,
     ):
+        """
+        Parameters
+        ----------
+        score_threshold:
+            Toxicity probability above which input is flagged.
+        truncation:
+            Whether to truncate inputs exceeding *max_length*.
+        max_length:
+            Maximum tokens per window. ModernBERT natively supports up
+            to 8192 tokens, so sliding windows only activate for very
+            long inputs.
+        window_stride:
+            Step size in tokens between sliding windows for inputs that
+            exceed *max_length*. Default 4096 (half of *max_length*).
+        """
         try:
             super().__init__(
                 model_name="vijil/vijil_dome_toxic_content_detection",

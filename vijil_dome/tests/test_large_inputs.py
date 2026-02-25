@@ -279,13 +279,17 @@ class TestChunkText:
 
     def test_input_at_max_length_boundary(self):
         """Input exactly at max_length: no chunking occurs."""
-        # Build text that is exactly at the boundary (510 tokens = max_length - 2 overhead)
+        # Build text up to but not exceeding 510 usable tokens (max_length=512 - 2 overhead)
         text = ""
+        prev_text = ""
         while True:
+            prev_text = text
             text += "word "
             token_count = len(self.tokenizer.encode(text, add_special_tokens=False))
-            if token_count >= 510:
+            if token_count > 510:
+                text = prev_text
                 break
+        assert len(self.tokenizer.encode(text, add_special_tokens=False)) <= 510
         chunks = chunk_text(text, self.tokenizer, max_length=512, stride=256)
         assert len(chunks) == 1
 

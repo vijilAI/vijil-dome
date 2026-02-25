@@ -45,6 +45,24 @@ class ToxicityDeberta(HFBaseModel):
         window_stride: int = 104,
         device: Optional[str] = None,
     ):
+        """
+        Parameters
+        ----------
+        truncation:
+            Whether to truncate inputs exceeding *max_length*.
+        max_length:
+            Maximum tokens per window. This model's effective limit is
+            208 tokens, so the sliding window activates for most
+            non-trivial inputs.
+        window_stride:
+            Step size in tokens between sliding windows for inputs that
+            exceed *max_length*. Default 104 (half of *max_length*).
+            A smaller stride increases overlap and detection
+            thoroughness at the cost of speed.
+        device:
+            Torch device string (e.g. ``"cpu"``, ``"cuda:0"``). If
+            *None*, CUDA is used when available.
+        """
         try:
             model_path = os.path.join(
                 os.path.dirname(__file__), "models", "deberta-toxicity"
