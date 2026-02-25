@@ -388,6 +388,7 @@ class PolicyGptOssSafeguard(LlmBaseDetector):
         api_key: Optional[str] = None,
         timeout: int = 60,
         max_retries: int = 3,
+        max_input_chars: Optional[int] = None,
     ):
         if output_format not in self._OUTPUT_FORMATS:
             raise ValueError(f"output_format must be one of {self._OUTPUT_FORMATS}")
@@ -408,6 +409,7 @@ class PolicyGptOssSafeguard(LlmBaseDetector):
             api_key=api_key,
             timeout=timeout,
             max_retries=max_retries,
+            max_input_chars=max_input_chars,
         )
 
         self.hub_name = hub_name
@@ -463,6 +465,7 @@ class PolicyGptOssSafeguard(LlmBaseDetector):
 
     async def detect(self, query_string: str) -> DetectionResult:
         try:
+            query_string = self._truncate_if_needed(query_string)
             normalized_query = normalize_query_for_classification(query_string)
             response = await acompletion(
                 model=self.model_name or "",

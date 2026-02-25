@@ -50,17 +50,20 @@ class GenericLLMDetector(LlmBaseDetector):
         hub_name: str = "openai",
         model_name: str = "gpt-4-turbo",
         api_key: Optional[str] = None,
+        max_input_chars: Optional[int] = None,
     ):
         super().__init__(
             method_name=GENERIC_LLM,
             hub_name=hub_name,
             model_name=model_name,
             api_key=api_key,
+            max_input_chars=max_input_chars,
         )
         self.sys_prompt_template = Template(sys_prompt_template)
         self.trigger_word_list = trigger_word_list
 
     async def detect(self, query_string: str) -> DetectionResult:
+        query_string = self._truncate_if_needed(query_string)
         llm_prompt = self.sys_prompt_template.substitute(query_string=query_string)
         llm_response = await litellm_acompletion(
             model=self.model_name,
@@ -95,15 +98,18 @@ class LlmModerations(LlmBaseDetector):
         hub_name: str = "openai",
         model_name: str = "gpt-4-turbo",
         api_key: Optional[str] = None,
+        max_input_chars: Optional[int] = None,
     ):
         super().__init__(
             method_name=MODERATION_LLM,
             hub_name=hub_name,
             model_name=model_name,
             api_key=api_key,
+            max_input_chars=max_input_chars,
         )
 
     async def detect(self, query_string: str) -> DetectionResult:
+        query_string = self._truncate_if_needed(query_string)
         content = format_custom_llm_classifier_prompt(
             "user",
             query_string,
@@ -142,15 +148,18 @@ class LlmSecurity(LlmBaseDetector):
         hub_name: str = "openai",
         model_name: str = "gpt-4-turbo",
         api_key: Optional[str] = None,
+        max_input_chars: Optional[int] = None,
     ):
         super().__init__(
             method_name=SECURITY_LLM,
             hub_name=hub_name,
             model_name=model_name,
             api_key=api_key,
+            max_input_chars=max_input_chars,
         )
 
     async def detect(self, query_string: str) -> DetectionResult:
+        query_string = self._truncate_if_needed(query_string)
         content = format_custom_llm_classifier_prompt(
             "user",
             query_string,
@@ -186,6 +195,7 @@ class LlmHallucination(LlmBaseDetectorWithContext):
         hub_name: str = "openai",
         model_name: str = "gpt-4-turbo",
         api_key: Optional[str] = None,
+        max_input_chars: Optional[int] = None,
         context: Optional[str] = None,
     ):
         super().__init__(
@@ -193,10 +203,12 @@ class LlmHallucination(LlmBaseDetectorWithContext):
             hub_name=hub_name,
             model_name=model_name,
             api_key=api_key,
+            max_input_chars=max_input_chars,
             context=context,
         )
 
     async def detect(self, query_string: str) -> DetectionResult:
+        query_string = self._truncate_if_needed(query_string)
         if self.context is None:
             raise ValueError(
                 "No context provided for LLM-Based Hallucination detection!"
@@ -230,6 +242,7 @@ class LlmFactcheck(LlmBaseDetectorWithContext):
         hub_name: str = "openai",
         model_name: str = "gpt-4-turbo",
         api_key: Optional[str] = None,
+        max_input_chars: Optional[int] = None,
         context: Optional[str] = None,
     ):
         super().__init__(
@@ -237,10 +250,12 @@ class LlmFactcheck(LlmBaseDetectorWithContext):
             hub_name=hub_name,
             model_name=model_name,
             api_key=api_key,
+            max_input_chars=max_input_chars,
             context=context,
         )
 
     async def detect(self, query_string: str) -> DetectionResult:
+        query_string = self._truncate_if_needed(query_string)
         if self.context is None:
             raise ValueError("No context provided for LLM-Based fact-check")
         content = format_llm_factcheck_prompt(self.context, query_string)

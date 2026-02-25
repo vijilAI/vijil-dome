@@ -25,6 +25,7 @@ from vijil_dome.detectors import (
 )
 from transformers import pipeline
 from vijil_dome.detectors.utils.hf_model import HFBaseModel
+from vijil_dome.detectors.utils.sliding_window import chunk_text
 from typing import List, Optional
 
 logger = logging.getLogger("vijil.dome")
@@ -40,8 +41,24 @@ class MBertPromptInjectionModel(HFBaseModel):
         self,
         score_threshold: float = 0.5,
         truncation: bool = True,
-        max_length: int = 512,
+        max_length: int = 8192,
+        window_stride: int = 4096,
     ):
+        """
+        Parameters
+        ----------
+        score_threshold:
+            Injection probability above which input is flagged.
+        truncation:
+            Whether to truncate inputs exceeding *max_length*.
+        max_length:
+            Maximum tokens per window. ModernBERT natively supports up
+            to 8192 tokens, so sliding windows only activate for very
+            long inputs.
+        window_stride:
+            Step size in tokens between sliding windows for inputs that
+            exceed *max_length*. Default 4096 (half of *max_length*).
+        """
         try:
             super().__init__(
                 model_name="vijil/vijil_dome_prompt_injection_detection",
@@ -49,6 +66,8 @@ class MBertPromptInjectionModel(HFBaseModel):
             )
 
             self.score_threshold = score_threshold
+            self.max_length = max_length
+            self.window_stride = window_stride
             self.classifier = pipeline(
                 "text-classification",
                 model=self.model,
@@ -64,20 +83,47 @@ class MBertPromptInjectionModel(HFBaseModel):
             logger.error(f"Failed to initialize MBert model: {str(e)}")
             raise
 
+    def _extract_injection_score(self, item):
+        if item["label"] in (1, "1", "LABEL_1"):
+            return item["score"]
+        return 1.0 - item["score"]
+
     def sync_detect(
         self, query_string: str, agent_id: Optional[str] = None
     ) -> DetectionResult:
-        pred = self.classifier(query_string)
-        if pred[0]["label"] in (1, "1", "LABEL_1"):
-            injection_score = pred[0]["score"]
-        else:
-            injection_score = 1.0 - pred[0]["score"]
-        flagged = injection_score >= self.score_threshold
+        chunks = chunk_text(
+            query_string, self.tokenizer, self.max_length, self.window_stride
+        )
+        num_windows = len(chunks)
+
+        if num_windows == 1:
+            pred = self.classifier(query_string)
+            injection_score = self._extract_injection_score(pred[0])
+            flagged = injection_score >= self.score_threshold
+            return flagged, {
+                "type": type(self),
+                "score": injection_score,
+                "predictions": pred,
+                "response_string": self.response_string if flagged else query_string,
+                "num_windows": 1,
+            }
+
+        # Multi-window: batch all chunks, any-positive with max score
+        all_preds = self.classifier(chunks)
+        max_score = 0.0
+        for window_pred in all_preds:
+            item = window_pred[0] if isinstance(window_pred, list) else window_pred  # type: ignore[assignment]
+            score = self._extract_injection_score(item)
+            if score > max_score:
+                max_score = score
+
+        flagged = max_score >= self.score_threshold
         return flagged, {
             "type": type(self),
-            "score": injection_score,
-            "predictions": pred,
+            "score": max_score,
+            "predictions": all_preds,
             "response_string": self.response_string if flagged else query_string,
+            "num_windows": num_windows,
         }
 
     async def detect(self, query_string: str) -> DetectionResult:
@@ -85,19 +131,37 @@ class MBertPromptInjectionModel(HFBaseModel):
         return self.sync_detect(query_string)
 
     async def detect_batch(self, inputs: List[str]) -> BatchDetectionResult:
-        preds = self.classifier(inputs)
+        # Phase 1: chunk each input, build flat list + per-input ranges
+        flat_chunks: List[str] = []
+        ranges = []
+        for text in inputs:
+            chunks = chunk_text(
+                text, self.tokenizer, self.max_length, self.window_stride
+            )
+            start = len(flat_chunks)
+            flat_chunks.extend(chunks)
+            ranges.append((start, len(flat_chunks)))
+
+        # Phase 2: single pipeline call on all chunks
+        all_preds = self.classifier(flat_chunks)
+
+        # Phase 3: re-aggregate per input using any-positive with max score
         results = []
-        for query_string, pred in zip(inputs, preds):
-            item = pred[0] if isinstance(pred, list) else pred
-            if item["label"] in (1, "1", "LABEL_1"):
-                injection_score = item["score"]
-            else:
-                injection_score = 1.0 - item["score"]
-            flagged = injection_score >= self.score_threshold
+        for query_string, (start, end) in zip(inputs, ranges):
+            chunk_preds = all_preds[start:end]
+            num_windows = end - start
+            max_score = 0.0
+            for pred in chunk_preds:
+                item = pred[0] if isinstance(pred, list) else pred
+                score = self._extract_injection_score(item)
+                if score > max_score:
+                    max_score = score
+            flagged = max_score >= self.score_threshold
             results.append((flagged, {
                 "type": type(self),
-                "score": injection_score,
-                "predictions": [item],
+                "score": max_score,
+                "predictions": chunk_preds,
                 "response_string": self.response_string if flagged else query_string,
+                "num_windows": num_windows,
             }))
         return results

@@ -15,12 +15,15 @@
 # vijil and vijil-dome are trademarks owned by Vijil Inc.
 
 import asyncio
+import logging
 import os
 from abc import ABC, abstractmethod
 from typing import List, Optional
 from litellm import ModelResponse
 
 from vijil_dome.detectors import DetectionResult, BatchDetectionResult, DetectionMethod
+
+logger = logging.getLogger("vijil.dome")
 
 
 class LlmBaseDetector(DetectionMethod, ABC):
@@ -37,6 +40,7 @@ class LlmBaseDetector(DetectionMethod, ABC):
         api_key: Optional[str] = None,
         timeout: Optional[int] = None,
         max_retries: Optional[int] = None,
+        max_input_chars: Optional[int] = None,
     ) -> None:
         supported_hubs = [None, "openai", "together", "groq"]
         self.model_name = model_name
@@ -59,7 +63,16 @@ class LlmBaseDetector(DetectionMethod, ABC):
         self.api_key = api_key
         self.timeout = timeout
         self.max_retries = max_retries
+        self.max_input_chars = max_input_chars
         self.blocked_response_string = f"Method:{method_name}"
+
+    def _truncate_if_needed(self, text: str) -> str:
+        if self.max_input_chars is not None and len(text) > self.max_input_chars:
+            logger.warning(
+                f"Input truncated from {len(text)} to {self.max_input_chars} chars"
+            )
+            return text[: self.max_input_chars]
+        return text
 
     @abstractmethod
     async def detect(self, query_string: str) -> DetectionResult:
@@ -84,6 +97,7 @@ class LlmBaseDetectorWithContext(LlmBaseDetector):
         api_key: Optional[str] = None,
         timeout: Optional[int] = None,
         max_retries: Optional[int] = None,
+        max_input_chars: Optional[int] = None,
         context: Optional[str] = None,
     ) -> None:
         super().__init__(
@@ -93,6 +107,7 @@ class LlmBaseDetectorWithContext(LlmBaseDetector):
             api_key=api_key,
             timeout=timeout,
             max_retries=max_retries,
+            max_input_chars=max_input_chars,
         )
         self.context = context
 
