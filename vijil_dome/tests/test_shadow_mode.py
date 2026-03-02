@@ -1,5 +1,4 @@
 """Tests for shadow mode (enforce flag) behavior."""
-import pytest
 from vijil_dome.Dome import ScanResult
 
 # Default values for required ScanResult fields not under test
