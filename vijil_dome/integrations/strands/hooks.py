@@ -124,7 +124,9 @@ class DomeHookProvider(HookProvider):
             return
 
         scan = await self.dome.async_guard_input(text, agent_id=self.agent_id)
-        if not scan.is_safe():
+        if scan.flagged and not scan.enforced:
+            logger.info("Dome shadow: input flagged but not enforced (score=%.2f)", scan.trace.get("detection_score", 0))
+        elif scan.enforced:
             logger.warning("Dome blocked input: %s...", text[:80])
             event.agent.messages[idx]["content"] = [
                 {"text": self.input_blocked_message}
@@ -140,7 +142,9 @@ class DomeHookProvider(HookProvider):
             return
 
         scan = await self.dome.async_guard_output(text, agent_id=self.agent_id)
-        if not scan.is_safe():
+        if scan.flagged and not scan.enforced:
+            logger.info("Dome shadow: output flagged but not enforced (score=%.2f)", scan.trace.get("detection_score", 0))
+        elif scan.enforced:
             logger.warning("Dome blocked output: %s...", text[:80])
             event.stop_response.message["content"] = [
                 {"text": self.output_blocked_message}
