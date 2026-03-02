@@ -67,6 +67,7 @@ def create_dome_config(config: Union[Dict, str]) -> DomeConfig:
 
 class ScanResult(BaseModel):
     flagged: bool
+    enforced: bool = False  # True only when flagged AND enforcement is active
     response_string: str
     trace: dict
     exec_time: float
@@ -83,6 +84,7 @@ class ScanResult(BaseModel):
     def __str__(self):
         result_dict = {
             "flagged": self.flagged,
+            "enforced": self.enforced,
             "trace": self.trace,
             "exec_time": self.exec_time,
             "response": self.response_string,
