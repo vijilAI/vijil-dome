@@ -120,7 +120,9 @@ class Dome:
         self,
         dome_config: Optional[Union[DomeConfig, Dict, str]] = None,
         client: Optional[OpenAI] = None,
+        enforce: bool = True,  # False = shadow mode (log but don't block)
     ):
+        self.enforce = enforce
         self.client = client
         self.input_guardrail = None  # type: Optional[Guardrail]
         self.output_guardrail = None  # type: Optional[Guardrail]
@@ -190,12 +192,14 @@ class Dome:
         if self.input_guardrail is None:
             return self._empty_guardrail_result(query_string)
         result = self.input_guardrail.scan(query_string, agent_id=agent_id)
-        return ScanResult(
+        scan_result = ScanResult(
             flagged=result.flagged,
             response_string=result.guardrail_response_message,
             trace=result.guard_exec_details,
             exec_time=result.exec_time,
         )
+        scan_result.enforced = self.enforce and scan_result.flagged
+        return scan_result
 
     async def async_guard_input(
         self, query_string: str, *, agent_id: Optional[str] = None
@@ -203,23 +207,27 @@ class Dome:
         if self.input_guardrail is None:
             return self._empty_guardrail_result(query_string)
         result = await self.input_guardrail.async_scan(query_string, agent_id=agent_id)
-        return ScanResult(
+        scan_result = ScanResult(
             flagged=result.flagged,
             response_string=result.guardrail_response_message,
             trace=result.guard_exec_details,
             exec_time=result.exec_time,
         )
+        scan_result.enforced = self.enforce and scan_result.flagged
+        return scan_result
 
     def guard_output(self, query_string: str, *, agent_id: Optional[str] = None):
         if self.output_guardrail is None:
             return self._empty_guardrail_result(query_string)
         result = self.output_guardrail.scan(query_string, agent_id=agent_id)
-        return ScanResult(
+        scan_result = ScanResult(
             flagged=result.flagged,
             response_string=result.guardrail_response_message,
             trace=result.guard_exec_details,
             exec_time=result.exec_time,
         )
+        scan_result.enforced = self.enforce and scan_result.flagged
+        return scan_result
 
     async def async_guard_output(
         self, query_string: str, *, agent_id: Optional[str] = None
@@ -227,12 +235,14 @@ class Dome:
         if self.output_guardrail is None:
             return self._empty_guardrail_result(query_string)
         result = await self.output_guardrail.async_scan(query_string, agent_id=agent_id)
-        return ScanResult(
+        scan_result = ScanResult(
             flagged=result.flagged,
             response_string=result.guardrail_response_message,
             trace=result.guard_exec_details,
             exec_time=result.exec_time,
         )
+        scan_result.enforced = self.enforce and scan_result.flagged
+        return scan_result
 
     @staticmethod
     def _empty_batch_result(inputs: List[str]) -> "BatchScanResult":
@@ -251,12 +261,14 @@ class Dome:
     ) -> "BatchScanResult":
         items = []
         for gr in batch_result.items:
-            items.append(ScanResult(
+            scan_result = ScanResult(
                 flagged=gr.flagged,
                 response_string=gr.guardrail_response_message,
                 trace=gr.guard_exec_details,
                 exec_time=gr.exec_time,
-            ))
+            )
+            scan_result.enforced = self.enforce and scan_result.flagged
+            items.append(scan_result)
         return BatchScanResult(items=items, exec_time=batch_result.exec_time)
 
     def guard_input_batch(
