@@ -71,6 +71,7 @@ class ScanResult(BaseModel):
     response_string: str
     trace: dict
     exec_time: float
+    detection_score: float = 0.0
 
     def is_safe(self):
         return not self.flagged
@@ -192,14 +193,14 @@ class Dome:
         if self.input_guardrail is None:
             return self._empty_guardrail_result(query_string)
         result = self.input_guardrail.scan(query_string, agent_id=agent_id)
-        scan_result = ScanResult(
+        return ScanResult(
             flagged=result.flagged,
+            enforced=self.enforce and result.flagged,
             response_string=result.guardrail_response_message,
             trace=result.guard_exec_details,
             exec_time=result.exec_time,
+            detection_score=result.detection_score,
         )
-        scan_result.enforced = self.enforce and scan_result.flagged
-        return scan_result
 
     async def async_guard_input(
         self, query_string: str, *, agent_id: Optional[str] = None
@@ -207,27 +208,27 @@ class Dome:
         if self.input_guardrail is None:
             return self._empty_guardrail_result(query_string)
         result = await self.input_guardrail.async_scan(query_string, agent_id=agent_id)
-        scan_result = ScanResult(
+        return ScanResult(
             flagged=result.flagged,
+            enforced=self.enforce and result.flagged,
             response_string=result.guardrail_response_message,
             trace=result.guard_exec_details,
             exec_time=result.exec_time,
+            detection_score=result.detection_score,
         )
-        scan_result.enforced = self.enforce and scan_result.flagged
-        return scan_result
 
     def guard_output(self, query_string: str, *, agent_id: Optional[str] = None):
         if self.output_guardrail is None:
             return self._empty_guardrail_result(query_string)
         result = self.output_guardrail.scan(query_string, agent_id=agent_id)
-        scan_result = ScanResult(
+        return ScanResult(
             flagged=result.flagged,
+            enforced=self.enforce and result.flagged,
             response_string=result.guardrail_response_message,
             trace=result.guard_exec_details,
             exec_time=result.exec_time,
+            detection_score=result.detection_score,
         )
-        scan_result.enforced = self.enforce and scan_result.flagged
-        return scan_result
 
     async def async_guard_output(
         self, query_string: str, *, agent_id: Optional[str] = None
@@ -235,14 +236,14 @@ class Dome:
         if self.output_guardrail is None:
             return self._empty_guardrail_result(query_string)
         result = await self.output_guardrail.async_scan(query_string, agent_id=agent_id)
-        scan_result = ScanResult(
+        return ScanResult(
             flagged=result.flagged,
+            enforced=self.enforce and result.flagged,
             response_string=result.guardrail_response_message,
             trace=result.guard_exec_details,
             exec_time=result.exec_time,
+            detection_score=result.detection_score,
         )
-        scan_result.enforced = self.enforce and scan_result.flagged
-        return scan_result
 
     @staticmethod
     def _empty_batch_result(inputs: List[str]) -> "BatchScanResult":
@@ -261,14 +262,14 @@ class Dome:
     ) -> "BatchScanResult":
         items = []
         for gr in batch_result.items:
-            scan_result = ScanResult(
+            items.append(ScanResult(
                 flagged=gr.flagged,
+                enforced=self.enforce and gr.flagged,
                 response_string=gr.guardrail_response_message,
                 trace=gr.guard_exec_details,
                 exec_time=gr.exec_time,
-            )
-            scan_result.enforced = self.enforce and scan_result.flagged
-            items.append(scan_result)
+                detection_score=gr.detection_score,
+            ))
         return BatchScanResult(items=items, exec_time=batch_result.exec_time)
 
     def guard_input_batch(

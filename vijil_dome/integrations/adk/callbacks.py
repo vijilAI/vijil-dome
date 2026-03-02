@@ -66,8 +66,8 @@ def generate_adk_input_callback(
             # Unfortunately, ADK callbacks don't support async yet
             scan = dome.guard_input(last_user_message_text)
             if scan.flagged and not scan.enforced:
-                logger.info("Dome shadow: input flagged but not enforced (score=%.2f)", scan.trace.get("detection_score", 0))
-            if scan.enforced:
+                logger.info("Dome shadow: input flagged but not enforced (score=%.2f)", scan.detection_score)
+            elif scan.enforced:
                 return LlmResponse(
                     content=types.Content(
                         role="model",  # Mimic an agent response
@@ -112,8 +112,8 @@ def generate_adk_output_callback(
         if last_model_message_text:
             scan = dome.guard_output(last_model_message_text)
             if scan.flagged and not scan.enforced:
-                logger.info("Dome shadow: output flagged but not enforced (score=%.2f)", scan.trace.get("detection_score", 0))
-            if scan.enforced:
+                logger.info("Dome shadow: output flagged but not enforced (score=%.2f)", scan.detection_score)
+            elif scan.enforced:
                 return LlmResponse(
                     content=types.Content(
                         role="model",  # Mimic an agent response
