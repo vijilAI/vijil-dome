@@ -102,6 +102,7 @@ def _add_darwin_detection_spans(
                     agent_id=agent_id,
                     team_id=team_id,
                 )
+                span.set_attribute("dome.guard.enforced", getattr(result, 'enforced', False))
             return result
 
     @wraps(original_async_scan)
@@ -119,6 +120,7 @@ def _add_darwin_detection_spans(
                     agent_id=agent_id,
                     team_id=team_id,
                 )
+                span.set_attribute("dome.guard.enforced", getattr(result, 'enforced', False))
             return result
 
     guardrail.scan = scan_with_darwin_spans  # type: ignore[method-assign]
