@@ -257,6 +257,7 @@ class TestAddDarwinDetectionSpans:
         mock_span.set_attribute.assert_any_call("detection.score", 0.95)
         mock_span.set_attribute.assert_any_call("agent.id", "a1")
         mock_span.set_attribute.assert_any_call("team.id", "t1")
+        mock_span.set_attribute.assert_any_call("dome.guard.enforced", True)
 
         assert result is flagged_guardrail_result
 
@@ -286,5 +287,112 @@ class TestAddDarwinDetectionSpans:
         mock_tracer.start_as_current_span.assert_called_once_with("dome-detection")
         mock_span.set_attribute.assert_any_call("dome.guardrail", "dome-output")
         mock_span.set_attribute.assert_any_call("detection.label", "flagged")
+        mock_span.set_attribute.assert_any_call("dome.guard.enforced", True)
 
         assert result is flagged_guardrail_result
+
+    def test_sync_scan_shadow_mode_sets_enforced_false(self, flagged_guardrail_result):
+        from vijil_dome.integrations.instrumentation.otel_instrumentation import (
+            _add_darwin_detection_spans,
+        )
+
+        guardrail = MagicMock()
+        guardrail.scan = MagicMock(return_value=flagged_guardrail_result)
+
+        mock_span = MagicMock()
+        mock_span.__enter__ = MagicMock(return_value=mock_span)
+        mock_span.__exit__ = MagicMock(return_value=False)
+
+        mock_tracer = MagicMock()
+        mock_tracer.start_as_current_span.return_value = mock_span
+
+        _add_darwin_detection_spans(guardrail, mock_tracer, "dome-input", enforce=False)
+        result = guardrail.scan("test input", agent_id="a1")
+
+        mock_span.set_attribute.assert_any_call("dome.guard.enforced", False)
+        # Detection still happens in shadow mode
+        mock_span.set_attribute.assert_any_call("detection.label", "flagged")
+        assert result is flagged_guardrail_result
+
+    def test_sync_scan_clean_result_sets_enforced_false(self, clean_guardrail_result):
+        from vijil_dome.integrations.instrumentation.otel_instrumentation import (
+            _add_darwin_detection_spans,
+        )
+
+        guardrail = MagicMock()
+        guardrail.scan = MagicMock(return_value=clean_guardrail_result)
+
+        mock_span = MagicMock()
+        mock_span.__enter__ = MagicMock(return_value=mock_span)
+        mock_span.__exit__ = MagicMock(return_value=False)
+
+        mock_tracer = MagicMock()
+        mock_tracer.start_as_current_span.return_value = mock_span
+
+        _add_darwin_detection_spans(guardrail, mock_tracer, "dome-input", enforce=True)
+        result = guardrail.scan("safe input", agent_id="a1")
+
+        # enforce=True but result not flagged, so enforced is False
+        mock_span.set_attribute.assert_any_call("dome.guard.enforced", False)
+        mock_span.set_attribute.assert_any_call("detection.label", "clean")
+        assert result is clean_guardrail_result
+
+    @pytest.mark.asyncio
+    async def test_async_scan_shadow_mode_sets_enforced_false(
+        self, flagged_guardrail_result
+    ):
+        from vijil_dome.integrations.instrumentation.otel_instrumentation import (
+            _add_darwin_detection_spans,
+        )
+
+        guardrail = MagicMock()
+
+        async def mock_async_scan(*args, **kwargs):
+            return flagged_guardrail_result
+
+        guardrail.async_scan = mock_async_scan
+
+        mock_span = MagicMock()
+        mock_span.__enter__ = MagicMock(return_value=mock_span)
+        mock_span.__exit__ = MagicMock(return_value=False)
+
+        mock_tracer = MagicMock()
+        mock_tracer.start_as_current_span.return_value = mock_span
+
+        _add_darwin_detection_spans(guardrail, mock_tracer, "dome-output", enforce=False)
+        result = await guardrail.async_scan("test output", agent_id="a2")
+
+        mock_span.set_attribute.assert_any_call("dome.guard.enforced", False)
+        # Detection still happens in shadow mode
+        mock_span.set_attribute.assert_any_call("detection.label", "flagged")
+        assert result is flagged_guardrail_result
+
+    @pytest.mark.asyncio
+    async def test_async_scan_clean_result_sets_enforced_false(
+        self, clean_guardrail_result
+    ):
+        from vijil_dome.integrations.instrumentation.otel_instrumentation import (
+            _add_darwin_detection_spans,
+        )
+
+        guardrail = MagicMock()
+
+        async def mock_async_scan(*args, **kwargs):
+            return clean_guardrail_result
+
+        guardrail.async_scan = mock_async_scan
+
+        mock_span = MagicMock()
+        mock_span.__enter__ = MagicMock(return_value=mock_span)
+        mock_span.__exit__ = MagicMock(return_value=False)
+
+        mock_tracer = MagicMock()
+        mock_tracer.start_as_current_span.return_value = mock_span
+
+        _add_darwin_detection_spans(guardrail, mock_tracer, "dome-output", enforce=True)
+        result = await guardrail.async_scan("safe output", agent_id="a2")
+
+        # enforce=True but result not flagged, so enforced is False
+        mock_span.set_attribute.assert_any_call("dome.guard.enforced", False)
+        mock_span.set_attribute.assert_any_call("detection.label", "clean")
+        assert result is clean_guardrail_result

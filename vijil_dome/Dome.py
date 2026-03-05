@@ -67,9 +67,11 @@ def create_dome_config(config: Union[Dict, str]) -> DomeConfig:
 
 class ScanResult(BaseModel):
     flagged: bool
+    enforced: bool = False  # True only when flagged AND enforcement is active
     response_string: str
     trace: dict
     exec_time: float
+    detection_score: float = 0.0
 
     def is_safe(self):
         return not self.flagged
@@ -83,6 +85,7 @@ class ScanResult(BaseModel):
     def __str__(self):
         result_dict = {
             "flagged": self.flagged,
+            "enforced": self.enforced,
             "trace": self.trace,
             "exec_time": self.exec_time,
             "response": self.response_string,
@@ -118,7 +121,9 @@ class Dome:
         self,
         dome_config: Optional[Union[DomeConfig, Dict, str]] = None,
         client: Optional[OpenAI] = None,
+        enforce: bool = True,  # False = shadow mode (log but don't block)
     ):
+        self.enforce = enforce
         self.client = client
         self.input_guardrail = None  # type: Optional[Guardrail]
         self.output_guardrail = None  # type: Optional[Guardrail]
@@ -137,9 +142,11 @@ class Dome:
 
     @staticmethod
     def create_from_config(
-        config: Union[Dict, str], client: Optional[OpenAI] = None
+        config: Union[Dict, str],
+        client: Optional[OpenAI] = None,
+        enforce: bool = True,
     ) -> "Dome":
-        return Dome(dome_config=config, client=client)
+        return Dome(dome_config=config, client=client, enforce=enforce)
 
     @staticmethod
     def create_from_vijil_agent(
@@ -147,11 +154,12 @@ class Dome:
         api_key: str,
         base_url: Optional[str] = None,
         client: Optional[OpenAI] = None,
+        enforce: bool = True,
     ) -> "Dome":
         config_dict = get_config_from_vijil_agent(api_key, agent_id, base_url)
         if config_dict is None:
             raise ValueError(f"No Dome configuration found for agent ID {agent_id}")
-        return Dome(dome_config=config_dict, client=client)
+        return Dome(dome_config=config_dict, client=client, enforce=enforce)
 
     @staticmethod
     def create_from_vijil_evaluation(
@@ -160,6 +168,7 @@ class Dome:
         latency_threshold: Optional[float] = None,
         base_url: Optional[str] = None,
         client: Optional[OpenAI] = None,
+        enforce: bool = True,
     ) -> "Dome":
         config_dict = get_config_from_vijil_evaluation(
             api_key, evaluation_id, base_url, latency_threshold
@@ -168,7 +177,7 @@ class Dome:
             raise ValueError(
                 f"No Dome configuration recommendation could be generated for evaluation ID {evaluation_id}"
             )
-        return Dome(dome_config=config_dict, client=client)
+        return Dome(dome_config=config_dict, client=client, enforce=enforce)
 
     def _init_from_dome_config(self, dome_config: DomeConfig):
         self.input_guardrail = dome_config.input_guardrail
@@ -190,9 +199,11 @@ class Dome:
         result = self.input_guardrail.scan(query_string, agent_id=agent_id)
         return ScanResult(
             flagged=result.flagged,
+            enforced=self.enforce and result.flagged,
             response_string=result.guardrail_response_message,
             trace=result.guard_exec_details,
             exec_time=result.exec_time,
+            detection_score=result.detection_score,
         )
 
     async def async_guard_input(
@@ -203,9 +214,11 @@ class Dome:
         result = await self.input_guardrail.async_scan(query_string, agent_id=agent_id)
         return ScanResult(
             flagged=result.flagged,
+            enforced=self.enforce and result.flagged,
             response_string=result.guardrail_response_message,
             trace=result.guard_exec_details,
             exec_time=result.exec_time,
+            detection_score=result.detection_score,
         )
 
     def guard_output(self, query_string: str, *, agent_id: Optional[str] = None):
@@ -214,9 +227,11 @@ class Dome:
         result = self.output_guardrail.scan(query_string, agent_id=agent_id)
         return ScanResult(
             flagged=result.flagged,
+            enforced=self.enforce and result.flagged,
             response_string=result.guardrail_response_message,
             trace=result.guard_exec_details,
             exec_time=result.exec_time,
+            detection_score=result.detection_score,
         )
 
     async def async_guard_output(
@@ -227,9 +242,11 @@ class Dome:
         result = await self.output_guardrail.async_scan(query_string, agent_id=agent_id)
         return ScanResult(
             flagged=result.flagged,
+            enforced=self.enforce and result.flagged,
             response_string=result.guardrail_response_message,
             trace=result.guard_exec_details,
             exec_time=result.exec_time,
+            detection_score=result.detection_score,
         )
 
     @staticmethod
@@ -251,9 +268,11 @@ class Dome:
         for gr in batch_result.items:
             items.append(ScanResult(
                 flagged=gr.flagged,
+                enforced=self.enforce and gr.flagged,
                 response_string=gr.guardrail_response_message,
                 trace=gr.guard_exec_details,
                 exec_time=gr.exec_time,
+                detection_score=gr.detection_score,
             ))
         return BatchScanResult(items=items, exec_time=batch_result.exec_time)
 

@@ -18,8 +18,12 @@
 These functions enable easy compatibility with Google ADK
 """
 
+import logging
+
 from typing import Callable, Optional
 from vijil_dome import Dome
+
+logger = logging.getLogger(__name__)
 
 try:
     from google.adk.agents.callback_context import CallbackContext
@@ -61,7 +65,9 @@ def generate_adk_input_callback(
         if last_user_message_text:
             # Unfortunately, ADK callbacks don't support async yet
             scan = dome.guard_input(last_user_message_text)
-            if not scan.is_safe():
+            if scan.flagged and not scan.enforced:
+                logger.info("Dome shadow: input flagged but not enforced (score=%.2f)", scan.detection_score)
+            elif scan.enforced:
                 return LlmResponse(
                     content=types.Content(
                         role="model",  # Mimic an agent response
@@ -105,7 +111,9 @@ def generate_adk_output_callback(
         # Pass the message through dome
         if last_model_message_text:
             scan = dome.guard_output(last_model_message_text)
-            if not scan.is_safe():
+            if scan.flagged and not scan.enforced:
+                logger.info("Dome shadow: output flagged but not enforced (score=%.2f)", scan.detection_score)
+            elif scan.enforced:
                 return LlmResponse(
                     content=types.Content(
                         role="model",  # Mimic an agent response

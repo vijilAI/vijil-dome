@@ -21,8 +21,9 @@ from langchain_core.runnables.config import RunnableConfig
 
 
 class GuardrailRunnable(Runnable):
-    def __init__(self, guardrail: Guardrail):
+    def __init__(self, guardrail: Guardrail, enforce: bool = True):
         self.guardrail = guardrail
+        self.enforce = enforce
         super().__init__()
 
     def _handle_result(
@@ -30,6 +31,7 @@ class GuardrailRunnable(Runnable):
     ) -> Dict[str, Any]:
         result = vars(guardrail_result)
         result["original_query"] = query
+        result["enforced"] = self.enforce and guardrail_result.flagged
         return result
 
     def invoke(

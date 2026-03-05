@@ -65,6 +65,7 @@ def _add_darwin_detection_spans(
     guardrail: Guardrail,
     tracer: Tracer,
     guardrail_name: str,
+    enforce: bool = True,
 ) -> None:
     """Wrap guardrail scan methods to emit Darwin-compatible detection spans.
 
@@ -102,6 +103,7 @@ def _add_darwin_detection_spans(
                     agent_id=agent_id,
                     team_id=team_id,
                 )
+                span.set_attribute("dome.guard.enforced", enforce and result.flagged)
             return result
 
     @wraps(original_async_scan)
@@ -119,6 +121,7 @@ def _add_darwin_detection_spans(
                     agent_id=agent_id,
                     team_id=team_id,
                 )
+                span.set_attribute("dome.guard.enforced", enforce and result.flagged)
             return result
 
     guardrail.scan = scan_with_darwin_spans  # type: ignore[method-assign]
@@ -161,6 +164,6 @@ def instrument_dome(
     # span wraps the full scan chain (metrics + generic traces + original scan).
     if tracer:
         if dome.input_guardrail is not None:
-            _add_darwin_detection_spans(dome.input_guardrail, tracer, "dome-input")
+            _add_darwin_detection_spans(dome.input_guardrail, tracer, "dome-input", enforce=dome.enforce)
         if dome.output_guardrail is not None:
-            _add_darwin_detection_spans(dome.output_guardrail, tracer, "dome-output")
+            _add_darwin_detection_spans(dome.output_guardrail, tracer, "dome-output", enforce=dome.enforce)
