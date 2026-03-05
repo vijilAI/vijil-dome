@@ -92,6 +92,8 @@ class TestInputGuarding:
     async def test_flagged_input_replaces_message(self, dome_mock):
         scan_result = MagicMock()
         scan_result.is_safe.return_value = False
+        scan_result.flagged = True
+        scan_result.enforced = True
         dome_mock.async_guard_input.return_value = scan_result
 
         provider = DomeHookProvider(dome_mock, agent_id="a1")
@@ -111,6 +113,8 @@ class TestInputGuarding:
     async def test_clean_input_passes_through(self, dome_mock):
         scan_result = MagicMock()
         scan_result.is_safe.return_value = True
+        scan_result.flagged = False
+        scan_result.enforced = False
         dome_mock.async_guard_input.return_value = scan_result
 
         provider = DomeHookProvider(dome_mock)
@@ -138,6 +142,8 @@ class TestInputGuarding:
     async def test_custom_blocked_message(self, dome_mock):
         scan_result = MagicMock()
         scan_result.is_safe.return_value = False
+        scan_result.flagged = True
+        scan_result.enforced = True
         dome_mock.async_guard_input.return_value = scan_result
 
         custom_msg = "Custom block"
@@ -204,6 +210,8 @@ class TestOutputGuarding:
     async def test_flagged_output_replaces_response(self, dome_mock):
         scan_result = MagicMock()
         scan_result.is_safe.return_value = False
+        scan_result.flagged = True
+        scan_result.enforced = True
         dome_mock.async_guard_output.return_value = scan_result
 
         provider = DomeHookProvider(dome_mock, agent_id="a1")
@@ -224,6 +232,8 @@ class TestOutputGuarding:
     async def test_clean_output_passes_through(self, dome_mock):
         scan_result = MagicMock()
         scan_result.is_safe.return_value = True
+        scan_result.flagged = False
+        scan_result.enforced = False
         dome_mock.async_guard_output.return_value = scan_result
 
         provider = DomeHookProvider(dome_mock)
@@ -249,6 +259,8 @@ class TestOutputGuarding:
     async def test_custom_output_blocked_message(self, dome_mock):
         scan_result = MagicMock()
         scan_result.is_safe.return_value = False
+        scan_result.flagged = True
+        scan_result.enforced = True
         dome_mock.async_guard_output.return_value = scan_result
 
         custom_msg = "Custom output block"
