@@ -58,3 +58,17 @@ class Embedder(AbstractEmbedder):
             )
 
         return await self._model.encode_async(sentences)
+    
+    def get_embedding_size(self) -> int:
+        """Get the embedding dimension of the model.
+        
+        Returns:
+            int: The dimension of embeddings produced by this embedder.
+        """
+        if self._model is None:
+            self._init_model()
+        if self._model is None:
+            raise ValueError(
+                "Model not found. Please provide a model to compute embeddings."
+            )
+        return self._model.embedding_size

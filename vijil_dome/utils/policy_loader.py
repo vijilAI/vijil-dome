@@ -21,6 +21,8 @@ from pathlib import Path
 from typing import Dict, Any, Optional
 import logging
 
+from vijil_dome.utils.s3_utils import create_s3_client as _create_s3_client
+
 logger = logging.getLogger("vijil.dome")
 
 
@@ -256,30 +258,8 @@ def load_policy_sections_from_s3(
     return policy_data
 
 
-def _create_s3_client(
-    aws_access_key_id: Optional[str] = None,
-    aws_secret_access_key: Optional[str] = None,
-    aws_session_token: Optional[str] = None,
-    region_name: Optional[str] = None,
-):
-    """Create boto3 S3 client with optional credentials."""
-    import boto3
-
-    client_kwargs = {}
-    if aws_access_key_id:
-        client_kwargs["aws_access_key_id"] = aws_access_key_id
-    if aws_secret_access_key:
-        client_kwargs["aws_secret_access_key"] = aws_secret_access_key
-    if aws_session_token:
-        client_kwargs["aws_session_token"] = aws_session_token
-    if region_name:
-        client_kwargs["region_name"] = region_name
-
-    if client_kwargs:
-        return boto3.client("s3", **client_kwargs)
-    else:
-        # Use boto3 default credentials (env vars, IAM role, etc.)
-        return boto3.client("s3")
+# Import shared S3 client utility
+from vijil_dome.utils.s3_utils import create_s3_client as _create_s3_client
 
 
 def _extract_policy_id_from_key(key: str) -> Optional[str]:
