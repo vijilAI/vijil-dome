@@ -18,6 +18,13 @@ from typing import List, Tuple, Optional
 from abc import ABC, abstractmethod
 from vijil_dome.embeds import EmbeddingsItem
 
+try:
+    from vijil_dome.embeds.index.faiss_index import FaissEmbeddingsIndex
+    _FAISS_AVAILABLE = True
+except ImportError:
+    _FAISS_AVAILABLE = False
+    FaissEmbeddingsIndex = None  # type: ignore
+
 
 class AbstractEmbeddingsIndex(ABC):
     @abstractmethod
