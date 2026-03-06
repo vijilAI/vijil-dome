@@ -20,20 +20,34 @@ from pydantic import BaseModel
 from opentelemetry.sdk.trace import Tracer, Span
 
 
+def _safe_set_attribute(span: Span, key: str, value) -> None:
+    """Set a span attribute only if the value is a valid OTEL type (not None).
+
+    The OTLP protobuf encoder rejects None values, crashing the entire
+    span batch export. This guard prevents one bad attribute from
+    dropping all traces in a BatchSpanProcessor flush cycle.
+    """
+    if value is None:
+        return
+    span.set_attribute(key, value)
+
+
 def _set_func_span_attributes(span: Span, *args, **kwargs):
-    span.set_attribute("function.args", str(args))
-    span.set_attribute("function.kwargs", str(kwargs))
+    _safe_set_attribute(span, "function.args", str(args))
+    _safe_set_attribute(span, "function.kwargs", str(kwargs))
 
     agent_id = kwargs.get("agent_id")
     if agent_id:
-        span.set_attribute("agent.id", agent_id)
+        _safe_set_attribute(span, "agent.id", str(agent_id))
 
 
 def _set_func_span_result_attributes(span: Span, result):
+    if result is None:
+        return
     if isinstance(result, BaseModel):
-        span.set_attribute("function.result", str(result.model_dump()))
+        _safe_set_attribute(span, "function.result", str(result.model_dump()))
     else:
-        span.set_attribute("function.result", str(result))
+        _safe_set_attribute(span, "function.result", str(result))
 
 
 # Wrap any function with a Tracer to record Spans. Works with both sync and async functions

@@ -226,6 +226,74 @@ class TestSetDarwinSpanAttributes:
 _otel_available = importlib.util.find_spec("opentelemetry.sdk") is not None
 
 
+# --- Tests: None-safety in span attributes (DOME-105) ---
+
+
+@pytest.mark.skipif(not _otel_available, reason="opentelemetry not installed")
+class TestNoneSafetyInSpanAttributes:
+    """Adversarial: None values must not crash the OTLP exporter.
+
+    The OTLP protobuf encoder rejects None attribute values, dropping the
+    entire span batch. These tests verify our guard layer prevents this.
+    """
+
+    def test_safe_set_attribute_skips_none(self):
+        from vijil_dome.instrumentation.tracing import _safe_set_attribute
+
+        span = MagicMock()
+        _safe_set_attribute(span, "key", None)
+        span.set_attribute.assert_not_called()
+
+    def test_safe_set_attribute_passes_valid_values(self):
+        from vijil_dome.instrumentation.tracing import _safe_set_attribute
+
+        span = MagicMock()
+        _safe_set_attribute(span, "str_key", "value")
+        _safe_set_attribute(span, "int_key", 42)
+        _safe_set_attribute(span, "float_key", 0.95)
+        assert span.set_attribute.call_count == 3
+
+    def test_func_span_result_attributes_with_none_result(self):
+        from vijil_dome.instrumentation.tracing import _set_func_span_result_attributes
+
+        span = MagicMock()
+        _set_func_span_result_attributes(span, None)
+        # Should not call set_attribute when result is None
+        span.set_attribute.assert_not_called()
+
+    def test_darwin_attributes_with_none_score(self):
+        """detection_score=None must not reach span.set_attribute as None."""
+        # Use model_construct to bypass Pydantic validation and simulate
+        # corrupt data where detection_score is None instead of float.
+        result = GuardrailResult.model_construct(
+            flagged=True,
+            guard_exec_details={},
+            exec_time=0.1,
+            guardrail_response_message="blocked",
+            detection_score=None,
+            triggered_methods=["det"],
+        )
+        span = MagicMock()
+        _set_darwin_span_attributes(span, result, agent_id="a1", team_id="t1")
+
+        # Verify detection.score is set as float, not None
+        score_calls = [
+            c for c in span.set_attribute.call_args_list if c.args[0] == "detection.score"
+        ]
+        assert len(score_calls) == 1
+        assert isinstance(score_calls[0].args[1], float)
+
+    def test_darwin_attributes_with_none_team_and_agent(self):
+        """None team_id and agent_id must not be set as span attributes."""
+        result = _make_guardrail_result(flagged=False, guard_details={})
+        span = MagicMock()
+        _set_darwin_span_attributes(span, result, agent_id=None, team_id=None)
+
+        call_keys = [c.args[0] for c in span.set_attribute.call_args_list]
+        assert "team.id" not in call_keys
+        assert "agent.id" not in call_keys
+
+
 # --- Tests: _add_darwin_detection_spans integration ---
 
 

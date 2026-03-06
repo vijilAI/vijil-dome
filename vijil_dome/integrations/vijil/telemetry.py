@@ -27,6 +27,7 @@ if TYPE_CHECKING:
     from opentelemetry.trace.span import Span
 
 from vijil_dome.guardrails import GuardrailResult, GuardResult
+from vijil_dome.instrumentation.tracing import _safe_set_attribute
 
 
 def _set_darwin_span_attributes(
@@ -44,16 +45,16 @@ def _set_darwin_span_attributes(
         team_id: Team ID for multi-tenant filtering.
     """
     if team_id:
-        span.set_attribute("team.id", team_id)
+        _safe_set_attribute(span, "team.id", str(team_id))
     if agent_id:
-        span.set_attribute("agent.id", agent_id)
+        _safe_set_attribute(span, "agent.id", str(agent_id))
 
     is_flagged = (
         result.flagged if isinstance(result, GuardrailResult) else result.triggered
     )
-    span.set_attribute("detection.label", "flagged" if is_flagged else "clean")
-    span.set_attribute("detection.score", result.detection_score)
+    _safe_set_attribute(span, "detection.label", "flagged" if is_flagged else "clean")
+    _safe_set_attribute(span, "detection.score", float(result.detection_score or 0.0))
 
     if result.triggered_methods:
-        span.set_attribute("detection.methods", result.triggered_methods)
-        span.set_attribute("detection.method", result.triggered_methods[0])
+        _safe_set_attribute(span, "detection.methods", result.triggered_methods)
+        _safe_set_attribute(span, "detection.method", result.triggered_methods[0])
