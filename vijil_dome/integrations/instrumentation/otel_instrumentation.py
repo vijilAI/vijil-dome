@@ -79,6 +79,7 @@ def _add_darwin_detection_spans(
         - detection.method: name of the triggered guard/detector
         - team.id: team context (from kwargs)
         - agent.id: agent context (from kwargs)
+        - user.id: user context (from kwargs)
 
     Args:
         guardrail: The Guardrail instance to wrap.

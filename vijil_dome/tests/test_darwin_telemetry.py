@@ -3,7 +3,7 @@
 Verifies that:
 - GuardResult and GuardrailResult expose detection_score and triggered_methods
 - instrument_dome() emits Darwin span attributes (detection.label,
-  detection.score, detection.methods, team.id, agent.id) alongside
+  detection.score, detection.methods, team.id, agent.id, user.id) alongside
   the existing split metrics.
 """
 
@@ -176,10 +176,12 @@ class TestSetDarwinSpanAttributes:
             flagged_guardrail_result,
             agent_id="agent-123",
             team_id="team-456",
+            user_id="user-789",
         )
 
         span.set_attribute.assert_any_call("team.id", "team-456")
         span.set_attribute.assert_any_call("agent.id", "agent-123")
+        span.set_attribute.assert_any_call("user.id", "user-789")
         span.set_attribute.assert_any_call("detection.label", "flagged")
         span.set_attribute.assert_any_call("detection.score", 0.95)
         span.set_attribute.assert_any_call("detection.method", "deberta-v3")
@@ -199,7 +201,7 @@ class TestSetDarwinSpanAttributes:
         assert "detection.method" not in call_keys
         assert "detection.methods" not in call_keys
 
-    def test_skips_team_and_agent_when_not_provided(
+    def test_skips_team_agent_and_user_when_not_provided(
         self, flagged_guardrail_result: GuardrailResult
     ):
         span = MagicMock()
@@ -208,6 +210,7 @@ class TestSetDarwinSpanAttributes:
         call_keys = [call.args[0] for call in span.set_attribute.call_args_list]
         assert "team.id" not in call_keys
         assert "agent.id" not in call_keys
+        assert "user.id" not in call_keys
 
     def test_perturbation_changing_score_does_not_affect_label(
         self, flagged_guardrail_result: GuardrailResult
@@ -249,7 +252,12 @@ class TestAddDarwinDetectionSpans:
         mock_tracer.start_as_current_span.return_value = mock_span
 
         _add_darwin_detection_spans(guardrail, mock_tracer, "dome-input")
-        result = guardrail.scan("test input", agent_id="a1", team_id="t1")
+        result = guardrail.scan(
+            "test input",
+            agent_id="a1",
+            team_id="t1",
+            user_id="u1",
+        )
 
         mock_tracer.start_as_current_span.assert_called_once_with("dome-detection")
         mock_span.set_attribute.assert_any_call("dome.guardrail", "dome-input")
@@ -257,6 +265,7 @@ class TestAddDarwinDetectionSpans:
         mock_span.set_attribute.assert_any_call("detection.score", 0.95)
         mock_span.set_attribute.assert_any_call("agent.id", "a1")
         mock_span.set_attribute.assert_any_call("team.id", "t1")
+        mock_span.set_attribute.assert_any_call("user.id", "u1")
         mock_span.set_attribute.assert_any_call("dome.guard.enforced", True)
 
         assert result is flagged_guardrail_result
@@ -282,11 +291,17 @@ class TestAddDarwinDetectionSpans:
         mock_tracer.start_as_current_span.return_value = mock_span
 
         _add_darwin_detection_spans(guardrail, mock_tracer, "dome-output")
-        result = await guardrail.async_scan("test output", agent_id="a2", team_id="t2")
+        result = await guardrail.async_scan(
+            "test output",
+            agent_id="a2",
+            team_id="t2",
+            user_id="u2",
+        )
 
         mock_tracer.start_as_current_span.assert_called_once_with("dome-detection")
         mock_span.set_attribute.assert_any_call("dome.guardrail", "dome-output")
         mock_span.set_attribute.assert_any_call("detection.label", "flagged")
+        mock_span.set_attribute.assert_any_call("user.id", "u2")
         mock_span.set_attribute.assert_any_call("dome.guard.enforced", True)
 
         assert result is flagged_guardrail_result
