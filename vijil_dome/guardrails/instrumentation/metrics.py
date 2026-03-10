@@ -43,20 +43,29 @@ def _create_request_counter(name: str, meter: Meter):
 
 # Add counter to track number of requests
 def _add_request_counter(request_counter: Counter):
+    def _build_attributes(kwargs):
+        attributes = {}
+        agent_id = kwargs.get("agent_id")
+        team_id = kwargs.get("team_id")
+        user_id = kwargs.get("user_id")
+        if agent_id:
+            attributes["agent.id"] = agent_id
+        if team_id:
+            attributes["team.id"] = team_id
+        if user_id:
+            attributes["user.id"] = user_id
+        return attributes
+
     def decorator(func):
         @wraps(func)
         def sync_wrapper(*args, **kwargs):
-            agent_id = kwargs.get("agent_id")
-            attributes = {"agent.id": agent_id} if agent_id else None
-            request_counter.add(1, attributes=attributes or {})
+            request_counter.add(1, attributes=_build_attributes(kwargs))
             result = func(*args, **kwargs)
             return result
 
         @wraps(func)
         async def async_wrapper(*args, **kwargs):
-            agent_id = kwargs.get("agent_id")
-            attributes = {"agent.id": agent_id} if agent_id else None
-            request_counter.add(1, attributes=attributes or {})
+            request_counter.add(1, attributes=_build_attributes(kwargs))
             result = await func(*args, **kwargs)
             return result
 
@@ -79,25 +88,36 @@ def _create_latency_histogram(name: str, meter: Meter):
 
 # Add histogram to track latency of function
 def _add_request_latency_histogram(request_latency: Histogram):
+    def _build_attributes(kwargs):
+        attributes = {}
+        agent_id = kwargs.get("agent_id")
+        team_id = kwargs.get("team_id")
+        user_id = kwargs.get("user_id")
+        if agent_id:
+            attributes["agent.id"] = agent_id
+        if team_id:
+            attributes["team.id"] = team_id
+        if user_id:
+            attributes["user.id"] = user_id
+        return attributes
+
     def decorator(func):
         @wraps(func)
         def sync_wrapper(*args, **kwargs):
-            agent_id = kwargs.get("agent_id")
-            attributes = {"agent.id": agent_id} if agent_id else None
+            attributes = _build_attributes(kwargs)
             start_time = time.time()
             result = func(*args, **kwargs)
             hist_time = time.time() - start_time
-            request_latency.record(hist_time, attributes=attributes or {})
+            request_latency.record(hist_time, attributes=attributes)
             return result
 
         @wraps(func)
         async def async_wrapper(*args, **kwargs):
-            agent_id = kwargs.get("agent_id")
-            attributes = {"agent.id": agent_id} if agent_id else None
+            attributes = _build_attributes(kwargs)
             start_time = time.time()
             result = await func(*args, **kwargs)
             hist_time = time.time() - start_time
-            request_latency.record(hist_time, attributes=attributes or {})
+            request_latency.record(hist_time, attributes=attributes)
             return result
 
         return _return_wrapper(func, sync_wrapper, async_wrapper)
@@ -131,19 +151,30 @@ def _set_result_counter(
 
 # Add counter to track number of requests flagged
 def _add_request_flagged_counter(request_flagged_counter: Counter):
+    def _build_attributes(kwargs):
+        attributes = {}
+        agent_id = kwargs.get("agent_id")
+        team_id = kwargs.get("team_id")
+        user_id = kwargs.get("user_id")
+        if agent_id:
+            attributes["agent.id"] = agent_id
+        if team_id:
+            attributes["team.id"] = team_id
+        if user_id:
+            attributes["user.id"] = user_id
+        return attributes
+
     def decorator(func):
         @wraps(func)
         def sync_wrapper(*args, **kwargs):
-            agent_id = kwargs.get("agent_id")
-            attributes = {"agent.id": agent_id} if agent_id else None
+            attributes = _build_attributes(kwargs)
             result = func(*args, **kwargs)
             _set_result_counter(result, request_flagged_counter, attributes)
             return result
 
         @wraps(func)
         async def async_wrapper(*args, **kwargs):
-            agent_id = kwargs.get("agent_id")
-            attributes = {"agent.id": agent_id} if agent_id else None
+            attributes = _build_attributes(kwargs)
             result = await func(*args, **kwargs)
             _set_result_counter(result, request_flagged_counter, attributes)
             return result
@@ -162,26 +193,37 @@ def _create_request_error_counter(name: str, meter: Meter):
 
 
 def _add_request_error_counter(request_error_counter: Counter):
+    def _build_attributes(kwargs):
+        attributes = {}
+        agent_id = kwargs.get("agent_id")
+        team_id = kwargs.get("team_id")
+        user_id = kwargs.get("user_id")
+        if agent_id:
+            attributes["agent.id"] = agent_id
+        if team_id:
+            attributes["team.id"] = team_id
+        if user_id:
+            attributes["user.id"] = user_id
+        return attributes
+
     def decorator(func):
         @wraps(func)
         def sync_wrapper(*args, **kwargs):
-            agent_id = kwargs.get("agent_id")
-            attributes = {"agent.id": agent_id} if agent_id else None
+            attributes = _build_attributes(kwargs)
             try:
                 result = func(*args, **kwargs)
             except:
-                request_error_counter.add(1, attributes=attributes or {})
+                request_error_counter.add(1, attributes=attributes)
                 raise
             return result
 
         @wraps(func)
         async def async_wrapper(*args, **kwargs):
-            agent_id = kwargs.get("agent_id")
-            attributes = {"agent.id": agent_id} if agent_id else None
+            attributes = _build_attributes(kwargs)
             try:
                 result = await func(*args, **kwargs)
             except:
-                request_error_counter.add(1, attributes=attributes or {})
+                request_error_counter.add(1, attributes=attributes)
                 raise
             return result
 
