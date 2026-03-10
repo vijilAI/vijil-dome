@@ -17,6 +17,7 @@
 import time
 import json
 import logging
+import inspect
 from enum import Enum, auto
 from abc import ABC, abstractmethod
 from typing import Type, Dict, List, Tuple, Callable, Coroutine, Any, Optional
@@ -106,6 +107,20 @@ class DetectionMethod(ABC):
     Abstract base class for all detection methods.
     """
 
+    @staticmethod
+    def _call_with_supported_kwargs(func, *args, **kwargs):
+        signature = inspect.signature(func)
+        supports_var_kwargs = any(
+            param.kind == inspect.Parameter.VAR_KEYWORD
+            for param in signature.parameters.values()
+        )
+        if supports_var_kwargs:
+            return func(*args, **kwargs)
+        filtered_kwargs = {
+            key: value for key, value in kwargs.items() if key in signature.parameters
+        }
+        return func(*args, **filtered_kwargs)
+
     @abstractmethod
     async def detect(self, query_string: str) -> DetectionResult:
         """
@@ -114,17 +129,35 @@ class DetectionMethod(ABC):
         pass
 
     async def detect_with_time(
-        self, query_string: str, agent_id: Optional[str] = None
+        self,
+        query_string: str,
+        agent_id: Optional[str] = None,
+        team_id: Optional[str] = None,
+        user_id: Optional[str] = None,
     ) -> DetectionTimingResult:
         """
         Perform the detection and return the result along with the execution time.
         """
         start_time = time.time()
-        result = await self.detect(query_string)
+        result = await self._call_with_supported_kwargs(
+            self.detect,
+            query_string,
+            agent_id=agent_id,
+            team_id=team_id,
+            user_id=user_id,
+        )
         execution_time = round((time.time() - start_time) * 1000, 3)
 
+        result_payload = dict(result[1])
+        if agent_id:
+            result_payload.setdefault("agent_id", agent_id)
+        if team_id:
+            result_payload.setdefault("team_id", team_id)
+        if user_id:
+            result_payload.setdefault("user_id", user_id)
+
         detection_result = DetectionTimingResult(
-            hit=result[0], result=result[1], exec_time=execution_time
+            hit=result[0], result=result_payload, exec_time=execution_time
         )
         sanitized_result = self._sanitize_result(result)
         logging.info(f"{sanitized_result}")
@@ -143,21 +176,38 @@ class DetectionMethod(ABC):
         return results
 
     async def detect_batch_with_time(
-        self, inputs: List[str], agent_id: Optional[str] = None
+        self,
+        inputs: List[str],
+        agent_id: Optional[str] = None,
+        team_id: Optional[str] = None,
+        user_id: Optional[str] = None,
     ) -> BatchDetectionTimingResult:
         """
         Timing wrapper for batch detection. Calls detect_batch and wraps
         each result in DetectionTimingResult.
         """
         start_time = time.time()
-        batch_results = await self.detect_batch(inputs)
+        batch_results = await self._call_with_supported_kwargs(
+            self.detect_batch,
+            inputs,
+            agent_id=agent_id,
+            team_id=team_id,
+            user_id=user_id,
+        )
         total_time = round((time.time() - start_time) * 1000, 3)
 
         timing_results = []
         for result in batch_results:
+            result_payload = dict(result[1])
+            if agent_id:
+                result_payload.setdefault("agent_id", agent_id)
+            if team_id:
+                result_payload.setdefault("team_id", team_id)
+            if user_id:
+                result_payload.setdefault("user_id", user_id)
             timing_results.append(
                 DetectionTimingResult(
-                    hit=result[0], result=result[1], exec_time=0.0
+                    hit=result[0], result=result_payload, exec_time=0.0
                 )
             )
 

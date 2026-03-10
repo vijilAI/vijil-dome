@@ -89,7 +89,11 @@ class MBertPromptInjectionModel(HFBaseModel):
         return 1.0 - item["score"]
 
     def sync_detect(
-        self, query_string: str, agent_id: Optional[str] = None
+        self,
+        query_string: str,
+        agent_id: Optional[str] = None,
+        team_id: Optional[str] = None,
+        user_id: Optional[str] = None,
     ) -> DetectionResult:
         chunks = chunk_text(
             query_string, self.tokenizer, self.max_length, self.window_stride

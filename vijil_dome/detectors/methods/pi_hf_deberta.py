@@ -97,7 +97,11 @@ class BaseDebertaPromptInjectionModel(HFBaseModel):
             raise
 
     def sync_detect(
-        self, query_string: str, agent_id: Optional[str] = None
+        self,
+        query_string: str,
+        agent_id: Optional[str] = None,
+        team_id: Optional[str] = None,
+        user_id: Optional[str] = None,
     ) -> DetectionResult:
         chunks = chunk_text(
             query_string, self.tokenizer, self.max_length, self.window_stride
@@ -316,7 +320,11 @@ class PromptGuardSecurityModel(HFBaseModel):
         return (probabilities[0, 1] + probabilities[0, 2]).item()
 
     def sync_detect(
-        self, query_string: str, agent_id: Optional[str] = None
+        self,
+        query_string: str,
+        agent_id: Optional[str] = None,
+        team_id: Optional[str] = None,
+        user_id: Optional[str] = None,
     ) -> DetectionResult:
         logger.debug("Detecting using Prompt Guard...")
         chunks = chunk_text(

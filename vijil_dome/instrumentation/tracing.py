@@ -27,6 +27,12 @@ def _set_func_span_attributes(span: Span, *args, **kwargs):
     agent_id = kwargs.get("agent_id")
     if agent_id:
         span.set_attribute("agent.id", agent_id)
+    team_id = kwargs.get("team_id")
+    if team_id:
+        span.set_attribute("team.id", team_id)
+    user_id = kwargs.get("user_id")
+    if user_id:
+        span.set_attribute("user.id", user_id)
 
 
 def _set_func_span_result_attributes(span: Span, result):

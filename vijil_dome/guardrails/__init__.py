@@ -109,18 +109,44 @@ class BatchGuardrailResult(BaseModel):
 
 # Enable detectors that have blocking sync_detect methods to run on another thread
 async def run_detector_via_executor(
-    executor, detector, query_string, agent_id: Optional[str] = None
+    executor,
+    detector,
+    query_string,
+    agent_id: Optional[str] = None,
+    team_id: Optional[str] = None,
+    user_id: Optional[str] = None,
 ):
     start_time = time.time()
     loop = asyncio.get_running_loop()
-    future = loop.run_in_executor(
-        executor, detector.sync_detect, query_string, agent_id
-    )
+    # Preserve compatibility with detector implementations that may only accept
+    # (query_string) or (query_string, agent_id).
+    def _invoke_sync_detect():
+        try:
+            return detector.sync_detect(
+                query_string,
+                agent_id=agent_id,
+                team_id=team_id,
+                user_id=user_id,
+            )
+        except TypeError:
+            try:
+                return detector.sync_detect(query_string, agent_id)
+            except TypeError:
+                return detector.sync_detect(query_string)
+
+    future = loop.run_in_executor(executor, _invoke_sync_detect)
     try:
         result = await future
         execution_time = round((time.time() - start_time) * 1000, 3)
+        result_payload = dict(result[1])
+        if agent_id:
+            result_payload.setdefault("agent_id", agent_id)
+        if team_id:
+            result_payload.setdefault("team_id", team_id)
+        if user_id:
+            result_payload.setdefault("user_id", user_id)
         result_with_timing = DetectionTimingResult(
-            hit=result[0], result=result[1], exec_time=execution_time
+            hit=result[0], result=result_payload, exec_time=execution_time
         )
         return result_with_timing
     except asyncio.CancelledError:
@@ -144,7 +170,11 @@ class Guard:
 
     # Sequential guard
     async def sequential_guard(
-        self, query_string: str, agent_id: Optional[str] = None
+        self,
+        query_string: str,
+        agent_id: Optional[str] = None,
+        team_id: Optional[str] = None,
+        user_id: Optional[str] = None,
     ) -> GuardResult:
         st_time = time.time()
         flagged = False
@@ -152,7 +182,10 @@ class Guard:
         response_string = query_string
         for detector in self.detector_list:
             detector_scan_result = await detector.detect_with_time(
-                query_string, agent_id=agent_id
+                query_string,
+                agent_id=agent_id,
+                team_id=team_id,
+                user_id=user_id,
             )
             detector_results[type(detector).__name__] = detector_scan_result
 
@@ -190,7 +223,12 @@ class Guard:
 
     # Parallel Guard
     async def parallel_guard(
-        self, query_string: str, executor, agent_id: Optional[str] = None
+        self,
+        query_string: str,
+        executor,
+        agent_id: Optional[str] = None,
+        team_id: Optional[str] = None,
+        user_id: Optional[str] = None,
     ) -> GuardResult:
         st_time = time.time()
         detector_results = {}
@@ -207,7 +245,12 @@ class Guard:
                     try:
                         async with asyncio.timeout(asyncio_timeout_limit):
                             result = await run_detector_via_executor(
-                                executor, detector, query_string, agent_id=agent_id
+                                executor,
+                                detector,
+                                query_string,
+                                agent_id=agent_id,
+                                team_id=team_id,
+                                user_id=user_id,
                             )
                     except TimeoutError:
                         result = DetectionTimingResult(
@@ -223,7 +266,10 @@ class Guard:
                 try:
                     async with asyncio.timeout(asyncio_timeout_limit):
                         result = await detector.detect_with_time(
-                            query_string, agent_id=agent_id
+                            query_string,
+                            agent_id=agent_id,
+                            team_id=team_id,
+                            user_id=user_id,
                         )
                 except TimeoutError:
                     logger.warning(
@@ -308,27 +354,65 @@ class Guard:
     # Sync method that runs the regular guard or parallel guard based on config
     # This is never invoked by the guardrail class, but is useful for debugging
     def scan(
-        self, query_string: str, executor, agent_id: Optional[str] = None
+        self,
+        query_string: str,
+        executor,
+        agent_id: Optional[str] = None,
+        team_id: Optional[str] = None,
+        user_id: Optional[str] = None,
     ) -> GuardResult:
         if self.run_in_parallel:
             return asyncio.run(
-                self.parallel_guard(query_string, executor, agent_id=agent_id)
+                self.parallel_guard(
+                    query_string,
+                    executor,
+                    agent_id=agent_id,
+                    team_id=team_id,
+                    user_id=user_id,
+                )
             )
         else:
-            return asyncio.run(self.sequential_guard(query_string, agent_id=agent_id))
+            return asyncio.run(
+                self.sequential_guard(
+                    query_string,
+                    agent_id=agent_id,
+                    team_id=team_id,
+                    user_id=user_id,
+                )
+            )
 
     # Async scan
     async def async_scan(
-        self, query_string: str, executor, agent_id: Optional[str] = None
+        self,
+        query_string: str,
+        executor,
+        agent_id: Optional[str] = None,
+        team_id: Optional[str] = None,
+        user_id: Optional[str] = None,
     ) -> GuardResult:
         if self.run_in_parallel:
-            return await self.parallel_guard(query_string, executor, agent_id=agent_id)
+            return await self.parallel_guard(
+                query_string,
+                executor,
+                agent_id=agent_id,
+                team_id=team_id,
+                user_id=user_id,
+            )
         else:
-            return await self.sequential_guard(query_string, agent_id=agent_id)
+            return await self.sequential_guard(
+                query_string,
+                agent_id=agent_id,
+                team_id=team_id,
+                user_id=user_id,
+            )
 
     # Batch guard - processes all inputs through all detectors
     async def sequential_guard_batch(
-        self, inputs: List[str], agent_id: Optional[str] = None
+        self,
+        inputs: List[str],
+        agent_id: Optional[str] = None,
+        team_id: Optional[str] = None,
+        user_id: Optional[str] = None,
     ) -> BatchGuardResult:
         st_time = time.time()
         n = len(inputs)
@@ -337,7 +421,12 @@ class Guard:
         item_detector_results: List[Dict[str, DetectionTimingResult]] = [{} for _ in range(n)]
 
         for detector in self.detector_list:
-            batch_timing = await detector.detect_batch_with_time(inputs, agent_id=agent_id)
+            batch_timing = await detector.detect_batch_with_time(
+                inputs,
+                agent_id=agent_id,
+                team_id=team_id,
+                user_id=user_id,
+            )
             detector_name = type(detector).__name__
 
             for i, det_result in enumerate(batch_timing.results):
@@ -380,14 +469,37 @@ class Guard:
         return BatchGuardResult(items=items, exec_time=exec_time)
 
     async def async_scan_batch(
-        self, inputs: List[str], executor=None, agent_id: Optional[str] = None
+        self,
+        inputs: List[str],
+        executor=None,
+        agent_id: Optional[str] = None,
+        team_id: Optional[str] = None,
+        user_id: Optional[str] = None,
     ) -> BatchGuardResult:
-        return await self.sequential_guard_batch(inputs, agent_id=agent_id)
+        return await self.sequential_guard_batch(
+            inputs,
+            agent_id=agent_id,
+            team_id=team_id,
+            user_id=user_id,
+        )
 
     def scan_batch(
-        self, inputs: List[str], executor=None, agent_id: Optional[str] = None
+        self,
+        inputs: List[str],
+        executor=None,
+        agent_id: Optional[str] = None,
+        team_id: Optional[str] = None,
+        user_id: Optional[str] = None,
     ) -> BatchGuardResult:
-        return asyncio.run(self.async_scan_batch(inputs, executor, agent_id=agent_id))
+        return asyncio.run(
+            self.async_scan_batch(
+                inputs,
+                executor,
+                agent_id=agent_id,
+                team_id=team_id,
+                user_id=user_id,
+            )
+        )
 
 
 class Guardrail:
@@ -415,7 +527,11 @@ class Guardrail:
         self.executor = concurrent.futures.ThreadPoolExecutor()
 
     async def sequential_guard(
-        self, query_string: str, agent_id: Optional[str] = None
+        self,
+        query_string: str,
+        agent_id: Optional[str] = None,
+        team_id: Optional[str] = None,
+        user_id: Optional[str] = None,
     ) -> GuardrailResult:
         st_time = time.time()
         flagged = False
@@ -423,7 +539,11 @@ class Guardrail:
         response_string = query_string
         for guard in self.guard_list:
             guard_scan_result = await guard.async_scan(
-                query_string, self.executor, agent_id=agent_id
+                query_string,
+                self.executor,
+                agent_id=agent_id,
+                team_id=team_id,
+                user_id=user_id,
             )
             guard_results[guard.guard_name] = guard_scan_result
             if guard_scan_result.triggered:
@@ -458,7 +578,11 @@ class Guardrail:
 
     # Parallel guard
     async def parallel_guard(
-        self, query_string: str, agent_id: Optional[str] = None
+        self,
+        query_string: str,
+        agent_id: Optional[str] = None,
+        team_id: Optional[str] = None,
+        user_id: Optional[str] = None,
     ) -> GuardrailResult:
         guard_results = {}
         flagged = False
@@ -467,7 +591,13 @@ class Guardrail:
 
         # Helper function - enable parallel execution of guards which can stop once a single guard is triggered
         async def guard_wrapper(guard: Guard, query_string: str, executor):
-            result = await guard.async_scan(query_string, executor, agent_id=agent_id)
+            result = await guard.async_scan(
+                query_string,
+                executor,
+                agent_id=agent_id,
+                team_id=team_id,
+                user_id=user_id,
+            )
             return {"name": guard.guard_name, "result": result}
 
         tasks = [
@@ -530,27 +660,63 @@ class Guardrail:
 
     # Sync method that runs the regular guard or parallel guard based on config
     def scan(
-        self, query_string: str, agent_id: Optional[str] = None
+        self,
+        query_string: str,
+        agent_id: Optional[str] = None,
+        team_id: Optional[str] = None,
+        user_id: Optional[str] = None,
     ) -> GuardrailResult:
         if self.run_in_parallel:
-            return asyncio.run(self.parallel_guard(query_string, agent_id=agent_id))
+            return asyncio.run(
+                self.parallel_guard(
+                    query_string,
+                    agent_id=agent_id,
+                    team_id=team_id,
+                    user_id=user_id,
+                )
+            )
         else:
-            return asyncio.run(self.sequential_guard(query_string, agent_id=agent_id))
+            return asyncio.run(
+                self.sequential_guard(
+                    query_string,
+                    agent_id=agent_id,
+                    team_id=team_id,
+                    user_id=user_id,
+                )
+            )
 
     # Async scan
     async def async_scan(
-        self, query_string: str, agent_id: Optional[str] = None
+        self,
+        query_string: str,
+        agent_id: Optional[str] = None,
+        team_id: Optional[str] = None,
+        user_id: Optional[str] = None,
     ) -> GuardrailResult:
         if self.run_in_parallel:
             logger.info(f'Scanning "{query_string}" through guards in parallel.')
-            return await self.parallel_guard(query_string, agent_id=agent_id)
+            return await self.parallel_guard(
+                query_string,
+                agent_id=agent_id,
+                team_id=team_id,
+                user_id=user_id,
+            )
         else:
             logger.info(f'Scanning "{query_string}" through guards sequentially.')
-            return await self.sequential_guard(query_string, agent_id=agent_id)
+            return await self.sequential_guard(
+                query_string,
+                agent_id=agent_id,
+                team_id=team_id,
+                user_id=user_id,
+            )
 
     # Batch guardrail - processes all inputs through all guards
     async def sequential_guard_batch(
-        self, inputs: List[str], agent_id: Optional[str] = None
+        self,
+        inputs: List[str],
+        agent_id: Optional[str] = None,
+        team_id: Optional[str] = None,
+        user_id: Optional[str] = None,
     ) -> BatchGuardrailResult:
         st_time = time.time()
         n = len(inputs)
@@ -560,7 +726,11 @@ class Guardrail:
 
         for guard in self.guard_list:
             batch_guard_result = await guard.async_scan_batch(
-                inputs, self.executor, agent_id=agent_id
+                inputs,
+                self.executor,
+                agent_id=agent_id,
+                team_id=team_id,
+                user_id=user_id,
             )
             for i, guard_result in enumerate(batch_guard_result.items):
                 item_guard_results[i][guard.guard_name] = guard_result
@@ -602,14 +772,34 @@ class Guardrail:
         return BatchGuardrailResult(items=items, exec_time=exec_time)
 
     async def async_scan_batch(
-        self, inputs: List[str], agent_id: Optional[str] = None
+        self,
+        inputs: List[str],
+        agent_id: Optional[str] = None,
+        team_id: Optional[str] = None,
+        user_id: Optional[str] = None,
     ) -> BatchGuardrailResult:
-        return await self.sequential_guard_batch(inputs, agent_id=agent_id)
+        return await self.sequential_guard_batch(
+            inputs,
+            agent_id=agent_id,
+            team_id=team_id,
+            user_id=user_id,
+        )
 
     def scan_batch(
-        self, inputs: List[str], agent_id: Optional[str] = None
+        self,
+        inputs: List[str],
+        agent_id: Optional[str] = None,
+        team_id: Optional[str] = None,
+        user_id: Optional[str] = None,
     ) -> BatchGuardrailResult:
-        return asyncio.run(self.async_scan_batch(inputs, agent_id=agent_id))
+        return asyncio.run(
+            self.async_scan_batch(
+                inputs,
+                agent_id=agent_id,
+                team_id=team_id,
+                user_id=user_id,
+            )
+        )
 
 
 # A generic Guardrail Config Class

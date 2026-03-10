@@ -35,10 +35,14 @@ class DomeConfig(GuardrailConfig):
         input_guardrail: Guardrail,
         output_guardrail: Guardrail,
         agent_id: Optional[str] = None,
+        team_id: Optional[str] = None,
+        user_id: Optional[str] = None,
     ):
         self.input_guardrail = input_guardrail
         self.output_guardrail = output_guardrail
         self.agent_id = agent_id
+        self.team_id = team_id
+        self.user_id = user_id
 
     def get_input_guardrail(self) -> Guardrail:
         return self.input_guardrail
@@ -49,15 +53,37 @@ class DomeConfig(GuardrailConfig):
     def get_agent_id(self) -> Optional[str]:
         return self.agent_id
 
+    def get_team_id(self) -> Optional[str]:
+        return self.team_id
+
+    def get_user_id(self) -> Optional[str]:
+        return self.user_id
+
 
 def create_dome_config(config: Union[Dict, str]) -> DomeConfig:
     if isinstance(config, str):
-        input_guardrail, output_guardrail, agent_id = convert_toml_to_guardrails(config)
-        config_object = DomeConfig(input_guardrail, output_guardrail, agent_id)
+        input_guardrail, output_guardrail, agent_id, team_id, user_id = (
+            convert_toml_to_guardrails(config)
+        )
+        config_object = DomeConfig(
+            input_guardrail,
+            output_guardrail,
+            agent_id=agent_id,
+            team_id=team_id,
+            user_id=user_id,
+        )
         return config_object
     elif isinstance(config, dict):
-        input_guardrail, output_guardrail, agent_id = convert_dict_to_guardrails(config)
-        config_object = DomeConfig(input_guardrail, output_guardrail, agent_id)
+        input_guardrail, output_guardrail, agent_id, team_id, user_id = (
+            convert_dict_to_guardrails(config)
+        )
+        config_object = DomeConfig(
+            input_guardrail,
+            output_guardrail,
+            agent_id=agent_id,
+            team_id=team_id,
+            user_id=user_id,
+        )
         return config_object
     else:
         raise ValueError(
@@ -128,6 +154,8 @@ class Dome:
         self.input_guardrail = None  # type: Optional[Guardrail]
         self.output_guardrail = None  # type: Optional[Guardrail]
         self.agent_id = None  # type: Optional[str]
+        self.team_id = None  # type: Optional[str]
+        self.user_id = None  # type: Optional[str]
         if dome_config is not None:
             if isinstance(dome_config, DomeConfig):
                 self._init_from_dome_config(dome_config)
@@ -183,6 +211,17 @@ class Dome:
         self.input_guardrail = dome_config.input_guardrail
         self.output_guardrail = dome_config.output_guardrail
         self.agent_id = dome_config.agent_id
+        self.team_id = dome_config.team_id
+        self.user_id = dome_config.user_id
+
+    def get_agent_id(self) -> Optional[str]:
+        return self.agent_id
+
+    def get_team_id(self) -> Optional[str]:
+        return self.team_id
+
+    def get_user_id(self) -> Optional[str]:
+        return self.user_id
 
     def get_guardrails(self):
         return [self.input_guardrail, self.output_guardrail]
@@ -193,10 +232,19 @@ class Dome:
             flagged=False, response_string=query_string, trace={}, exec_time=0.0
         )
 
-    def guard_input(self, query_string: str, *, agent_id: Optional[str] = None):
+    def guard_input(
+        self,
+        query_string: str,
+        *,
+        agent_id: Optional[str] = None,
+        team_id: Optional[str] = None,
+        user_id: Optional[str] = None,
+    ):
         if self.input_guardrail is None:
             return self._empty_guardrail_result(query_string)
-        result = self.input_guardrail.scan(query_string, agent_id=agent_id)
+        result = self.input_guardrail.scan(
+            query_string, agent_id=agent_id, team_id=team_id, user_id=user_id
+        )
         return ScanResult(
             flagged=result.flagged,
             enforced=self.enforce and result.flagged,
@@ -207,11 +255,18 @@ class Dome:
         )
 
     async def async_guard_input(
-        self, query_string: str, *, agent_id: Optional[str] = None
+        self,
+        query_string: str,
+        *,
+        agent_id: Optional[str] = None,
+        team_id: Optional[str] = None,
+        user_id: Optional[str] = None,
     ):
         if self.input_guardrail is None:
             return self._empty_guardrail_result(query_string)
-        result = await self.input_guardrail.async_scan(query_string, agent_id=agent_id)
+        result = await self.input_guardrail.async_scan(
+            query_string, agent_id=agent_id, team_id=team_id, user_id=user_id
+        )
         return ScanResult(
             flagged=result.flagged,
             enforced=self.enforce and result.flagged,
@@ -221,10 +276,19 @@ class Dome:
             detection_score=result.detection_score,
         )
 
-    def guard_output(self, query_string: str, *, agent_id: Optional[str] = None):
+    def guard_output(
+        self,
+        query_string: str,
+        *,
+        agent_id: Optional[str] = None,
+        team_id: Optional[str] = None,
+        user_id: Optional[str] = None,
+    ):
         if self.output_guardrail is None:
             return self._empty_guardrail_result(query_string)
-        result = self.output_guardrail.scan(query_string, agent_id=agent_id)
+        result = self.output_guardrail.scan(
+            query_string, agent_id=agent_id, team_id=team_id, user_id=user_id
+        )
         return ScanResult(
             flagged=result.flagged,
             enforced=self.enforce and result.flagged,
@@ -235,11 +299,18 @@ class Dome:
         )
 
     async def async_guard_output(
-        self, query_string: str, *, agent_id: Optional[str] = None
+        self,
+        query_string: str,
+        *,
+        agent_id: Optional[str] = None,
+        team_id: Optional[str] = None,
+        user_id: Optional[str] = None,
     ):
         if self.output_guardrail is None:
             return self._empty_guardrail_result(query_string)
-        result = await self.output_guardrail.async_scan(query_string, agent_id=agent_id)
+        result = await self.output_guardrail.async_scan(
+            query_string, agent_id=agent_id, team_id=team_id, user_id=user_id
+        )
         return ScanResult(
             flagged=result.flagged,
             enforced=self.enforce and result.flagged,
@@ -277,38 +348,62 @@ class Dome:
         return BatchScanResult(items=items, exec_time=batch_result.exec_time)
 
     def guard_input_batch(
-        self, inputs: List[str], *, agent_id: Optional[str] = None
+        self,
+        inputs: List[str],
+        *,
+        agent_id: Optional[str] = None,
+        team_id: Optional[str] = None,
+        user_id: Optional[str] = None,
     ) -> "BatchScanResult":
         if self.input_guardrail is None:
             return self._empty_batch_result(inputs)
-        result = self.input_guardrail.scan_batch(inputs, agent_id=agent_id)
+        result = self.input_guardrail.scan_batch(
+            inputs, agent_id=agent_id, team_id=team_id, user_id=user_id
+        )
         return self._batch_guardrail_to_scan(result)
 
     async def async_guard_input_batch(
-        self, inputs: List[str], *, agent_id: Optional[str] = None
+        self,
+        inputs: List[str],
+        *,
+        agent_id: Optional[str] = None,
+        team_id: Optional[str] = None,
+        user_id: Optional[str] = None,
     ) -> "BatchScanResult":
         if self.input_guardrail is None:
             return self._empty_batch_result(inputs)
         result = await self.input_guardrail.async_scan_batch(
-            inputs, agent_id=agent_id
+            inputs, agent_id=agent_id, team_id=team_id, user_id=user_id
         )
         return self._batch_guardrail_to_scan(result)
 
     def guard_output_batch(
-        self, inputs: List[str], *, agent_id: Optional[str] = None
+        self,
+        inputs: List[str],
+        *,
+        agent_id: Optional[str] = None,
+        team_id: Optional[str] = None,
+        user_id: Optional[str] = None,
     ) -> "BatchScanResult":
         if self.output_guardrail is None:
             return self._empty_batch_result(inputs)
-        result = self.output_guardrail.scan_batch(inputs, agent_id=agent_id)
+        result = self.output_guardrail.scan_batch(
+            inputs, agent_id=agent_id, team_id=team_id, user_id=user_id
+        )
         return self._batch_guardrail_to_scan(result)
 
     async def async_guard_output_batch(
-        self, inputs: List[str], *, agent_id: Optional[str] = None
+        self,
+        inputs: List[str],
+        *,
+        agent_id: Optional[str] = None,
+        team_id: Optional[str] = None,
+        user_id: Optional[str] = None,
     ) -> "BatchScanResult":
         if self.output_guardrail is None:
             return self._empty_batch_result(inputs)
         result = await self.output_guardrail.async_scan_batch(
-            inputs, agent_id=agent_id
+            inputs, agent_id=agent_id, team_id=team_id, user_id=user_id
         )
         return self._batch_guardrail_to_scan(result)
 

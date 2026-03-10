@@ -114,6 +114,9 @@ You can configure Dome using a TOML file or a Python dictionary.
 input-guards = ["prompt-injection", "input-toxicity"]
 output-guards = ["output-toxicity"]
 input-early-exit = false
+agent_id = "agent-123"
+team_id = "team-001"
+user_id = "user-001"
 
 [prompt-injection]
 type = "security"
@@ -139,6 +142,9 @@ config = {
     "input-guards": ["prompt-injection", "input-toxicity"],
     "output-guards": ["output-toxicity"],
     "input-early-exit": False,
+    "agent_id": "agent-123",
+    "team_id": "team-001",
+    "user_id": "user-001",
     "prompt-injection": {
         "type": "security",
         "early-exit": False,
@@ -157,6 +163,14 @@ config = {
     },
 }
 ```
+
+### Identity Fields
+
+You can include these optional top-level fields in config:
+
+- `agent_id`
+- `team_id`
+- `user_id`
 
 Dome includes 20+ prebuilt guardrails and supports building your own! See the [Detector Reference](vijil_dome/detectors/DETECTOR_INFO.md) for a full list of detectors, their parameters, and configuration examples.
 

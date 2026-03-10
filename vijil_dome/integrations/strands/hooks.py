@@ -24,7 +24,7 @@ Usage:
     from vijil_dome.integrations.strands import DomeHookProvider
 
     dome = Dome(config)
-    agent = Agent(hooks=[DomeHookProvider(dome, agent_id="...")])
+    agent = Agent(hooks=[DomeHookProvider(dome, agent_id="...", team_id="...", user_id="...")])
 """
 
 import logging
@@ -104,12 +104,16 @@ class DomeHookProvider(HookProvider):
     def __init__(
         self,
         dome: Dome,
-        agent_id: str = "",
+        agent_id: Optional[str] = None,
+        team_id: Optional[str] = None,
+        user_id: Optional[str] = None,
         input_blocked_message: str = DEFAULT_INPUT_BLOCKED_MESSAGE,
         output_blocked_message: str = DEFAULT_OUTPUT_BLOCKED_MESSAGE,
     ):
         self.dome = dome
         self.agent_id = agent_id
+        self.team_id = team_id
+        self.user_id = user_id
         self.input_blocked_message = input_blocked_message
         self.output_blocked_message = output_blocked_message
 
@@ -123,7 +127,12 @@ class DomeHookProvider(HookProvider):
         if text is None or idx is None:
             return
 
-        scan = await self.dome.async_guard_input(text, agent_id=self.agent_id)
+        scan = await self.dome.async_guard_input(
+            text,
+            agent_id=self.agent_id,
+            team_id=self.team_id,
+            user_id=self.user_id,
+        )
         if scan.flagged and not scan.enforced:
             logger.info("Dome shadow: input flagged but not enforced (score=%.2f)", scan.detection_score)
         elif scan.enforced:
@@ -141,7 +150,12 @@ class DomeHookProvider(HookProvider):
         if not text:
             return
 
-        scan = await self.dome.async_guard_output(text, agent_id=self.agent_id)
+        scan = await self.dome.async_guard_output(
+            text,
+            agent_id=self.agent_id,
+            team_id=self.team_id,
+            user_id=self.user_id,
+        )
         if scan.flagged and not scan.enforced:
             logger.info("Dome shadow: output flagged but not enforced (score=%.2f)", scan.detection_score)
         elif scan.enforced:

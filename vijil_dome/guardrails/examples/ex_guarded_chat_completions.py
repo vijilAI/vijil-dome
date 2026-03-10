@@ -35,7 +35,9 @@ default_guardrail_config = {
     "output-guards": [simple_guard],
 }
 
-input_guardrail, output_guardrail, _ = convert_dict_to_guardrails(default_guardrail_config)
+input_guardrail, output_guardrail, _, _, _ = convert_dict_to_guardrails(
+    default_guardrail_config
+)
 
 
 class SimpleConfig(GuardrailConfig):
