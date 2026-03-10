@@ -4,6 +4,8 @@ output-guards = ["output-toxicity"]  # User Defined Names
 input-early-exit = false # This setting runs both input guards, even if one catches the prompt
 input-run-parallel = true
 agent_id = "sample-agent-001"
+team_id = "sample-team-001"
+user_id = "sample-user-001"
 
 [prompt-injection] # matches to UD names
 type="security"

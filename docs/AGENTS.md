@@ -92,6 +92,9 @@ if not output_scan.is_safe():
 config = {
     "input-guards": ["prompt-injection", "input-toxicity"],
     "output-guards": ["output-toxicity", "pii-masking"],
+    "agent_id": "agent-123",
+    "team_id": "team-001",
+    "user_id": "user-001",
     "prompt-injection": {
         "type": "security",
         "methods": ["prompt-injection-deberta-v3-base"]
@@ -102,6 +105,8 @@ dome = Dome(config)
 # Via TOML file
 dome = Dome.from_toml("guardrails.toml")
 ```
+
+Identity fields supported in config: `agent_id`, `team_id`, `user_id`.
 
 ### Google ADK Integration
 
