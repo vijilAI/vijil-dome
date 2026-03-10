@@ -488,6 +488,9 @@ class PolicyGptOssSafeguard(LlmBaseDetector):
                 "parsed_output": parsed.output,
                 "model_response": response_text,
                 "normalized_query": normalized_query,
+                "response_string": self.blocked_response_string
+                if parsed.is_violation
+                else query_string,
             }
             if parsed.warning:
                 result["warning"] = parsed.warning
@@ -501,4 +504,5 @@ class PolicyGptOssSafeguard(LlmBaseDetector):
                 "config": self.config,
                 "error": str(exc),
                 "parsed_output": {"error": str(exc)},
+                "response_string": query_string,
             }
