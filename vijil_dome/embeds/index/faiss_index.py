@@ -197,22 +197,24 @@ class FaissEmbeddingsIndex(AbstractEmbeddingsIndex):
             distances, indices = self._index.search(query_vector, k)
             results = []
             for i, idx in enumerate(indices[0]):
-                if idx < len(self._items):
+                # FAISS can return -1 when fewer than k neighbors exist
+                if 0 <= idx < len(self._items):
                     # FAISS returns squared L2 distances, convert to similarity
                     # Using 1 / (1 + distance) as similarity score
                     distance = float(distances[0][i])
                     similarity = 1.0 / (1.0 + distance) if distance >= 0 else 0.0
                     results.append((self._items[idx], similarity))
-                else:
+                elif idx != -1:
                     logger.warning(f"Index {idx} out of range for {len(self._items)} items")
             return results
         else:
             distances, indices = self._index.search(query_vector, k)
             results = []
             for idx in indices[0]:
-                if idx < len(self._items):
+                # FAISS can return -1 when fewer than k neighbors exist
+                if 0 <= idx < len(self._items):
                     results.append((self._items[idx], None))
-                else:
+                elif idx != -1:
                     logger.warning(f"Index {idx} out of range for {len(self._items)} items")
             return results
 
@@ -239,3 +241,12 @@ class FaissEmbeddingsIndex(AbstractEmbeddingsIndex):
         
         self._items = items
         logger.info(f"Set {len(items)} items for FAISS index mapping")
+    
+    def set_embedder(self, embedder: AbstractEmbedder) -> None:
+        """Set the embedder for encoding queries.
+        
+        Args:
+            embedder: Embedder instance for encoding queries
+        """
+        self._embedder = embedder
+        logger.info("Set embedder for FAISS index")

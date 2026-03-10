@@ -21,6 +21,7 @@ from typing import Optional, List, Dict, Any, Union, Tuple
 from vijil_dome.detectors import (
     DetectionCategory,
     DetectionMethod,
+    DetectionResult,
     register_method,
     POLICY_SECTIONS,
 )
@@ -118,7 +119,7 @@ class PolicySectionsDetector(DetectionMethod):
             max_parallel_sections: Maximum number of sections to run in parallel (default: None = no limit)
             model_name: LLM model identifier (default: "openai/gpt-oss-120b")
             reasoning_effort: Reasoning depth - "low", "medium", "high" (default: "medium")
-            hub_name: LLM hub to use (default: "nebius")
+            hub_name: LLM hub to use (default: "openai")
             timeout: Request timeout in seconds (default: 60)
             max_retries: Maximum retry attempts (default: 3)
             api_key: API key for the hub (optional, uses env var if not provided)
@@ -290,7 +291,7 @@ class PolicySectionsDetector(DetectionMethod):
                     self.use_rag = False
                     self.faiss_index = None
                 else:
-                    self.faiss_index._embedder = self.embedder
+                    self.faiss_index.set_embedder(self.embedder)
                     logger.info(
                         "Loaded FAISS index",
                         extra={
@@ -459,13 +460,7 @@ class PolicySectionsDetector(DetectionMethod):
             )
             self.use_rag = False
     
-    def __del__(self):
-        """Cleanup resources."""
-        # FAISS index doesn't need explicit cleanup
-        # OpenAI client cleanup is handled by the client itself
-        pass
-
-    async def detect(self, query_string: str) -> Tuple[bool, Dict[str, Any]]:
+    async def detect(self, query_string: str) -> DetectionResult:
         """
         Detect policy violations by running section detectors in parallel batches.
         If RAG is enabled, retrieves only the most relevant sections first.
@@ -546,109 +541,9 @@ class PolicySectionsDetector(DetectionMethod):
                     }
                 )
         
-        # If max_parallel_sections is set, process in batches
-        if self.max_parallel_sections and self.max_parallel_sections > 0:
-            return await self._detect_batched(query_string, detectors_to_run, metadata_to_run, rag_info)
-        else:
-            return await self._detect_all_parallel(query_string, detectors_to_run, metadata_to_run, rag_info)
-
-    async def _detect_all_parallel(
-        self, 
-        query_string: str,
-        detectors: Optional[List[PolicyGptOssSafeguard]] = None,
-        metadata: Optional[List[Dict[str, Any]]] = None,
-        rag_info: Optional[Dict[str, Any]] = None,
-    ) -> Tuple[bool, Dict[str, Any]]:
-        """Run detectors in parallel with fast fail."""
-        if detectors is None:
-            detectors = self.detectors
-        if metadata is None:
-            metadata = self.section_metadata
-        
-        # Create tasks with metadata
-        task_data = [
-            {
-                "task": asyncio.create_task(detector.detect_with_time(query_string)),
-                "section_idx": idx,
-            }
-            for idx, detector in enumerate(detectors)
-        ]
-        tasks = [td["task"] for td in task_data]
-
-        violation_detected = False
-        violation_result = None
-        all_results = []
-
-        while tasks:
-            done, pending = await asyncio.wait(
-                tasks, return_when=asyncio.FIRST_COMPLETED
-            )
-
-            for task in done:
-                if task.cancelled():
-                    continue
-                try:
-                    result = task.result()
-                    # Find the section index for this task
-                    section_idx = next(
-                        td["section_idx"] for td in task_data if td["task"] == task
-                    )
-                    section_meta = metadata[section_idx]
-
-                    all_results.append({
-                        "section_id": section_meta["section_id"],
-                        "header": section_meta["header"],
-                        "hit": result.hit,
-                        "result": result.result,
-                        "exec_time": result.exec_time,
-                    })
-
-                    if result.hit:
-                        violation_detected = True
-                        violation_result = result
-                        # Cancel remaining tasks and await cancellation
-                        for p in pending:
-                            p.cancel()
-                        # Await cancelled tasks to avoid warnings
-                        await asyncio.gather(*pending, return_exceptions=True)
-                        break
-                except Exception as e:
-                    logger.warning(
-                        "Detector task raised exception",
-                        extra={
-                            "error": str(e),
-                            "query_length": len(query_string),
-                            "section_idx": section_idx if 'section_idx' in locals() else None,
-                        }
-                    )
-                    continue
-
-            if violation_detected:
-                break
-
-            # Update task_data to only include pending tasks
-            task_data = [td for td in task_data if td["task"] in pending]
-            tasks = pending
-
-        result_dict: Dict[str, Any] = {
-            "violation": violation_detected,
-            "sections": all_results,
-        }
-        
-        if violation_detected and violation_result:
-            result_dict.update({
-                "violating_section": all_results[-1] if all_results else None,
-                "model": violation_result.result.get("model"),
-                "hub": violation_result.result.get("hub"),
-                "response_string": self.blocked_response_string,
-            })
-        else:
-            result_dict["response_string"] = query_string
-        
-        if rag_info:
-            result_dict["rag_info"] = rag_info
-        
-        return violation_detected, result_dict
+        # Process in batches (use all detectors if max_parallel_sections is None)
+        batch_size = self.max_parallel_sections if self.max_parallel_sections and self.max_parallel_sections > 0 else len(detectors_to_run)
+        return await self._detect_batched(query_string, detectors_to_run, metadata_to_run, rag_info, batch_size)
 
     async def _detect_batched(
         self,
@@ -656,20 +551,23 @@ class PolicySectionsDetector(DetectionMethod):
         detectors: Optional[List[PolicyGptOssSafeguard]] = None,
         metadata: Optional[List[Dict[str, Any]]] = None,
         rag_info: Optional[Dict[str, Any]] = None,
-    ) -> Tuple[bool, Dict[str, Any]]:
+        batch_size: Optional[int] = None,
+    ) -> DetectionResult:
         """Run detectors in batches with fast fail."""
         if detectors is None:
             detectors = self.detectors
         if metadata is None:
             metadata = self.section_metadata
+        if batch_size is None:
+            batch_size = self.max_parallel_sections if self.max_parallel_sections and self.max_parallel_sections > 0 else len(detectors)
         
         violation_detected = False
         all_results = []
         violation_result = None
 
         # Process in batches
-        for batch_start in range(0, len(detectors), self.max_parallel_sections):
-            batch_end = min(batch_start + self.max_parallel_sections, len(detectors))
+        for batch_start in range(0, len(detectors), batch_size):
+            batch_end = min(batch_start + batch_size, len(detectors))
             batch_detectors = detectors[batch_start:batch_end]
             batch_metadata = metadata[batch_start:batch_end]
 

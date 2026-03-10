@@ -258,10 +258,6 @@ def load_policy_sections_from_s3(
     return policy_data
 
 
-# Import shared S3 client utility
-from vijil_dome.utils.s3_utils import create_s3_client as _create_s3_client
-
-
 def _extract_policy_id_from_key(key: str) -> Optional[str]:
     """
     Extract policy_id from S3 key path.

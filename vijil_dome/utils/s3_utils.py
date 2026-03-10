@@ -55,32 +55,22 @@ def create_s3_client(
     aws_region = region_name or os.getenv("AWS_REGION")
     
     # If we have explicit credentials (from params or env vars), create client directly
-    # This avoids ProfileNotFound errors when AWS_PROFILE is set but doesn't exist
+    # Use boto3.Session with explicit credentials to avoid ProfileNotFound errors
+    # This is thread-safe as it doesn't mutate process-wide environment variables
     if access_key and secret_key:
-        client_kwargs = {
+        session_kwargs = {
             "aws_access_key_id": access_key,
             "aws_secret_access_key": secret_key,
         }
         if session_token:
-            client_kwargs["aws_session_token"] = session_token
+            session_kwargs["aws_session_token"] = session_token
         if aws_region:
-            client_kwargs["region_name"] = aws_region
+            session_kwargs["region_name"] = aws_region
         
-        # Temporarily unset AWS_PROFILE to avoid ProfileNotFound errors
-        # boto3/botocore will try to read it even with explicit credentials
-        original_profile = os.environ.pop("AWS_PROFILE", None)
-        original_default_profile = os.environ.pop("AWS_DEFAULT_PROFILE", None)
-        try:
-            # Create client with explicit credentials
-            # By unsetting AWS_PROFILE, boto3 won't try to load the non-existent profile
-            client = boto3.client("s3", **client_kwargs)
-            return client
-        finally:
-            # Restore AWS_PROFILE if it was set
-            if original_profile is not None:
-                os.environ["AWS_PROFILE"] = original_profile
-            if original_default_profile is not None:
-                os.environ["AWS_DEFAULT_PROFILE"] = original_default_profile
+        # Create a dedicated session with explicit credentials
+        # This bypasses profile resolution without mutating process-wide environment variables
+        session = boto3.Session(**session_kwargs)
+        return session.client("s3")
     
     # No explicit credentials - try to use boto3 defaults
     # Handle profile that might not exist

@@ -162,31 +162,31 @@ def load_faiss_index_from_s3(
         return str(index_file_path)
     
     # Download from S3 if cache invalid
-        logger.info(f"Downloading FAISS index from s3://{bucket}/{key}")
-        try:
-            s3_object = s3_client.get_object(Bucket=bucket, Key=key)
-            index_bytes = s3_object["Body"].read()
-            
-            # Save to cache
-            with open(index_file_path, 'wb') as f:
-                f.write(index_bytes)
-            
-            # Save metadata
-            metadata = {
-                "etag": s3_object.get("ETag", "").strip('"'),
-                "s3_bucket": bucket,
-                "s3_key": key,
-                "last_updated": time.time(),
-            }
-            with open(metadata_file_path, 'w') as f:
-                json.dump(metadata, f, indent=2)
-            
-            logger.info(f"Cached FAISS index to {index_file_path}")
-        except Exception as e:
-            if index_file_path.exists():
-                logger.warning(f"S3 download failed, using stale cache: {e}")
-                return str(index_file_path)
-            raise
+    logger.info(f"Downloading FAISS index from s3://{bucket}/{key}")
+    try:
+        s3_object = s3_client.get_object(Bucket=bucket, Key=key)
+        index_bytes = s3_object["Body"].read()
+        
+        # Save to cache
+        with open(index_file_path, 'wb') as f:
+            f.write(index_bytes)
+        
+        # Save metadata
+        metadata = {
+            "etag": s3_object.get("ETag", "").strip('"'),
+            "s3_bucket": bucket,
+            "s3_key": key,
+            "last_updated": time.time(),
+        }
+        with open(metadata_file_path, 'w') as f:
+            json.dump(metadata, f, indent=2)
+        
+        logger.info(f"Cached FAISS index to {index_file_path}")
+    except Exception as e:
+        if index_file_path.exists():
+            logger.warning(f"S3 download failed, using stale cache: {e}")
+            return str(index_file_path)
+        raise
     
     return str(index_file_path)
 
@@ -252,16 +252,34 @@ def load_section_ids_from_s3(
                 # Cache is fresh, skip S3 check
                 logger.info(f"Using cached section_ids.json (age: {cache_age:.0f}s < {cache_ttl_seconds}s)")
                 with open(json_file_path, 'r', encoding='utf-8') as f:
-                    return json.load(f)
+                    cached_data = json.load(f)
+                # Apply normalization/validation (same as download path)
+                if isinstance(cached_data, list):
+                    if len(cached_data) > 0:
+                        if isinstance(cached_data[0], str):
+                            cached_data = {
+                                str(i): section_id for i, section_id in enumerate(cached_data)
+                            }
+                        elif isinstance(cached_data[0], dict):
+                            cached_data = {
+                                str(i): item.get("section_id", item.get("id", str(i)))
+                                for i, item in enumerate(cached_data)
+                            }
+                        else:
+                            logger.warning(f"Cached data is list but cannot convert, will re-download")
+                            cache_valid = False
+                    else:
+                        cached_data = {}
+                elif isinstance(cached_data, dict) and "data" in cached_data:
+                    cached_data = cached_data["data"]
+                # Validate structure
+                if isinstance(cached_data, dict):
+                    return cached_data
+                else:
+                    logger.warning(f"Cached data is not a dict (got {type(cached_data).__name__}), will re-download")
+                    cache_valid = False
             
             # Cache is old, check if S3 file changed
-            s3_client = _create_s3_client(
-                aws_access_key_id=aws_access_key_id,
-                aws_secret_access_key=aws_secret_access_key,
-                aws_session_token=aws_session_token,
-                region_name=region_name,
-            )
-            
             try:
                 s3_head = s3_client.head_object(Bucket=bucket, Key=key)
                 s3_etag = s3_head.get("ETag", "").strip('"')
