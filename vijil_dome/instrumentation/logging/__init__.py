@@ -48,7 +48,12 @@ def get_log_level(level_str: str) -> int:
     return getattr(logging, level_str.upper())
 
 
-def setup_vijil_logging(config: Optional[Dict[str, Any]] = None, agent_id: Optional[str] = None) -> LoggerProvider:
+def setup_vijil_logging(
+    config: Optional[Dict[str, Any]] = None,
+    agent_id: Optional[str] = None,
+    team_id: Optional[str] = None,
+    user_id: Optional[str] = None,
+) -> LoggerProvider:
     default_config = _load_default_config()
     if config:
         default_config.update(config)
@@ -63,6 +68,10 @@ def setup_vijil_logging(config: Optional[Dict[str, Any]] = None, agent_id: Optio
     # Add agent.id to resource attributes if provided
     if agent_id:
         resource_attributes["agent.id"] = agent_id
+    if team_id:
+        resource_attributes["team.id"] = team_id
+    if user_id:
+        resource_attributes["user.id"] = user_id
 
     resource = Resource.create(resource_attributes)
 

@@ -118,14 +118,35 @@ async def run_detector_via_executor(
 ):
     start_time = time.time()
     loop = asyncio.get_running_loop()
-    future = loop.run_in_executor(
-        executor, detector.sync_detect, query_string, agent_id
-    )
+    # Preserve compatibility with detector implementations that may only accept
+    # (query_string) or (query_string, agent_id).
+    def _invoke_sync_detect():
+        try:
+            return detector.sync_detect(
+                query_string,
+                agent_id=agent_id,
+                team_id=team_id,
+                user_id=user_id,
+            )
+        except TypeError:
+            try:
+                return detector.sync_detect(query_string, agent_id)
+            except TypeError:
+                return detector.sync_detect(query_string)
+
+    future = loop.run_in_executor(executor, _invoke_sync_detect)
     try:
         result = await future
         execution_time = round((time.time() - start_time) * 1000, 3)
+        result_payload = dict(result[1])
+        if agent_id:
+            result_payload.setdefault("agent_id", agent_id)
+        if team_id:
+            result_payload.setdefault("team_id", team_id)
+        if user_id:
+            result_payload.setdefault("user_id", user_id)
         result_with_timing = DetectionTimingResult(
-            hit=result[0], result=result[1], exec_time=execution_time
+            hit=result[0], result=result_payload, exec_time=execution_time
         )
         return result_with_timing
     except asyncio.CancelledError:
@@ -161,7 +182,10 @@ class Guard:
         response_string = query_string
         for detector in self.detector_list:
             detector_scan_result = await detector.detect_with_time(
-                query_string, agent_id=agent_id
+                query_string,
+                agent_id=agent_id,
+                team_id=team_id,
+                user_id=user_id,
             )
             detector_results[type(detector).__name__] = detector_scan_result
 
@@ -242,7 +266,10 @@ class Guard:
                 try:
                     async with asyncio.timeout(asyncio_timeout_limit):
                         result = await detector.detect_with_time(
-                            query_string, agent_id=agent_id
+                            query_string,
+                            agent_id=agent_id,
+                            team_id=team_id,
+                            user_id=user_id,
                         )
                 except TimeoutError:
                     logger.warning(
@@ -394,7 +421,12 @@ class Guard:
         item_detector_results: List[Dict[str, DetectionTimingResult]] = [{} for _ in range(n)]
 
         for detector in self.detector_list:
-            batch_timing = await detector.detect_batch_with_time(inputs, agent_id=agent_id)
+            batch_timing = await detector.detect_batch_with_time(
+                inputs,
+                agent_id=agent_id,
+                team_id=team_id,
+                user_id=user_id,
+            )
             detector_name = type(detector).__name__
 
             for i, det_result in enumerate(batch_timing.results):

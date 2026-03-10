@@ -96,7 +96,7 @@ class TestInputGuarding:
         scan_result.enforced = True
         dome_mock.async_guard_input.return_value = scan_result
 
-        provider = DomeHookProvider(dome_mock, agent_id="a1")
+        provider = DomeHookProvider(dome_mock, agent_id="a1", team_id="t1", user_id="u1")
 
         messages = [_make_message("user", "malicious prompt")]
         event = _make_before_event(messages)
@@ -106,7 +106,7 @@ class TestInputGuarding:
         # The user message text should be replaced with blocked message
         assert event.agent.messages[0]["content"] == [{"text": DEFAULT_INPUT_BLOCKED_MESSAGE}]
         dome_mock.async_guard_input.assert_called_once_with(
-            "malicious prompt", agent_id="a1"
+            "malicious prompt", agent_id="a1", team_id="t1", user_id="u1"
         )
 
     @pytest.mark.asyncio
@@ -126,6 +126,12 @@ class TestInputGuarding:
 
         # Message unchanged
         assert event.agent.messages[0]["content"] == [{"text": "normal question"}]
+        dome_mock.async_guard_input.assert_called_once_with(
+            "normal question",
+            agent_id=None,
+            team_id=None,
+            user_id=None,
+        )
 
     @pytest.mark.asyncio
     async def test_no_user_messages_skips_scan(self, dome_mock):
@@ -214,7 +220,7 @@ class TestOutputGuarding:
         scan_result.enforced = True
         dome_mock.async_guard_output.return_value = scan_result
 
-        provider = DomeHookProvider(dome_mock, agent_id="a1")
+        provider = DomeHookProvider(dome_mock, agent_id="a1", team_id="t1", user_id="u1")
 
         event = _make_after_event("unsafe response")
 
@@ -225,7 +231,7 @@ class TestOutputGuarding:
             {"text": DEFAULT_OUTPUT_BLOCKED_MESSAGE}
         ]
         dome_mock.async_guard_output.assert_called_once_with(
-            "unsafe response", agent_id="a1"
+            "unsafe response", agent_id="a1", team_id="t1", user_id="u1"
         )
 
     @pytest.mark.asyncio
@@ -244,6 +250,12 @@ class TestOutputGuarding:
 
         # Message unchanged
         assert event.stop_response.message["content"] == [{"text": "safe response"}]
+        dome_mock.async_guard_output.assert_called_once_with(
+            "safe response",
+            agent_id=None,
+            team_id=None,
+            user_id=None,
+        )
 
     @pytest.mark.asyncio
     async def test_no_stop_response_skips_scan(self, dome_mock):
