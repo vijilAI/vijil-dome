@@ -164,6 +164,9 @@ def convert_toml_to_guardrail_dict(path_to_toml: str):
     raw_config_dict["user_id"] = toml_config_dict.get("guardrail", {}).get(
         "user_id", None
     )
+    raw_config_dict["trace-log"] = toml_config_dict.get("guardrail", {}).get(
+        "trace-log", None
+    )
 
     raw_config_dict["input-guards"] = extract_field_from_toml(
         "input", "guards", [], toml_config_dict
@@ -201,18 +204,19 @@ def convert_toml_to_guardrail_dict(path_to_toml: str):
 # Convert a dictionary into the corresponding guardrails
 def convert_dict_to_guardrails(
     config_dict: dict,
-) -> Tuple[Guardrail, Guardrail, Optional[str], Optional[str], Optional[str]]:
+) -> Tuple[Guardrail, Guardrail, Optional[str], Optional[str], Optional[str], Optional[str]]:
     input_guardrail = create_guardrail("input", config_dict)
     output_guardrail = create_guardrail("output", config_dict)
     team_id = config_dict.get("team_id", None)
     user_id = config_dict.get("user_id", None)
     agent_id = config_dict.get("agent_id", None)
-    return input_guardrail, output_guardrail, agent_id, team_id, user_id
+    trace_log = config_dict.get("trace-log", None)
+    return input_guardrail, output_guardrail, agent_id, team_id, user_id, trace_log
 
 
 # convert a toml file into its corresponding guardrails
 def convert_toml_to_guardrails(
     path_to_toml: str,
-) -> Tuple[Guardrail, Guardrail, Optional[str], Optional[str], Optional[str]]:
+) -> Tuple[Guardrail, Guardrail, Optional[str], Optional[str], Optional[str], Optional[str]]:
     config_dict = convert_toml_to_guardrail_dict(path_to_toml)
     return convert_dict_to_guardrails(config_dict)

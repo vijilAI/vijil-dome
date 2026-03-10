@@ -28,6 +28,13 @@ from typing import Union, Dict, List, Optional, Callable, Iterator
 from .defaults import get_default_config
 from pydantic import BaseModel
 
+import json
+import logging
+import time
+from pathlib import Path
+
+_trace_logger = logging.getLogger("vijil.dome.trace")
+
 
 class DomeConfig(GuardrailConfig):
     def __init__(
@@ -37,12 +44,14 @@ class DomeConfig(GuardrailConfig):
         agent_id: Optional[str] = None,
         team_id: Optional[str] = None,
         user_id: Optional[str] = None,
+        trace_log: Optional[str] = None,
     ):
         self.input_guardrail = input_guardrail
         self.output_guardrail = output_guardrail
         self.agent_id = agent_id
         self.team_id = team_id
         self.user_id = user_id
+        self.trace_log = trace_log
 
     def get_input_guardrail(self) -> Guardrail:
         return self.input_guardrail
@@ -62,29 +71,29 @@ class DomeConfig(GuardrailConfig):
 
 def create_dome_config(config: Union[Dict, str]) -> DomeConfig:
     if isinstance(config, str):
-        input_guardrail, output_guardrail, agent_id, team_id, user_id = (
+        input_guardrail, output_guardrail, agent_id, team_id, user_id, trace_log = (
             convert_toml_to_guardrails(config)
         )
-        config_object = DomeConfig(
+        return DomeConfig(
             input_guardrail,
             output_guardrail,
             agent_id=agent_id,
             team_id=team_id,
             user_id=user_id,
+            trace_log=trace_log,
         )
-        return config_object
     elif isinstance(config, dict):
-        input_guardrail, output_guardrail, agent_id, team_id, user_id = (
+        input_guardrail, output_guardrail, agent_id, team_id, user_id, trace_log = (
             convert_dict_to_guardrails(config)
         )
-        config_object = DomeConfig(
+        return DomeConfig(
             input_guardrail,
             output_guardrail,
             agent_id=agent_id,
             team_id=team_id,
             user_id=user_id,
+            trace_log=trace_log,
         )
-        return config_object
     else:
         raise ValueError(
             "Only dicts or .toml filepaths can be converted to Dome Config objects"
@@ -148,6 +157,7 @@ class Dome:
         dome_config: Optional[Union[DomeConfig, Dict, str]] = None,
         client: Optional[OpenAI] = None,
         enforce: bool = True,  # False = shadow mode (log but don't block)
+        trace_log: Optional[Union[str, Path]] = None,
     ):
         self.enforce = enforce
         self.client = client
@@ -156,6 +166,9 @@ class Dome:
         self.agent_id = None  # type: Optional[str]
         self.team_id = None  # type: Optional[str]
         self.user_id = None  # type: Optional[str]
+        self._trace_log = Path(trace_log) if trace_log else None
+        if self._trace_log:
+            self._trace_log.parent.mkdir(parents=True, exist_ok=True)
         if dome_config is not None:
             if isinstance(dome_config, DomeConfig):
                 self._init_from_dome_config(dome_config)
@@ -173,8 +186,9 @@ class Dome:
         config: Union[Dict, str],
         client: Optional[OpenAI] = None,
         enforce: bool = True,
+        trace_log: Optional[Union[str, Path]] = None,
     ) -> "Dome":
-        return Dome(dome_config=config, client=client, enforce=enforce)
+        return Dome(dome_config=config, client=client, enforce=enforce, trace_log=trace_log)
 
     @staticmethod
     def create_from_vijil_agent(
@@ -213,6 +227,66 @@ class Dome:
         self.agent_id = dome_config.agent_id
         self.team_id = dome_config.team_id
         self.user_id = dome_config.user_id
+        # Config-based trace_log only applies if not already set via __init__ kwarg
+        if self._trace_log is None and dome_config.trace_log:
+            self._trace_log = Path(dome_config.trace_log)
+            self._trace_log.parent.mkdir(parents=True, exist_ok=True)
+
+    @staticmethod
+    def _serialize_trace(trace: dict) -> dict:
+        """Serialize guard trace to JSON-safe dict."""
+        guards: Dict[str, dict] = {}
+        for guard_name, guard_result in trace.items():
+            g: Dict[str, object] = {
+                "triggered": guard_result.triggered,
+                "exec_time": guard_result.exec_time,
+            }
+            if guard_result.triggered_methods:
+                g["triggered_methods"] = guard_result.triggered_methods
+            detectors: Dict[str, dict] = {}
+            for det_name, det_result in (guard_result.details or {}).items():
+                det_info: Dict[str, object] = {
+                    "hit": det_result.hit,
+                    "exec_time": det_result.exec_time,
+                }
+                if isinstance(det_result.result, dict):
+                    for k, v in det_result.result.items():
+                        if k == "type":
+                            continue
+                        try:
+                            json.dumps(v)
+                            det_info[k] = v
+                        except (TypeError, ValueError):
+                            pass
+                detectors[det_name] = det_info
+            g["detectors"] = detectors
+            guards[guard_name] = g
+        return guards
+
+    def _log_trace(
+        self,
+        direction: str,
+        text: str,
+        scan: "ScanResult",
+    ) -> None:
+        """Append a trace entry to the trace log file."""
+        if self._trace_log is None:
+            return
+        try:
+            entry = {
+                "ts": time.time(),
+                "direction": direction,
+                "flagged": scan.flagged,
+                "enforced": scan.enforced,
+                "detection_score": scan.detection_score,
+                "guards": self._serialize_trace(scan.trace) if scan.trace else {},
+                "exec_time": scan.exec_time,
+                "text_preview": text[:200] if text else "",
+            }
+            with open(self._trace_log, "a") as f:
+                f.write(json.dumps(entry) + "\n")
+        except Exception as exc:
+            _trace_logger.warning("Failed to write trace: %s", exc)
 
     def get_agent_id(self) -> Optional[str]:
         return self.agent_id
@@ -245,7 +319,7 @@ class Dome:
         result = self.input_guardrail.scan(
             query_string, agent_id=agent_id, team_id=team_id, user_id=user_id
         )
-        return ScanResult(
+        scan = ScanResult(
             flagged=result.flagged,
             enforced=self.enforce and result.flagged,
             response_string=result.guardrail_response_message,
@@ -253,6 +327,8 @@ class Dome:
             exec_time=result.exec_time,
             detection_score=result.detection_score,
         )
+        self._log_trace("input", query_string, scan)
+        return scan
 
     async def async_guard_input(
         self,
@@ -267,7 +343,7 @@ class Dome:
         result = await self.input_guardrail.async_scan(
             query_string, agent_id=agent_id, team_id=team_id, user_id=user_id
         )
-        return ScanResult(
+        scan = ScanResult(
             flagged=result.flagged,
             enforced=self.enforce and result.flagged,
             response_string=result.guardrail_response_message,
@@ -275,6 +351,8 @@ class Dome:
             exec_time=result.exec_time,
             detection_score=result.detection_score,
         )
+        self._log_trace("input", query_string, scan)
+        return scan
 
     def guard_output(
         self,
@@ -289,7 +367,7 @@ class Dome:
         result = self.output_guardrail.scan(
             query_string, agent_id=agent_id, team_id=team_id, user_id=user_id
         )
-        return ScanResult(
+        scan = ScanResult(
             flagged=result.flagged,
             enforced=self.enforce and result.flagged,
             response_string=result.guardrail_response_message,
@@ -297,6 +375,8 @@ class Dome:
             exec_time=result.exec_time,
             detection_score=result.detection_score,
         )
+        self._log_trace("output", query_string, scan)
+        return scan
 
     async def async_guard_output(
         self,
@@ -311,7 +391,7 @@ class Dome:
         result = await self.output_guardrail.async_scan(
             query_string, agent_id=agent_id, team_id=team_id, user_id=user_id
         )
-        return ScanResult(
+        scan = ScanResult(
             flagged=result.flagged,
             enforced=self.enforce and result.flagged,
             response_string=result.guardrail_response_message,
@@ -319,6 +399,8 @@ class Dome:
             exec_time=result.exec_time,
             detection_score=result.detection_score,
         )
+        self._log_trace("output", query_string, scan)
+        return scan
 
     @staticmethod
     def _empty_batch_result(inputs: List[str]) -> "BatchScanResult":
@@ -333,18 +415,24 @@ class Dome:
         )
 
     def _batch_guardrail_to_scan(
-        self, batch_result: BatchGuardrailResult
+        self,
+        batch_result: BatchGuardrailResult,
+        inputs: List[str],
+        direction: str,
     ) -> "BatchScanResult":
         items = []
-        for gr in batch_result.items:
-            items.append(ScanResult(
+        for i, gr in enumerate(batch_result.items):
+            scan = ScanResult(
                 flagged=gr.flagged,
                 enforced=self.enforce and gr.flagged,
                 response_string=gr.guardrail_response_message,
                 trace=gr.guard_exec_details,
                 exec_time=gr.exec_time,
                 detection_score=gr.detection_score,
-            ))
+            )
+            text = inputs[i] if i < len(inputs) else ""
+            self._log_trace(direction, text, scan)
+            items.append(scan)
         return BatchScanResult(items=items, exec_time=batch_result.exec_time)
 
     def guard_input_batch(
@@ -360,7 +448,7 @@ class Dome:
         result = self.input_guardrail.scan_batch(
             inputs, agent_id=agent_id, team_id=team_id, user_id=user_id
         )
-        return self._batch_guardrail_to_scan(result)
+        return self._batch_guardrail_to_scan(result, inputs, "input")
 
     async def async_guard_input_batch(
         self,
@@ -375,7 +463,7 @@ class Dome:
         result = await self.input_guardrail.async_scan_batch(
             inputs, agent_id=agent_id, team_id=team_id, user_id=user_id
         )
-        return self._batch_guardrail_to_scan(result)
+        return self._batch_guardrail_to_scan(result, inputs, "input")
 
     def guard_output_batch(
         self,
@@ -390,7 +478,7 @@ class Dome:
         result = self.output_guardrail.scan_batch(
             inputs, agent_id=agent_id, team_id=team_id, user_id=user_id
         )
-        return self._batch_guardrail_to_scan(result)
+        return self._batch_guardrail_to_scan(result, inputs, "output")
 
     async def async_guard_output_batch(
         self,
@@ -405,7 +493,7 @@ class Dome:
         result = await self.output_guardrail.async_scan_batch(
             inputs, agent_id=agent_id, team_id=team_id, user_id=user_id
         )
-        return self._batch_guardrail_to_scan(result)
+        return self._batch_guardrail_to_scan(result, inputs, "output")
 
     def apply_decorator(self, decoration_method: Callable) -> None:
         # Replace the default guard input and output functions with the decorated versions
