@@ -15,7 +15,7 @@
 # vijil and vijil-dome are trademarks owned by Vijil Inc.
 
 import pytest
-from unittest.mock import Mock, patch
+from unittest.mock import patch
 
 from vijil_dome import Dome
 

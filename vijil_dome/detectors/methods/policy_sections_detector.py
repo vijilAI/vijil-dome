@@ -90,7 +90,7 @@ class PolicySectionsDetector(DetectionMethod):
         # PolicyGptOssSafeguard params
         model_name: str = "openai/gpt-oss-safeguard-20b",
         reasoning_effort: str = "medium",
-        hub_name: str = "openai",
+        hub_name: str = "groq",
         timeout: Optional[int] = 60,
         max_retries: Optional[int] = 3,
         api_key: Optional[str] = None,
@@ -120,7 +120,7 @@ class PolicySectionsDetector(DetectionMethod):
             max_parallel_sections: Maximum number of sections to run in parallel (default: None = no limit)
             model_name: LLM model identifier (default: "openai/gpt-oss-safeguard-20b")
             reasoning_effort: Reasoning depth - "low", "medium", "high" (default: "medium")
-            hub_name: LLM hub to use (default: "openai")
+            hub_name: LLM hub to use (default: "groq")
             timeout: Request timeout in seconds (default: 60)
             max_retries: Maximum retry attempts (default: 3)
             api_key: API key for the hub (optional, uses env var if not provided)

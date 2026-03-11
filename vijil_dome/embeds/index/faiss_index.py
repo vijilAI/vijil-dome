@@ -21,7 +21,6 @@ from typing import List, Tuple, Optional
 from vijil_dome.embeds import EmbeddingsItem
 from vijil_dome.embeds.index import AbstractEmbeddingsIndex
 from vijil_dome.embeds import AbstractEmbedder
-from vijil_dome.types import Embeddings
 
 try:
     import faiss

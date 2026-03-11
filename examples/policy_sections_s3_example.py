@@ -39,16 +39,27 @@ This example demonstrates three different modes for running policy guardrails:
 Prerequisites:
 - Set AWS credentials (via environment variables, IAM role, or AWS credentials file)
 - Set OPENAI_API_KEY or GROQ_API_KEY environment variable (for PolicyGptOssSafeguard detector)
-- For S3 examples: Have policy sections JSON file in S3 at: teams/{team_id}/policies/{policy_id}/sections.json
+- For S3 examples: Set POLICY_S3_BUCKET and POLICY_S3_KEY_PREFIX environment variables
+  Example:
+    export POLICY_S3_BUCKET="my-policy-bucket"
+    export POLICY_S3_KEY_PREFIX="teams/team-123/policies/policy-456"
 - For RAG mode: Have FAISS index and section_ids.json in same S3 directory
 - See vijil_dome/detectors/policies/sample_policy_sections.json for format reference
 """
 
 import asyncio
+import logging
 import os
 import sys
 import tempfile
 from pathlib import Path
+
+# Load .env file if it exists
+try:
+    from dotenv import load_dotenv  # type: ignore[import-untyped]
+    load_dotenv()
+except ImportError:
+    pass  # python-dotenv is optional
 
 # Add parent directory to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -56,22 +67,47 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from vijil_dome import Dome
 from vijil_dome.utils.policy_loader import load_policy_sections_from_file
 
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    datefmt='%Y-%m-%d %H:%M:%S'
+)
+logger = logging.getLogger(__name__)
+
+# S3 Configuration - Set these via environment variables
+# Example: export POLICY_S3_BUCKET="my-policy-bucket"
+#          export POLICY_S3_KEY_PREFIX="teams/team-123/policies/policy-456"
+POLICY_S3_BUCKET = os.getenv("POLICY_S3_BUCKET", "my-policy-bucket")
+POLICY_S3_KEY_PREFIX = os.getenv("POLICY_S3_KEY_PREFIX", "teams/team-123/policies/policy-456")
+
+# Warn if using default values (for public repo safety)
+if POLICY_S3_BUCKET == "my-policy-bucket" or POLICY_S3_KEY_PREFIX == "teams/team-123/policies/policy-456":
+    logger.warning(
+        "Using default S3 bucket/key values. Set POLICY_S3_BUCKET and POLICY_S3_KEY_PREFIX "
+        "environment variables to use your own S3 resources."
+    )
+
 
 async def example_full_policy_mode():
     """Example 1: Full Policy Mode - Single detector with entire policy"""
-    print("\n" + "="*60)
-    print("Example 1: Full Policy Mode")
-    print("="*60)
-    print("Best for: Small policies (<400 tokens)")
-    print("Mode: Single detector evaluates entire policy in one LLM call")
-    print()
+    logger.info("""\
+
+============================================================
+Example 1: Full Policy Mode
+============================================================
+Best for: Small policies (<400 tokens)
+Mode: Single detector evaluates entire policy in one LLM call
+""")
 
     api_key = os.getenv("OPENAI_API_KEY") or os.getenv("GROQ_API_KEY")
     if not api_key:
-        print("WARNING: OPENAI_API_KEY or GROQ_API_KEY not set.")
-        print("Set it with: export OPENAI_API_KEY='your-api-key'")
-        print("  or: export GROQ_API_KEY='your-api-key'")
+        logger.warning("OPENAI_API_KEY or GROQ_API_KEY not set.")
+        logger.info("Set it with: export OPENAI_API_KEY='your-api-key'")
+        logger.info("  or: export GROQ_API_KEY='your-api-key'")
         return
+    
+    logger.info(f"Using API key: {'OPENAI_API_KEY' if os.getenv('OPENAI_API_KEY') else 'GROQ_API_KEY'}")
 
     try:
         # Create a sample policy file for demonstration
@@ -106,7 +142,7 @@ Classify whether an AI agent response violates customer support guidelines.
                     "methods": ["policy-gpt-oss-safeguard"],
                     "policy-gpt-oss-safeguard": {
                         "policy_file": policy_path,
-                        "hub_name": "groq",  # or "openai"
+                        "hub_name": "groq",
                         "model_name": "openai/gpt-oss-safeguard-20b",
                         "output_format": "policy_ref",
                         "reasoning_effort": "medium",
@@ -114,10 +150,11 @@ Classify whether an AI agent response violates customer support guidelines.
                 },
             }
 
+            logger.info("Creating Dome instance (Full Policy Mode)...")
             dome = Dome(config)
-            print("✓ Dome instance created successfully (Full Policy Mode)")
-            print(f"✓ Input guardrail: {dome.input_guardrail is not None}")
-            print(f"✓ Output guardrail: {dome.output_guardrail is not None}")
+            logger.info("✓ Dome instance created successfully (Full Policy Mode)")
+            logger.info(f"✓ Input guardrail: {dome.input_guardrail is not None}")
+            logger.info(f"✓ Output guardrail: {dome.output_guardrail is not None}")
 
             # Test
             test_inputs = [
@@ -125,34 +162,47 @@ Classify whether an AI agent response violates customer support guidelines.
                 "User request: How do I reset my password?\nAgent response: You can reset it at our help center.",
             ]
 
-            print("\nTesting input guardrails:")
-            for test_input in test_inputs:
+            logger.info("\nTesting input guardrails:")
+            for i, test_input in enumerate(test_inputs, 1):
+                logger.info(f"\n[{i}/{len(test_inputs)}] Testing input: '{test_input[:50]}...'")
                 result = await dome.async_guard_input(test_input)
-                print(f"\nInput: '{test_input[:50]}...'")
-                print(f"Flagged: {result.flagged}")
+                logger.info(f"  Result: {'FLAGGED' if result.flagged else 'ALLOWED'}")
+                if result.flagged:
+                    logger.warning(f"  Response: {result.response_string[:100]}...")
 
         finally:
             os.unlink(policy_path)
 
     except Exception as e:
-        print(f"Error: {e}")
-        import traceback
-        traceback.print_exc()
+        logger.error(f"Error in example: {e}", exc_info=True)
 
 
 async def example_chunked_parallel_mode():
     """Example 2: Chunked Parallel Mode - All sections evaluated in parallel"""
-    print("\n" + "="*60)
-    print("Example 2: Chunked Parallel Mode")
-    print("="*60)
-    print("Best for: Large policies split into 400-600 token sections")
-    print("Mode: All sections evaluated in parallel batches with fast fail")
-    print()
+    logger.info("""\
+
+============================================================
+Example 2: Chunked Parallel Mode
+============================================================
+Best for: Large policies split into 400-600 token sections
+Mode: All sections evaluated in parallel batches with fast fail
+""")
 
     api_key = os.getenv("OPENAI_API_KEY") or os.getenv("GROQ_API_KEY")
     if not api_key:
-        print("WARNING: OPENAI_API_KEY or GROQ_API_KEY not set.")
+        logger.warning("OPENAI_API_KEY or GROQ_API_KEY not set.")
         return
+    
+    logger.info(f"Using API key: {'OPENAI_API_KEY' if os.getenv('OPENAI_API_KEY') else 'GROQ_API_KEY'}")
+    logger.info("Checking AWS credentials...")
+    aws_key = os.getenv("AWS_ACCESS_KEY_ID")
+    aws_profile = os.getenv("AWS_PROFILE")
+    if aws_key:
+        logger.info("AWS credentials found: Access Key ID set")
+    elif aws_profile:
+        logger.info(f"AWS credentials found: Profile '{aws_profile}'")
+    else:
+        logger.warning("No AWS credentials found. Will use boto3 defaults (IAM role, etc.)")
 
     try:
         # Chunked Parallel Mode config - uses type: "policy" with policy-sections
@@ -163,29 +213,30 @@ async def example_chunked_parallel_mode():
                 "type": "policy",
                 "methods": ["policy-sections"],
                 "policy-sections": {
-                    "policy_s3_bucket": "my-policy-bucket",  # Replace with your bucket
-                    "policy_s3_key": "teams/550e8400-e29b-41d4-a716-446655440000/policies/123e4567-e89b-12d3-a456-426614174000/sections.json",
+                    "policy_s3_bucket": POLICY_S3_BUCKET,
+                    "policy_s3_key": f"{POLICY_S3_KEY_PREFIX}/sections.json",
                     "applies_to": "input",
                     "use_rag": False,  # Explicitly disable RAG - evaluate all sections
                     "max_parallel_sections": 10,  # Rate limiting: max concurrent LLM calls
                     "model_name": "openai/gpt-oss-safeguard-20b",
                     "reasoning_effort": "medium",
-                    "hub_name": "openai",  # or "groq"
+                    "hub_name": "groq",
                     "timeout": 60,
                     "max_retries": 3,
-                    # S3 auth params (optional - uses boto3 defaults if not provided)
-                    # "aws_access_key_id": "...",
-                    # "aws_secret_access_key": "...",
-                    # "aws_session_token": "...",
-                    # "region_name": "...",
+                    # S3 auth params - pass explicitly to avoid profile conflicts
+                    "aws_access_key_id": os.getenv("AWS_ACCESS_KEY_ID"),
+                    "aws_secret_access_key": os.getenv("AWS_SECRET_ACCESS_KEY"),
+                    "aws_session_token": os.getenv("AWS_SESSION_TOKEN"),
+                    "region_name": os.getenv("AWS_REGION"),
                 },
             }
         }
 
+        logger.info("Creating Dome instance (Chunked Parallel Mode)...")
         dome = Dome(config)
-        print("✓ Dome instance created successfully (Chunked Parallel Mode)")
-        print(f"✓ Input guardrail: {dome.input_guardrail is not None}")
-        print("✓ All sections will be evaluated in parallel batches of 10")
+        logger.info("✓ Dome instance created successfully (Chunked Parallel Mode)")
+        logger.info(f"✓ Input guardrail: {dome.input_guardrail is not None}")
+        logger.info("✓ All sections will be evaluated in parallel batches of 10")
 
         # Test input guardrail
         test_inputs = [
@@ -194,41 +245,52 @@ async def example_chunked_parallel_mode():
             "How can I reset my password?",
         ]
 
-        print("\nTesting input guardrails:")
-        for test_input in test_inputs:
+        logger.info("\nTesting input guardrails:")
+        for i, test_input in enumerate(test_inputs, 1):
+            logger.info(f"\n[{i}/{len(test_inputs)}] Testing input: '{test_input}'")
             result = await dome.async_guard_input(test_input)
-            print(f"\nInput: '{test_input}'")
-            print(f"Flagged: {result.flagged}")
+            logger.info(f"  Result: {'FLAGGED' if result.flagged else 'ALLOWED'}")
             if result.flagged:
-                print(f"Response: {result.response_string}")
+                logger.warning(f"  Response: {result.response_string[:100]}...")
                 # Check which sections triggered
                 for guard_name, guard_res in result.trace.items():
                     for detector_name, det_res in guard_res.details.items():
                         if det_res.hit:
                             violating_section = det_res.result.get("violating_section")
                             if violating_section:
-                                print(f"  → Triggered by section: {violating_section.get('section_id')}")
+                                logger.warning(f"  → Triggered by section: {violating_section.get('section_id')}")
 
     except Exception as e:
-        print(f"Error: {e}")
-        import traceback
-        traceback.print_exc()
+        logger.error(f"Error in example: {e}", exc_info=True)
 
 
 async def example_rag_mode():
     """Example 3: RAG/VectorDB Mode - Retrieval-first approach with FAISS"""
-    print("\n" + "="*60)
-    print("Example 3: RAG/VectorDB Mode")
-    print("="*60)
-    print("Best for: Very large policies (100+ sections)")
-    print("Mode: Retrieves only relevant sections using FAISS, then evaluates")
-    print()
+    logger.info("""\
+
+============================================================
+Example 3: RAG/VectorDB Mode
+============================================================
+Best for: Very large policies (100+ sections)
+Mode: Retrieves only relevant sections using FAISS, then evaluates
+""")
 
     api_key = os.getenv("OPENAI_API_KEY")
     if not api_key:
-        print("WARNING: OPENAI_API_KEY not set (required for RAG mode).")
-        print("Set it with: export OPENAI_API_KEY='your-api-key'")
+        logger.warning("OPENAI_API_KEY not set (required for RAG mode).")
+        logger.info("Set it with: export OPENAI_API_KEY='your-api-key'")
         return
+    
+    logger.info("Using OPENAI_API_KEY for RAG mode")
+    logger.info("Checking AWS credentials for S3 access...")
+    aws_key = os.getenv("AWS_ACCESS_KEY_ID")
+    aws_profile = os.getenv("AWS_PROFILE")
+    if aws_key:
+        logger.info("AWS credentials found: Access Key ID set")
+    elif aws_profile:
+        logger.info(f"AWS credentials found: Profile '{aws_profile}'")
+    else:
+        logger.warning("No AWS credentials found. Will use boto3 defaults (IAM role, etc.)")
 
     try:
         # RAG Mode config - uses type: "policy" with policy-sections
@@ -239,33 +301,36 @@ async def example_rag_mode():
                 "type": "policy",
                 "methods": ["policy-sections"],
                 "policy-sections": {
-                    "policy_s3_bucket": "my-policy-bucket",  # Replace with your bucket
-                    "policy_s3_key": "teams/550e8400-e29b-41d4-a716-446655440000/policies/123e4567-e89b-12d3-a456-426614174000/sections.json",
+                    "policy_s3_bucket": POLICY_S3_BUCKET,
+                    "policy_s3_key": f"{POLICY_S3_KEY_PREFIX}/sections.json",
                     "applies_to": "input",
                     "use_rag": True,  # Enable RAG - retrieve relevant sections first
-                    "faiss_s3_key": "teams/550e8400-e29b-41d4-a716-446655440000/policies/123e4567-e89b-12d3-a456-426614174000/faiss.index",
-                    "section_ids_s3_key": "teams/550e8400-e29b-41d4-a716-446655440000/policies/123e4567-e89b-12d3-a456-426614174000/section_ids.json",
+                    "faiss_s3_key": f"{POLICY_S3_KEY_PREFIX}/faiss.index",
+                    "section_ids_s3_key": f"{POLICY_S3_KEY_PREFIX}/section_ids.json",
                     "top_k": 5,  # Retrieve top 5 most relevant sections
                     "similarity_threshold": 0.7,  # Minimum similarity score to include
                     "embedding_model": "text-embedding-ada-002",  # OpenAI embedding model
                     "embedding_engine": "OpenAI",  # Embedding engine
                     "model_name": "openai/gpt-oss-safeguard-20b",
                     "reasoning_effort": "medium",
-                    "hub_name": "openai",
+                    "hub_name": "groq",
                     "timeout": 60,
                     "max_retries": 3,
-                    # S3 auth params (optional)
-                    # "aws_access_key_id": "...",
-                    # "aws_secret_access_key": "...",
-                    # "region_name": "...",
+                    # S3 auth params - pass explicitly to avoid profile conflicts
+                    "aws_access_key_id": os.getenv("AWS_ACCESS_KEY_ID"),
+                    "aws_secret_access_key": os.getenv("AWS_SECRET_ACCESS_KEY"),
+                    "aws_session_token": os.getenv("AWS_SESSION_TOKEN"),
+                    "region_name": os.getenv("AWS_REGION"),
                 },
             }
         }
 
+        logger.info("Creating Dome instance (RAG Mode)...")
+        logger.info("  Loading FAISS index and section IDs from S3...")
         dome = Dome(config)
-        print("✓ Dome instance created successfully (RAG Mode)")
-        print(f"✓ Input guardrail: {dome.input_guardrail is not None}")
-        print("✓ RAG will retrieve top 5 relevant sections before evaluation")
+        logger.info("✓ Dome instance created successfully (RAG Mode)")
+        logger.info(f"✓ Input guardrail: {dome.input_guardrail is not None}")
+        logger.info("✓ RAG will retrieve top 5 relevant sections before evaluation")
 
         # Test input guardrail
         test_inputs = [
@@ -274,40 +339,51 @@ async def example_rag_mode():
             "How can I contact customer support?",
         ]
 
-        print("\nTesting input guardrails:")
-        for test_input in test_inputs:
+        logger.info("\nTesting input guardrails:")
+        for i, test_input in enumerate(test_inputs, 1):
+            logger.info(f"\n[{i}/{len(test_inputs)}] Testing input: '{test_input}'")
             result = await dome.async_guard_input(test_input)
-            print(f"\nInput: '{test_input}'")
-            print(f"Flagged: {result.flagged}")
+            logger.info(f"  Result: {'FLAGGED' if result.flagged else 'ALLOWED'}")
             if result.flagged:
-                print(f"Response: {result.response_string}")
+                logger.warning(f"  Response: {result.response_string[:100]}...")
                 # Check RAG retrieval info
                 for guard_name, guard_res in result.trace.items():
                     for detector_name, det_res in guard_res.details.items():
                         if det_res.hit:
                             rag_info = det_res.result.get("rag_info")
                             if rag_info:
-                                print(f"  → RAG retrieved {rag_info.get('retrieved_sections')} sections")
-                                print(f"  → Total sections: {rag_info.get('total_sections')}")
+                                logger.info(f"  → RAG retrieved {rag_info.get('retrieved_sections')} sections")
+                                logger.info(f"  → Total sections: {rag_info.get('total_sections')}")
 
     except Exception as e:
-        print(f"Error: {e}")
-        import traceback
-        traceback.print_exc()
+        logger.error(f"Error in example: {e}", exc_info=True)
 
 
 async def example_rate_limiting():
     """Example 4: Rate limiting with max_parallel_sections"""
-    print("\n" + "="*60)
-    print("Example 4: Rate Limiting with max_parallel_sections")
-    print("="*60)
-    print("Demonstrates how to limit concurrent LLM calls to avoid rate limits")
-    print()
+    logger.info("""\
+
+============================================================
+Example 4: Rate Limiting with max_parallel_sections
+============================================================
+Demonstrates how to limit concurrent LLM calls to avoid rate limits
+""")
 
     api_key = os.getenv("OPENAI_API_KEY") or os.getenv("GROQ_API_KEY")
     if not api_key:
-        print("WARNING: OPENAI_API_KEY or GROQ_API_KEY not set.")
+        logger.warning("OPENAI_API_KEY or GROQ_API_KEY not set.")
         return
+    
+    logger.info(f"Using API key: {'OPENAI_API_KEY' if os.getenv('OPENAI_API_KEY') else 'GROQ_API_KEY'}")
+    logger.info("Checking AWS credentials...")
+    aws_key = os.getenv("AWS_ACCESS_KEY_ID")
+    aws_profile = os.getenv("AWS_PROFILE")
+    if aws_key:
+        logger.info("AWS credentials found: Access Key ID set")
+    elif aws_profile:
+        logger.info(f"AWS credentials found: Profile '{aws_profile}'")
+    else:
+        logger.warning("No AWS credentials found. Will use boto3 defaults (IAM role, etc.)")
 
     try:
         config = {
@@ -316,44 +392,62 @@ async def example_rate_limiting():
                 "type": "policy",
                 "methods": ["policy-sections"],
                 "policy-sections": {
-                    "policy_s3_bucket": "my-policy-bucket",
-                    "policy_s3_key": "teams/team-123/policies/policy-456/sections.json",
+                    "policy_s3_bucket": POLICY_S3_BUCKET,
+                    "policy_s3_key": f"{POLICY_S3_KEY_PREFIX}/sections.json",
                     "applies_to": "input",
                     "use_rag": False,
                     "max_parallel_sections": 5,  # Limit to 5 concurrent LLM calls
                     "model_name": "openai/gpt-oss-safeguard-20b",
                     "reasoning_effort": "medium",
-                    "hub_name": "openai",
+                    "hub_name": "groq",
+                    # S3 auth params - pass explicitly to avoid profile conflicts
+                    "aws_access_key_id": os.getenv("AWS_ACCESS_KEY_ID"),
+                    "aws_secret_access_key": os.getenv("AWS_SECRET_ACCESS_KEY"),
+                    "aws_session_token": os.getenv("AWS_SESSION_TOKEN"),
+                    "region_name": os.getenv("AWS_REGION"),
                 },
             }
         }
 
+        logger.info("Creating Dome instance with max_parallel_sections=5...")
         dome = Dome(config)
-        print("✓ Dome instance created with max_parallel_sections=5")
-        print("  This limits concurrent LLM calls to avoid rate limits")
-        print("  Sections will be processed in batches of 5")
+        logger.info("✓ Dome instance created with max_parallel_sections=5")
+        logger.info("  This limits concurrent LLM calls to avoid rate limits")
+        logger.info("  Sections will be processed in batches of 5")
 
+        logger.info("\nTesting with sample query...")
         result = await dome.async_guard_input("Test query")
-        print(f"\nTest completed - Flagged: {result.flagged}")
+        logger.info(f"Test completed - Result: {'FLAGGED' if result.flagged else 'ALLOWED'}")
 
     except Exception as e:
-        print(f"Error: {e}")
-        import traceback
-        traceback.print_exc()
+        logger.error(f"Error in example: {e}", exc_info=True)
 
 
 async def example_s3_auth():
     """Example 5: Using S3 authentication parameters"""
-    print("\n" + "="*60)
-    print("Example 5: S3 Authentication Parameters")
-    print("="*60)
-    print("Demonstrates explicit S3 credential configuration")
-    print()
+    logger.info("""\
+
+============================================================
+Example 5: S3 Authentication Parameters
+============================================================
+Demonstrates explicit S3 credential configuration
+""")
 
     api_key = os.getenv("OPENAI_API_KEY") or os.getenv("GROQ_API_KEY")
     if not api_key:
-        print("WARNING: OPENAI_API_KEY or GROQ_API_KEY not set.")
+        logger.warning("OPENAI_API_KEY or GROQ_API_KEY not set.")
         return
+    
+    logger.info(f"Using API key: {'OPENAI_API_KEY' if os.getenv('OPENAI_API_KEY') else 'GROQ_API_KEY'}")
+    logger.info("Checking AWS credentials...")
+    aws_key = os.getenv("AWS_ACCESS_KEY_ID")
+    aws_profile = os.getenv("AWS_PROFILE")
+    if aws_key:
+        logger.info("AWS credentials found: Access Key ID set")
+    elif aws_profile:
+        logger.info(f"AWS credentials found: Profile '{aws_profile}'")
+    else:
+        logger.warning("No AWS credentials found. Will use boto3 defaults (IAM role, etc.)")
 
     try:
         # Config with explicit S3 auth params
@@ -363,13 +457,13 @@ async def example_s3_auth():
                 "type": "policy",
                 "methods": ["policy-sections"],
                 "policy-sections": {
-                    "policy_s3_bucket": "my-policy-bucket",
-                    "policy_s3_key": "teams/team-123/policies/policy-456/sections.json",
+                    "policy_s3_bucket": POLICY_S3_BUCKET,
+                    "policy_s3_key": f"{POLICY_S3_KEY_PREFIX}/sections.json",
                     "applies_to": "input",
                     "use_rag": False,
                     "model_name": "openai/gpt-oss-safeguard-20b",
                     "reasoning_effort": "medium",
-                    "hub_name": "openai",
+                    "hub_name": "groq",
                     # S3 auth params
                     "aws_access_key_id": os.getenv("AWS_ACCESS_KEY_ID"),
                     "aws_secret_access_key": os.getenv("AWS_SECRET_ACCESS_KEY"),
@@ -378,98 +472,112 @@ async def example_s3_auth():
             }
         }
 
+        logger.info("Creating Dome instance with explicit S3 credentials...")
         dome = Dome(config)
-        print("✓ Dome instance created with explicit S3 credentials")
-        print("  Note: If not provided, boto3 uses default credentials")
+        logger.info("✓ Dome instance created with explicit S3 credentials")
+        logger.info("  Note: If not provided, boto3 uses default credentials")
 
+        logger.info("\nTesting with sample query...")
         result = await dome.async_guard_input("Test query")
-        print(f"\nTest completed - Flagged: {result.flagged}")
+        logger.info(f"Test completed - Result: {'FLAGGED' if result.flagged else 'ALLOWED'}")
 
     except Exception as e:
-        print(f"Error: {e}")
-        import traceback
-        traceback.print_exc()
+        logger.error(f"Error in example: {e}", exc_info=True)
 
 
 async def example_local_file():
     """Example 6: Loading from local file (for testing/development)"""
-    print("\n" + "="*60)
-    print("Example 6: Loading from Local File")
-    print("="*60)
-    print("Demonstrates using local policy sections file for testing")
-    print()
+    logger.info("""\
+
+============================================================
+Example 6: Loading from Local File
+============================================================
+Demonstrates using local policy sections file for testing
+""")
 
     api_key = os.getenv("OPENAI_API_KEY") or os.getenv("GROQ_API_KEY")
     if not api_key:
-        print("WARNING: OPENAI_API_KEY or GROQ_API_KEY not set.")
+        logger.warning("OPENAI_API_KEY or GROQ_API_KEY not set.")
         return
+    
+    logger.info(f"Using API key: {'OPENAI_API_KEY' if os.getenv('OPENAI_API_KEY') else 'GROQ_API_KEY'}")
+    logger.info("Checking AWS credentials...")
+    aws_key = os.getenv("AWS_ACCESS_KEY_ID")
+    aws_profile = os.getenv("AWS_PROFILE")
+    if aws_key:
+        logger.info("AWS credentials found: Access Key ID set")
+    elif aws_profile:
+        logger.info(f"AWS credentials found: Profile '{aws_profile}'")
+    else:
+        logger.warning("No AWS credentials found. Will use boto3 defaults (IAM role, etc.)")
 
     try:
         # Load sample sections file
         sample_file = Path(__file__).parent.parent / "vijil_dome" / "detectors" / "policies" / "sample_policy_sections.json"
         
         if not sample_file.exists():
-            print(f"Sample file not found: {sample_file}")
+            logger.error(f"Sample file not found: {sample_file}")
             return
 
+        logger.info(f"Loading policy sections from {sample_file}...")
         policy_data = load_policy_sections_from_file(str(sample_file))
-        print(f"✓ Loaded {len(policy_data['sections'])} sections from {sample_file}")
+        logger.info(f"✓ Loaded {len(policy_data['sections'])} sections from {sample_file.name}")
 
         # Create config with direct sections using config builder
         from vijil_dome.utils.policy_config_builder import build_dome_config_from_sections
 
+        logger.info("Building Dome config from sections...")
         config = build_dome_config_from_sections(
             policy_data,
             model_name="openai/gpt-oss-safeguard-20b",
             reasoning_effort="medium",
-            hub_name="openai",
+            hub_name="groq",
         )
 
+        logger.info("Creating Dome instance...")
         dome = Dome(config)
-        print("✓ Dome instance created")
+        logger.info("✓ Dome instance created")
 
         # Test
-        result = await dome.async_guard_input("This is a test-violation query")
-        print("\nTest result:")
-        print("  Input: 'This is a test-violation query'")
-        print(f"  Flagged: {result.flagged}")
+        test_query = "This is a test-violation query"
+        logger.info(f"\nTesting with query: '{test_query}'")
+        result = await dome.async_guard_input(test_query)
+        logger.info("\nTest result:")
+        logger.info(f"  Input: '{test_query}'")
+        logger.info(f"  Result: {'FLAGGED' if result.flagged else 'ALLOWED'}")
         if result.flagged:
-            print(f"  Response: {result.response_string}")
+            logger.warning(f"  Response: {result.response_string[:100]}...")
 
     except Exception as e:
-        print(f"Error: {e}")
-        import traceback
-        traceback.print_exc()
+        logger.error(f"Error in example: {e}", exc_info=True)
 
 
 async def main():
     """Run all examples"""
-    print("\n" + "="*60)
-    print("Policy Guardrail Examples - All Three Modes")
-    print("="*60)
-    print("\nThis example demonstrates three policy guardrail modes:")
-    print("  1. Full Policy Mode - Single detector with entire policy")
-    print("  2. Chunked Parallel Mode - All sections evaluated in parallel")
-    print("  3. RAG/VectorDB Mode - Retrieval-first with FAISS")
-    print("\n" + "="*60)
+    logger.info("""\
+============================================================
+Policy Guardrail Examples - All Three Modes
+============================================================
 
-    # Run examples (uncomment to run)
-    # await example_full_policy_mode()
-    # await example_chunked_parallel_mode()
-    # await example_rag_mode()
-    # await example_rate_limiting()
-    # await example_s3_auth()
-    # await example_local_file()
+This example demonstrates three policy guardrail modes:
+  1. Full Policy Mode - Single detector with entire policy
+  2. Chunked Parallel Mode - All sections evaluated in parallel
+  3. RAG/VectorDB Mode - Retrieval-first with FAISS
 
-    print("\n" + "="*60)
-    print("Note: Examples are commented out. Uncomment to run.")
-    print("\nPrerequisites:")
-    print("  1. Set OPENAI_API_KEY or GROQ_API_KEY environment variable")
-    print("  2. Configure AWS credentials (for S3 examples)")
-    print("  3. Update bucket/team_id/policy_id values in examples")
-    print("  4. For RAG mode: Ensure FAISS index and section_ids.json exist in S3")
-    print("  5. See vijil_dome/detectors/policies/sample_policy_sections.json for format")
-    print("="*60)
+============================================================
+""")
+
+    # Run examples (comment out any you don't want to run)
+    await example_full_policy_mode()
+    await example_chunked_parallel_mode()
+    await example_rag_mode()
+    await example_rate_limiting()
+    await example_s3_auth()
+    await example_local_file()
+    
+    logger.info("="*60)
+    logger.info("All examples completed!")
+    logger.info("="*60)
 
 
 if __name__ == "__main__":
