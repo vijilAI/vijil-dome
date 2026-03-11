@@ -178,7 +178,7 @@ def test_build_dome_config_optional_parameters(sample_policy_data):
 
 
 def test_build_dome_config_includes_metadata(sample_policy_data):
-    """Test that section metadata is included in detector config"""
+    """Test that section metadata is NOT included in detector config (filtered out per code review)"""
     config = build_dome_config_from_sections(sample_policy_data)
 
     input_guard = config["input-guards"][0]["all-policy-sections-input"]
@@ -186,9 +186,16 @@ def test_build_dome_config_includes_metadata(sample_policy_data):
     method_keys = input_guard["methods"]
     section_1_key = [k for k in method_keys if "input-section-1" in k][0]
     detector_config = input_guard[section_1_key]
-
-    # header is metadata and not included in detector config (filtered out per code review)
-    # Metadata fields like section_id, header, and policy_id are not passed to detector constructors
+    
+    # Verify that metadata fields are NOT included in detector config
+    # Metadata fields like section_id, header, and policy_id are filtered out
+    assert "section_id" not in detector_config, "section_id should be filtered out"
+    assert "header" not in detector_config, "header should be filtered out"
+    assert "policy_id" not in detector_config, "policy_id should be filtered out"
+    
+    # Verify that actual detector parameters ARE included
+    assert "method" in detector_config
+    assert "policy_content" in detector_config
 
 
 def test_build_dome_config_only_input_sections():
