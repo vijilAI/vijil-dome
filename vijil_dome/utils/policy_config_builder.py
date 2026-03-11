@@ -24,7 +24,7 @@ def build_dome_config_from_sections(
     policy_data: Dict[str, Any],
     model_name: str = "openai/gpt-oss-120b",
     reasoning_effort: str = "medium",
-    hub_name: str = "nebius",
+    hub_name: str = "groq",
     timeout: Optional[int] = 60,
     max_retries: Optional[int] = 3,
     api_key: Optional[str] = None,
@@ -41,7 +41,7 @@ def build_dome_config_from_sections(
         policy_data: Policy data dictionary with 'sections' array
         model_name: LLM model to use for all detectors (default: "openai/gpt-oss-120b")
         reasoning_effort: Reasoning depth - "low", "medium", "high" (default: "medium")
-        hub_name: LLM hub to use (default: "nebius")
+        hub_name: LLM hub to use (default: "groq")
         timeout: Request timeout in seconds (default: 60)
         max_retries: Maximum retry attempts (default: 3)
         api_key: API key for the hub (optional, uses env var if not provided)

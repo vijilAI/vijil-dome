@@ -119,10 +119,10 @@ def test_build_dome_config_detector_config(sample_policy_data):
 
     assert detector_config["method"] == "policy-gpt-oss-safeguard"
     assert detector_config["policy_content"] == "# Input Policy 1\n\nContent here"
-    assert detector_config["section_id"] == "input-section-1"
+    # section_id is metadata and not included in detector config
     assert detector_config["model_name"] == "openai/gpt-oss-20b"
     assert detector_config["reasoning_effort"] == "high"
-    assert detector_config["hub_name"] == "nebius"
+    assert detector_config["hub_name"] == "groq"
     assert detector_config["timeout"] == 60  # default
     assert detector_config["max_retries"] == 3  # default
 
@@ -187,9 +187,8 @@ def test_build_dome_config_includes_metadata(sample_policy_data):
     section_1_key = [k for k in method_keys if "input-section-1" in k][0]
     detector_config = input_guard[section_1_key]
 
-    # Should include header from metadata if present
-    if "metadata" in sample_policy_data["sections"][0] and "header" in sample_policy_data["sections"][0]["metadata"]:
-        assert detector_config["header"] == "Input Policy 1"
+    # header is metadata and not included in detector config (filtered out per code review)
+    # Metadata fields like section_id, header, and policy_id are not passed to detector constructors
 
 
 def test_build_dome_config_only_input_sections():

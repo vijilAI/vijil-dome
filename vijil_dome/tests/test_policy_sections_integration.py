@@ -177,8 +177,8 @@ async def test_guardrail_execution_structure(sample_policy_data):
 @pytest.mark.asyncio
 async def test_guardrail_with_api_key(sample_policy_data):
     """Test guardrail execution with API key (if available)"""
-    if not os.getenv("NEBIUS_API_KEY"):
-        pytest.skip("NEBIUS_API_KEY not set")
+    if not os.getenv("GROQ_API_KEY") and not os.getenv("OPENAI_API_KEY"):
+        pytest.skip("GROQ_API_KEY or OPENAI_API_KEY not set")
 
     config = build_dome_config_from_sections(sample_policy_data)
     dome = Dome(config)
@@ -189,7 +189,7 @@ async def test_guardrail_with_api_key(sample_policy_data):
     # Should be flagged (depending on model accuracy)
     assert isinstance(result.flagged, bool)
     assert hasattr(result, "response_string")
-    assert hasattr(result, "guard_exec_details")
+    assert hasattr(result, "trace")  # ScanResult uses 'trace' not 'guard_exec_details'
 
 
 def test_multiple_sections_parallel_config(sample_policy_data):
