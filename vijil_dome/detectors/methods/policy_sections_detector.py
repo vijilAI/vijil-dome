@@ -16,12 +16,13 @@
 
 import asyncio
 import logging
-from typing import Optional, List, Dict, Any, Union, Tuple
+from typing import Optional, List, Dict, Any, Union, Tuple, Literal, cast
 
 from vijil_dome.detectors import (
     DetectionCategory,
     DetectionMethod,
     DetectionResult,
+    DetectionTimingResult,
     register_method,
     POLICY_SECTIONS,
 )
@@ -239,6 +240,11 @@ class PolicySectionsDetector(DetectionMethod):
         if not use_rag or not has_s3:
             return
         
+        # Assert that S3 parameters are not None when use_rag is True
+        assert policy_s3_bucket is not None, "policy_s3_bucket must be set when use_rag=True"
+        assert faiss_s3_key is not None, "faiss_s3_key must be set when use_rag=True"
+        assert section_ids_s3_key is not None, "section_ids_s3_key must be set when use_rag=True"
+        
         try:
             # Load FAISS index
             faiss_index_path = load_faiss_index_from_s3(
@@ -442,6 +448,8 @@ class PolicySectionsDetector(DetectionMethod):
         """Load policy sections and filter by applies_to."""
         # Load sections
         if has_s3:
+            assert policy_s3_bucket is not None, "policy_s3_bucket must be set when loading from S3"
+            assert policy_s3_key is not None, "policy_s3_key must be set when loading from S3"
             policy_data = load_policy_sections_from_s3(
                 bucket=policy_s3_bucket,
                 key=policy_s3_key,
@@ -502,7 +510,7 @@ class PolicySectionsDetector(DetectionMethod):
             detector = PolicyGptOssSafeguard(
                 policy_content=section["content"],
                 model_name=model_name,
-                reasoning_effort=reasoning_effort,
+                reasoning_effort=cast(Literal["low", "medium", "high"], reasoning_effort),
                 hub_name=hub_name,
                 timeout=timeout if timeout is not None else 60,
                 max_retries=max_retries if max_retries is not None else 3,
@@ -665,14 +673,16 @@ class PolicySectionsDetector(DetectionMethod):
             batch_metadata = metadata[batch_start:batch_end]
 
             # Create tasks with metadata
-            batch_task_data = [
+            batch_task_data: List[Dict[str, Any]] = [
                 {
                     "task": asyncio.create_task(detector.detect_with_time(query_string)),
                     "task_idx": idx,
                 }
                 for idx, detector in enumerate(batch_detectors)
             ]
-            tasks = [td["task"] for td in batch_task_data]
+            tasks: List[asyncio.Task[DetectionTimingResult]] = [
+                cast(asyncio.Task[DetectionTimingResult], td["task"]) for td in batch_task_data
+            ]
 
             batch_results = []
             batch_violation = False
@@ -727,7 +737,7 @@ class PolicySectionsDetector(DetectionMethod):
 
                 # Update batch_task_data to only include pending tasks
                 batch_task_data = [td for td in batch_task_data if td["task"] in pending]
-                tasks = pending
+                tasks = list(pending)
 
             all_results.extend(batch_results)
 

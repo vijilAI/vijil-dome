@@ -194,7 +194,7 @@ class FaissEmbeddingsIndex(AbstractEmbeddingsIndex):
         # Search FAISS index
         if with_distance:
             distances, indices = self._index.search(query_vector, k)
-            results = []
+            results_with_dist: List[Tuple[EmbeddingsItem, Optional[float]]] = []
             for i, idx in enumerate(indices[0]):
                 # FAISS can return -1 when fewer than k neighbors exist
                 if 0 <= idx < len(self._items):
@@ -202,20 +202,20 @@ class FaissEmbeddingsIndex(AbstractEmbeddingsIndex):
                     # Using 1 / (1 + distance) as similarity score
                     distance = float(distances[0][i])
                     similarity = 1.0 / (1.0 + distance) if distance >= 0 else 0.0
-                    results.append((self._items[idx], similarity))
+                    results_with_dist.append((self._items[idx], similarity))
                 elif idx != -1:
                     logger.warning(f"Index {idx} out of range for {len(self._items)} items")
-            return results
+            return results_with_dist
         else:
             distances, indices = self._index.search(query_vector, k)
-            results = []
+            results_no_dist: List[Tuple[EmbeddingsItem, Optional[float]]] = []
             for idx in indices[0]:
                 # FAISS can return -1 when fewer than k neighbors exist
                 if 0 <= idx < len(self._items):
-                    results.append((self._items[idx], None))
+                    results_no_dist.append((self._items[idx], None))
                 elif idx != -1:
                     logger.warning(f"Index {idx} out of range for {len(self._items)} items")
-            return results
+            return results_no_dist
 
     def set_items(self, items: List[EmbeddingsItem]) -> None:
         """Set the items list for mapping FAISS indices to EmbeddingsItem objects.

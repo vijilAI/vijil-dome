@@ -482,6 +482,7 @@ class PolicyGptOssSafeguard(LlmBaseDetector):
             self.policy_source = "inline_content"
         else:
             # Load from file - policy_file must be set at this point due to validation above
+            assert policy_file is not None, "policy_file must be set when policy_content is not provided"
             policy_path = Path(policy_file)
             if not policy_path.exists():
                 raise FileNotFoundError(f"Policy file not found: {policy_file}")
