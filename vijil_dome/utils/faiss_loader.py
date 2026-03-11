@@ -77,7 +77,7 @@ def _is_cache_valid(
             
             cached_etag = cached_metadata.get("etag", "")
             if s3_etag == cached_etag:
-                logger.info(f"Cache valid (ETag match), using cached file")
+                logger.info("Cache valid (ETag match), using cached file")
                 # Update cache timestamp
                 file_path.touch()
                 return True
@@ -266,7 +266,7 @@ def load_section_ids_from_s3(
                                 for i, item in enumerate(cached_data)
                             }
                         else:
-                            logger.warning(f"Cached data is list but cannot convert, will re-download")
+                            logger.warning("Cached data is list but cannot convert, will re-download")
                             cache_valid = False
                     else:
                         cached_data = {}
@@ -281,6 +281,12 @@ def load_section_ids_from_s3(
             
             # Cache is old, check if S3 file changed
             try:
+                s3_client = _create_s3_client(
+                    aws_access_key_id=aws_access_key_id,
+                    aws_secret_access_key=aws_secret_access_key,
+                    aws_session_token=aws_session_token,
+                    region_name=region_name,
+                )
                 s3_head = s3_client.head_object(Bucket=bucket, Key=key)
                 s3_etag = s3_head.get("ETag", "").strip('"')
                 
@@ -291,7 +297,7 @@ def load_section_ids_from_s3(
                 cached_etag = cached_metadata.get("etag", "")
                 if s3_etag == cached_etag:
                     cache_valid = True
-                    logger.info(f"Cache valid (ETag match), using cached section_ids.json")
+                    logger.info("Cache valid (ETag match), using cached section_ids.json")
                     # Update cache timestamp
                     json_file_path.touch()
                     with open(json_file_path, 'r', encoding='utf-8') as f:
@@ -309,7 +315,7 @@ def load_section_ids_from_s3(
                                         for i, item in enumerate(cached_data)
                                     }
                                 else:
-                                    logger.warning(f"Cached data is list but cannot convert, will re-download")
+                                    logger.warning("Cached data is list but cannot convert, will re-download")
                                     cache_valid = False
                             else:
                                 cached_data = {}
@@ -330,6 +336,12 @@ def load_section_ids_from_s3(
     if not cache_valid:
         logger.info(f"Downloading section_ids.json from s3://{bucket}/{key}")
         try:
+            s3_client = _create_s3_client(
+                aws_access_key_id=aws_access_key_id,
+                aws_secret_access_key=aws_secret_access_key,
+                aws_session_token=aws_session_token,
+                region_name=region_name,
+            )
             s3_object = s3_client.get_object(Bucket=bucket, Key=key)
             json_bytes = s3_object["Body"].read()
             json_str = json_bytes.decode("utf-8")
@@ -434,4 +446,155 @@ def load_section_ids_from_s3(
                 )
             return cached_data
     
-    raise FileNotFoundError(f"Could not load section_ids.json from S3 or cache")
+    raise FileNotFoundError("Could not load section_ids.json from S3 or cache")
+
+def load_extraction_metadata_from_s3(
+    bucket: str,
+    key: str,
+    cache_dir: Optional[str] = None,
+    aws_access_key_id: Optional[str] = None,
+    aws_secret_access_key: Optional[str] = None,
+    aws_session_token: Optional[str] = None,
+    region_name: Optional[str] = None,
+    cache_ttl_seconds: int = 3600,
+) -> Optional[Dict[str, Any]]:
+    """Load extraction_metadata.json from S3 with caching.
+    
+    This function loads the extraction metadata file that contains information about
+    the embedding model and engine used to create the FAISS index. The metadata is
+    cached locally to avoid repeated S3 calls.
+    
+    Args:
+        bucket: S3 bucket name
+        key: S3 object key (path to extraction_metadata.json file)
+        cache_dir: Local cache directory (defaults to ~/.cache/vijil-dome/faiss/)
+        aws_access_key_id: AWS access key (optional, uses boto3 defaults if not provided)
+        aws_secret_access_key: AWS secret key (optional)
+        aws_session_token: AWS session token (optional)
+        region_name: AWS region (optional, uses boto3 defaults if not provided)
+        cache_ttl_seconds: Cache TTL in seconds (default: 3600 = 1 hour)
+        
+    Returns:
+        Dictionary with metadata fields (embedding_model, embedding_engine, etc.) or None if file not found
+        
+    Raises:
+        ImportError: If boto3 is not installed
+        Exception: For S3 access errors (other than 404)
+    """
+    import importlib.util
+    if importlib.util.find_spec("boto3") is None:
+        raise ImportError(
+            "boto3 is not installed. Install it with: pip install boto3"
+        )
+    
+    if cache_dir is None:
+        cache_dir = str(get_default_cache_dir())
+    
+    cache_path = Path(cache_dir)
+    cache_path.mkdir(parents=True, exist_ok=True)
+    
+    # Create cache filename from bucket and key
+    cache_key = f"{bucket}/{key}".replace("/", "_").replace(" ", "_")
+    json_file_path = cache_path / f"{cache_key}.json"
+    metadata_file_path = cache_path / f"{cache_key}.metadata.json"
+    
+    # Check cache validity
+    cache_valid = False
+    if json_file_path.exists() and metadata_file_path.exists():
+        try:
+            # Check cache age
+            cache_age = time.time() - json_file_path.stat().st_mtime
+            if cache_age < cache_ttl_seconds:
+                # Cache is fresh, skip S3 check
+                logger.info(f"Using cached extraction_metadata.json (age: {cache_age:.0f}s < {cache_ttl_seconds}s)")
+                with open(json_file_path, 'r', encoding='utf-8') as f:
+                    return json.load(f)
+            else:
+                cache_valid = False
+            
+            # Cache is old, check if S3 file changed
+            try:
+                s3_client = _create_s3_client(
+                    aws_access_key_id=aws_access_key_id,
+                    aws_secret_access_key=aws_secret_access_key,
+                    aws_session_token=aws_session_token,
+                    region_name=region_name,
+                )
+                s3_head = s3_client.head_object(Bucket=bucket, Key=key)
+                s3_etag = s3_head.get("ETag", "").strip('"')
+                
+                # Load cached metadata
+                with open(metadata_file_path, 'r') as f:
+                    cached_metadata = json.load(f)
+                
+                cached_etag = cached_metadata.get("etag", "")
+                if s3_etag == cached_etag:
+                    cache_valid = True
+                    logger.info("Cache valid (ETag match), using cached extraction_metadata.json")
+                    # Update cache timestamp
+                    json_file_path.touch()
+                    with open(json_file_path, 'r', encoding='utf-8') as f:
+                        return json.load(f)
+            except Exception as e:
+                logger.warning(f"Failed to validate cache, will re-download: {e}")
+        except Exception as e:
+            logger.warning(f"Failed to validate cache, will re-download: {e}")
+    
+    # Download from S3 if cache invalid
+    if not cache_valid:
+        logger.info(f"Downloading extraction_metadata.json from s3://{bucket}/{key}")
+        try:
+            s3_client = _create_s3_client(
+                aws_access_key_id=aws_access_key_id,
+                aws_secret_access_key=aws_secret_access_key,
+                aws_session_token=aws_session_token,
+                region_name=region_name,
+            )
+            s3_object = s3_client.get_object(Bucket=bucket, Key=key)
+            json_bytes = s3_object["Body"].read()
+            json_str = json_bytes.decode("utf-8")
+            metadata = json.loads(json_str)
+            
+            # Validate structure
+            if not isinstance(metadata, dict):
+                raise ValueError(
+                    f"extraction_metadata.json must be a dictionary, got {type(metadata).__name__}. "
+                    f"Content preview: {json_str[:500]}"
+                )
+            
+            # Save to cache
+            with open(json_file_path, 'w', encoding='utf-8') as f:
+                json.dump(metadata, f, indent=2, ensure_ascii=False)
+            
+            # Save metadata
+            cache_metadata = {
+                "etag": s3_object.get("ETag", "").strip('"'),
+                "s3_bucket": bucket,
+                "s3_key": key,
+                "last_updated": time.time(),
+            }
+            with open(metadata_file_path, 'w') as f:
+                json.dump(cache_metadata, f, indent=2)
+            
+            logger.info(f"Cached extraction_metadata.json to {json_file_path}")
+            return metadata
+        except Exception as e:
+            # Check if it's a 404/NoSuchKey error (file doesn't exist)
+            error_code = getattr(e, 'response', {}).get('Error', {}).get('Code', '')
+            if error_code in ('NoSuchKey', '404') or 'NoSuchKey' in str(e) or '404' in str(e):
+                # File doesn't exist - return None (not an error)
+                logger.info(f"extraction_metadata.json not found at s3://{bucket}/{key}, returning None")
+                return None
+            # For other errors, check if we have stale cache
+            if json_file_path.exists():
+                logger.warning(f"S3 download failed, using stale cache: {e}")
+                with open(json_file_path, 'r', encoding='utf-8') as f:
+                    return json.load(f)
+            raise
+    
+    # Should not reach here, but return cached file if exists
+    if json_file_path.exists():
+        with open(json_file_path, 'r', encoding='utf-8') as f:
+            return json.load(f)
+    
+    return None

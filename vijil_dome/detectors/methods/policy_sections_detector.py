@@ -33,6 +33,7 @@ from vijil_dome.utils.policy_loader import (
 from vijil_dome.utils.faiss_loader import (
     load_faiss_index_from_s3,
     load_section_ids_from_s3,
+    load_extraction_metadata_from_s3,
 )
 from vijil_dome.embeds import EmbeddingsItem
 from vijil_dome.embeds.embedder import Embedder
@@ -57,7 +58,7 @@ class PolicySectionsDetector(DetectionMethod):
             policy_s3_key="teams/team-123/policies/policy-456/sections.json",
             applies_to="input",
             max_parallel_sections=10,
-            model_name="openai/gpt-oss-120b",
+            model_name="openai/gpt-oss-safeguard-20b",
             reasoning_effort="medium"
         )
 
@@ -71,7 +72,7 @@ class PolicySectionsDetector(DetectionMethod):
                 }
             ],
             applies_to="input",
-            model_name="openai/gpt-oss-120b",
+            model_name="openai/gpt-oss-safeguard-20b",
         )
     """
 
@@ -87,7 +88,7 @@ class PolicySectionsDetector(DetectionMethod):
         # Rate limiting
         max_parallel_sections: Optional[int] = None,
         # PolicyGptOssSafeguard params
-        model_name: str = "openai/gpt-oss-120b",
+        model_name: str = "openai/gpt-oss-safeguard-20b",
         reasoning_effort: str = "medium",
         hub_name: str = "openai",
         timeout: Optional[int] = 60,
@@ -105,8 +106,8 @@ class PolicySectionsDetector(DetectionMethod):
         section_ids_s3_key: Optional[str] = None,
         top_k: int = 5,
         similarity_threshold: float = 0.0,
-        embedding_model: str = "all-MiniLM-L6-v2",
-        embedding_engine: str = "SentenceTransformers",
+        embedding_model: str = "text-embedding-ada-002",
+        embedding_engine: str = "OpenAI",
     ):
         """
         Initialize the policy sections detector.
@@ -117,7 +118,7 @@ class PolicySectionsDetector(DetectionMethod):
             policy_sections: Direct list of section dicts (required if S3 params not provided)
             applies_to: Filter sections by applies_to - "input", "output", or ["input", "output"] (default: "input")
             max_parallel_sections: Maximum number of sections to run in parallel (default: None = no limit)
-            model_name: LLM model identifier (default: "openai/gpt-oss-120b")
+            model_name: LLM model identifier (default: "openai/gpt-oss-safeguard-20b")
             reasoning_effort: Reasoning depth - "low", "medium", "high" (default: "medium")
             hub_name: LLM hub to use (default: "openai")
             timeout: Request timeout in seconds (default: 60)
@@ -261,11 +262,101 @@ class PolicySectionsDetector(DetectionMethod):
                 region_name=region_name,
             )
             
-            # Initialize embedder
+            # Load extraction metadata to get embedding model/engine info
+            # Infer extraction_metadata.json path from faiss_s3_key (same directory)
+            extraction_metadata_key = None
+            extraction_metadata = None
+            if faiss_s3_key:
+                # Extract directory from faiss_s3_key (e.g., "teams/.../policies/.../faiss.index" -> "teams/.../policies/.../")
+                if "/" in faiss_s3_key:
+                    extraction_metadata_key = "/".join(faiss_s3_key.split("/")[:-1]) + "/extraction_metadata.json"
+                else:
+                    # If no directory, assume same level
+                    extraction_metadata_key = "extraction_metadata.json"
+            
+            metadata_embedding_model = embedding_model
+            metadata_embedding_engine = embedding_engine
+            metadata_source = "user-provided/default"
+            
+            if extraction_metadata_key:
+                try:
+                    extraction_metadata = load_extraction_metadata_from_s3(
+                        bucket=policy_s3_bucket,
+                        key=extraction_metadata_key,
+                        cache_dir=cache_dir,
+                        aws_access_key_id=aws_access_key_id,
+                        aws_secret_access_key=aws_secret_access_key,
+                        aws_session_token=aws_session_token,
+                        region_name=region_name,
+                    )
+                    
+                    if extraction_metadata:
+                        # Extract embedding_model and embedding_engine from metadata
+                        if "embedding_model" in extraction_metadata:
+                            metadata_embedding_model = extraction_metadata["embedding_model"]
+                            metadata_source = "extraction_metadata.json"
+                        if "embedding_engine" in extraction_metadata:
+                            metadata_embedding_engine = extraction_metadata["embedding_engine"]
+                            if metadata_source == "user-provided/default":
+                                metadata_source = "extraction_metadata.json"
+                        
+                        logger.info(
+                            "Loaded embedding model configuration from extraction_metadata.json",
+                            extra={
+                                "embedding_model": metadata_embedding_model,
+                                "embedding_engine": metadata_embedding_engine,
+                                "source": metadata_source,
+                            }
+                        )
+                    else:
+                        logger.info(
+                            "extraction_metadata.json not found, using user-provided/default values",
+                            extra={
+                                "embedding_model": embedding_model,
+                                "embedding_engine": embedding_engine,
+                            }
+                        )
+                except Exception as e:
+                    logger.warning(
+                        "Failed to load extraction_metadata.json, using user-provided/default values",
+                        extra={
+                            "error": str(e),
+                            "embedding_model": embedding_model,
+                            "embedding_engine": embedding_engine,
+                        }
+                    )
+            
+            # Initialize embedder with metadata values (or user-provided/defaults)
             self.embedder = Embedder(
-                embedding_model=embedding_model,
-                embedding_engine=embedding_engine,
+                embedding_model=metadata_embedding_model,
+                embedding_engine=metadata_embedding_engine,
             )
+            
+            # Validate metadata vs actual embedder config (if metadata was loaded)
+            if extraction_metadata:
+                metadata_model = extraction_metadata.get("embedding_model")
+                metadata_engine = extraction_metadata.get("embedding_engine")
+                actual_model = self.embedder.embedding_model
+                actual_engine = self.embedder.embedding_engine
+                
+                mismatches = []
+                if metadata_model and metadata_model != actual_model:
+                    mismatches.append(f"model: {metadata_model} != {actual_model}")
+                if metadata_engine and metadata_engine != actual_engine:
+                    mismatches.append(f"engine: {metadata_engine} != {actual_engine}")
+                
+                if mismatches:
+                    logger.warning(
+                        "Embedding model/engine mismatch between metadata and actual config",
+                        extra={
+                            "mismatches": ", ".join(mismatches),
+                            "metadata_model": metadata_model,
+                            "metadata_engine": metadata_engine,
+                            "actual_model": actual_model,
+                            "actual_engine": actual_engine,
+                            "note": "User may have intentionally overridden metadata values",
+                        }
+                    )
             
             # Load FAISS index
             try:
@@ -284,7 +375,7 @@ class PolicySectionsDetector(DetectionMethod):
                         extra={
                             "index_dim": index_dim,
                             "embedder_dim": embedder_dim,
-                            "embedding_model": embedding_model,
+                            "embedding_model": metadata_embedding_model,
                             "suggested_model": suggested_model,
                         }
                     )
@@ -297,6 +388,8 @@ class PolicySectionsDetector(DetectionMethod):
                         extra={
                             "dimension": index_dim,
                             "section_count": len(self.section_ids_mapping),
+                            "embedding_model": metadata_embedding_model,
+                            "embedding_engine": metadata_embedding_engine,
                         }
                     )
             except ImportError:
