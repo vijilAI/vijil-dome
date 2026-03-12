@@ -39,7 +39,7 @@ def needs_chunking(
     special_token_overhead: int = 2,
 ) -> bool:
     """Return True if *text* exceeds *max_length* tokens (fast path check)."""
-    token_ids = tokenizer.encode(text, add_special_tokens=False)
+    token_ids = tokenizer.encode(text, add_special_tokens=False, verbose=False)
     return len(token_ids) > (max_length - special_token_overhead)
 
 
@@ -93,7 +93,7 @@ def chunk_text(
     if not text:
         return [text]
 
-    token_ids = tokenizer.encode(text, add_special_tokens=False)
+    token_ids = tokenizer.encode(text, add_special_tokens=False, verbose=False)
 
     if len(token_ids) <= usable:
         return [text]

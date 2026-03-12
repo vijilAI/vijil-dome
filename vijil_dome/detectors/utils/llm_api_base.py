@@ -79,8 +79,9 @@ class LlmBaseDetector(DetectionMethod, ABC):
         pass
 
     async def detect_batch(self, inputs: List[str]) -> BatchDetectionResult:
-        tasks = [self.detect(query) for query in inputs]
-        return list(await asyncio.gather(*tasks))
+        return await self._gather_with_concurrency(
+            [self.detect(query) for query in inputs]
+        )
 
 
 class LlmBaseDetectorWithContext(LlmBaseDetector):
