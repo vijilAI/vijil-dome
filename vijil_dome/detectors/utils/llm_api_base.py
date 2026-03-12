@@ -14,7 +14,6 @@
 #
 # vijil and vijil-dome are trademarks owned by Vijil Inc.
 
-import asyncio
 import logging
 import os
 from abc import ABC, abstractmethod
