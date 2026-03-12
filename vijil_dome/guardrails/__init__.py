@@ -95,6 +95,8 @@ class GuardrailResult(BaseModel):
             "guardrail_response_message": self.guardrail_response_message,
             "exec_time": self.exec_time,
             "guard_exec_details": self.guard_exec_details,
+            "detection_score": self.detection_score,
+            "triggered_methods": self.triggered_methods,
         }
         return str(result_dict)
 
