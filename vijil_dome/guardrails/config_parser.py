@@ -159,8 +159,9 @@ def convert_toml_to_guardrail_dict(path_to_toml: str):
 
     raw_config_dict = dict()  # type: Dict[str, Any]
 
-    raw_config_dict["agent_id"] = toml_config_dict.get("guardrail", {}).get(
-        "agent_id", None
+    guardrail_config = toml_config_dict.get("guardrail", {})
+    raw_config_dict["agent_id"] = guardrail_config.get("agent_id") or guardrail_config.get(
+        "agent_config_id"
     )
     raw_config_dict["team_id"] = toml_config_dict.get("guardrail", {}).get(
         "team_id", None
@@ -210,7 +211,7 @@ def convert_dict_to_guardrails(
     output_guardrail = create_guardrail("output", config_dict)
     team_id = config_dict.get("team_id", None)
     user_id = config_dict.get("user_id", None)
-    agent_id = config_dict.get("agent_id", None)
+    agent_id = config_dict.get("agent_id") or config_dict.get("agent_config_id")
     return input_guardrail, output_guardrail, agent_id, team_id, user_id
 
 

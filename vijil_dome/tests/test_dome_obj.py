@@ -136,6 +136,14 @@ async def test_async_config_agent_id():
 
 
 @pytest.mark.asyncio
+async def test_async_config_agent_config_id_alias():
+    config_with_legacy_agent_id = TEST_CONFIG.copy()
+    config_with_legacy_agent_id["agent_config_id"] = "legacy-agent-123"
+    dome = Dome(dome_config=create_dome_config(config_with_legacy_agent_id))
+    assert dome.agent_id == "legacy-agent-123"
+
+
+@pytest.mark.asyncio
 async def test_async_config_agent_team_user_ids():
     config_with_ids = TEST_CONFIG.copy()
     config_with_ids["agent_id"] = "agent-456"
