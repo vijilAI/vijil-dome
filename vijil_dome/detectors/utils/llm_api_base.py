@@ -14,7 +14,6 @@
 #
 # vijil and vijil-dome are trademarks owned by Vijil Inc.
 
-import asyncio
 import logging
 import os
 from abc import ABC, abstractmethod
@@ -79,8 +78,9 @@ class LlmBaseDetector(DetectionMethod, ABC):
         pass
 
     async def detect_batch(self, inputs: List[str]) -> BatchDetectionResult:
-        tasks = [self.detect(query) for query in inputs]
-        return list(await asyncio.gather(*tasks))
+        return await self._gather_with_concurrency(
+            [self.detect(query) for query in inputs]
+        )
 
 
 class LlmBaseDetectorWithContext(LlmBaseDetector):

@@ -98,6 +98,7 @@ class ScanResult(BaseModel):
     trace: dict
     exec_time: float
     detection_score: float = 0.0
+    triggered_methods: List[str] = []
 
     def is_safe(self):
         return not self.flagged
@@ -115,6 +116,8 @@ class ScanResult(BaseModel):
             "trace": self.trace,
             "exec_time": self.exec_time,
             "response": self.response_string,
+            "detection_score": self.detection_score,
+            "triggered_methods": self.triggered_methods,
         }
         return str(result_dict)
 
@@ -252,6 +255,7 @@ class Dome:
             trace=result.guard_exec_details,
             exec_time=result.exec_time,
             detection_score=result.detection_score,
+            triggered_methods=result.triggered_methods,
         )
 
     async def async_guard_input(
@@ -274,6 +278,7 @@ class Dome:
             trace=result.guard_exec_details,
             exec_time=result.exec_time,
             detection_score=result.detection_score,
+            triggered_methods=result.triggered_methods,
         )
 
     def guard_output(
@@ -296,6 +301,7 @@ class Dome:
             trace=result.guard_exec_details,
             exec_time=result.exec_time,
             detection_score=result.detection_score,
+            triggered_methods=result.triggered_methods,
         )
 
     async def async_guard_output(
@@ -318,6 +324,7 @@ class Dome:
             trace=result.guard_exec_details,
             exec_time=result.exec_time,
             detection_score=result.detection_score,
+            triggered_methods=result.triggered_methods,
         )
 
     @staticmethod
@@ -344,6 +351,7 @@ class Dome:
                 trace=gr.guard_exec_details,
                 exec_time=gr.exec_time,
                 detection_score=gr.detection_score,
+                triggered_methods=gr.triggered_methods,
             ))
         return BatchScanResult(items=items, exec_time=batch_result.exec_time)
 

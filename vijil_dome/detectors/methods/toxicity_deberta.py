@@ -115,7 +115,7 @@ class ToxicityDeberta(HFBaseModel):
             }
 
         # Multi-window: batch all chunks, any-positive aggregation
-        all_preds = self.classifier(chunks)
+        all_preds = self.classifier(chunks, batch_size=self.max_batch_concurrency)
         flagged = False
         for window_pred in all_preds:
             item = window_pred[0] if isinstance(window_pred, list) else window_pred
@@ -148,8 +148,8 @@ class ToxicityDeberta(HFBaseModel):
             flat_chunks.extend(chunks)
             ranges.append((start, len(flat_chunks)))
 
-        # Phase 2: single pipeline call on all chunks
-        all_preds = self.classifier(flat_chunks)
+        # Phase 2: pipeline call on all chunks (batched)
+        all_preds = self.classifier(flat_chunks, batch_size=self.max_batch_concurrency)
 
         # Phase 3: re-aggregate per input using any-positive
         results = []
