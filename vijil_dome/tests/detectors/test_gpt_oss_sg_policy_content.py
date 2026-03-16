@@ -15,7 +15,6 @@
 # vijil and vijil-dome are trademarks owned by Vijil Inc.
 
 import pytest
-import os
 from pathlib import Path
 
 from vijil_dome.detectors.methods.gpt_oss_safeguard_policy import PolicyGptOssSafeguard
@@ -94,44 +93,6 @@ Reasoning: high"""
     # Should not duplicate Reasoning directive
     assert detector.policy.count("Reasoning:") == 1
     assert "Reasoning: high" in detector.policy
-
-
-@pytest.mark.asyncio
-async def test_policy_content_detection():
-    """Test detection with policy_content (if API key available)"""
-    if not os.getenv("NEBIUS_API_KEY"):
-        pytest.skip("NEBIUS_API_KEY not set")
-
-    policy_content = """# Test Policy
-
-## INSTRUCTIONS
-Check if input contains "blockme".
-Return ONLY: 0 or 1
-
-## VIOLATES (1)
-- Contains "blockme"
-
-## SAFE (0)
-- Normal text
-
-Content: [INPUT]
-Answer:"""
-
-    detector = PolicyGptOssSafeguard(
-        policy_content=policy_content,
-        model_name="openai/gpt-oss-120b"
-    )
-
-    # Test safe input
-    result = await detector.detect("What is the weather?")
-    assert not result[0]
-    assert result[1]["policy_source"] == "inline_content"
-
-    # Test violation
-    result = await detector.detect("This is a blockme query")
-    # Note: Actual result depends on model, but should have metadata
-    assert "model" in result[1]
-    assert result[1]["policy_source"] == "inline_content"
 
 
 def test_backward_compatibility_with_file():

@@ -382,7 +382,7 @@ class PolicyGptOssSafeguard(LlmBaseDetector):
     Example with file:
         detector = PolicyGptOssSafeguard(
             policy_file="vijil_dome/detectors/policies/spam_policy.md",
-            model_name="openai/gpt-oss-120b",
+            model_name="openai/gpt-oss-safeguard-20b",
             output_format="policy_ref",
             reasoning_effort="medium"
         )
@@ -390,7 +390,7 @@ class PolicyGptOssSafeguard(LlmBaseDetector):
     Example with inline content:
         detector = PolicyGptOssSafeguard(
             policy_content="# Policy\n\n## INSTRUCTIONS\n...",
-            model_name="openai/gpt-oss-120b",
+            model_name="openai/gpt-oss-safeguard-20b",
             output_format="policy_ref",
             reasoning_effort="medium"
         )
@@ -424,10 +424,10 @@ class PolicyGptOssSafeguard(LlmBaseDetector):
             hub_name: LLM hub to use (default: "groq")
             model_name: Model identifier - options:
                        - "openai/gpt-oss-safeguard-20b" (default for groq)
-                       - "openai/gpt-oss-120b" (for nebius)
+                       - "openai/gpt-oss-safeguard-120b" (for groq)
             output_format: Output format - "binary", "policy_ref", "with_rationale" (default: "policy_ref")
             reasoning_effort: Reasoning depth - "low", "medium", "high" (default: "medium")
-            api_key: API key for the hub (defaults to GROQ_API_KEY or NEBIUS_API_KEY env var)
+            api_key: API key for the hub (defaults to GROQ_API_KEY env var)
             timeout: Request timeout in seconds
             max_retries: Maximum number of retry attempts
 
@@ -455,11 +455,7 @@ class PolicyGptOssSafeguard(LlmBaseDetector):
         litellm_model = model_name
         if hub_name == "groq" and not model_name.startswith("groq/"):
             litellm_model = f"groq/{model_name}"
-        elif hub_name == "nebius" and model_name.startswith("openai/"):
-            # Fix for LiteLLM: when using custom base_url, LiteLLM strips one "openai/" prefix
-            # So we need to double it: "openai/gpt-oss-120b" -> "openai/openai/gpt-oss-120b"
-            litellm_model = f"openai/{model_name}"
-
+        
         super().__init__(
             method_name=POLICY_GPT_OSS_SAFEGUARD,
             hub_name=hub_name,

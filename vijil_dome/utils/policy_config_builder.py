@@ -22,7 +22,7 @@ POLICY_GPT_OSS_SAFEGUARD_METHOD = "policy-gpt-oss-safeguard"
 
 def build_dome_config_from_sections(
     policy_data: Dict[str, Any],
-    model_name: str = "openai/gpt-oss-120b",
+    model_name: str = "openai/gpt-oss-safeguard-20b",
     reasoning_effort: str = "medium",
     hub_name: str = "groq",
     timeout: Optional[int] = 60,
@@ -39,7 +39,7 @@ def build_dome_config_from_sections(
 
     Args:
         policy_data: Policy data dictionary with 'sections' array
-        model_name: LLM model to use for all detectors (default: "openai/gpt-oss-120b")
+        model_name: LLM model to use for all detectors (default: "openai/gpt-oss-safeguard-20b")
         reasoning_effort: Reasoning depth - "low", "medium", "high" (default: "medium")
         hub_name: LLM hub to use (default: "groq")
         timeout: Request timeout in seconds (default: 60)
