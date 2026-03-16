@@ -14,6 +14,7 @@
 #
 # vijil and vijil-dome are trademarks owned by Vijil Inc.
 
+import asyncio
 import time
 import json
 import logging
@@ -108,6 +109,21 @@ class DetectionMethod(ABC):
     """
     Abstract base class for all detection methods.
     """
+
+    DEFAULT_MAX_BATCH_CONCURRENCY = 5
+    max_batch_concurrency: int = DEFAULT_MAX_BATCH_CONCURRENCY
+
+    async def _gather_with_concurrency(
+        self, coros: List[Coroutine],
+    ) -> List[Any]:
+        """Run coroutines with a concurrency cap of self.max_batch_concurrency."""
+        semaphore = asyncio.Semaphore(self.max_batch_concurrency)
+
+        async def _limited(coro):
+            async with semaphore:
+                return await coro
+
+        return list(await asyncio.gather(*[_limited(c) for c in coros]))
 
     @staticmethod
     def _call_with_supported_kwargs(func, *args, **kwargs):

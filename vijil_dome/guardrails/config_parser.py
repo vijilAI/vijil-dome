@@ -38,16 +38,20 @@ def create_detector_for_guard(
 ):
     if detector_type not in GUARDRAIL_CATEGORY_MAPPING:
         raise ValueError(f"Invalid detector type encountered: {detector_type}")
+    config = dict(detector_config_dict)
+    max_batch_concurrency = config.pop("max_batch_concurrency", None)
     try:
         detector_instance = DetectionFactory.get_detector(
             GUARDRAIL_CATEGORY_MAPPING[detector_type],
             detector_name,
-            **detector_config_dict,
+            **config,
         )
     except Exception as e:
         raise ValueError(
             f"Something broke when creating the detector {detector_name}. You might have passed an invalid parameter. Exception:{e}"
         )
+    if max_batch_concurrency is not None:
+        detector_instance.max_batch_concurrency = max_batch_concurrency
     return detector_instance
 
 
@@ -167,8 +171,9 @@ def convert_toml_to_guardrail_dict(path_to_toml: str):
 
     raw_config_dict = dict()  # type: Dict[str, Any]
 
-    raw_config_dict["agent_id"] = toml_config_dict.get("guardrail", {}).get(
-        "agent_id", None
+    guardrail_config = toml_config_dict.get("guardrail", {})
+    raw_config_dict["agent_id"] = guardrail_config.get("agent_id") or guardrail_config.get(
+        "agent_config_id"
     )
     raw_config_dict["team_id"] = toml_config_dict.get("guardrail", {}).get(
         "team_id", None
@@ -218,7 +223,7 @@ def convert_dict_to_guardrails(
     output_guardrail = create_guardrail("output", config_dict)
     team_id = config_dict.get("team_id", None)
     user_id = config_dict.get("user_id", None)
-    agent_id = config_dict.get("agent_id", None)
+    agent_id = config_dict.get("agent_id") or config_dict.get("agent_config_id")
     return input_guardrail, output_guardrail, agent_id, team_id, user_id
 
 
