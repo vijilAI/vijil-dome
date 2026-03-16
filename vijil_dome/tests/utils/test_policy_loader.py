@@ -200,22 +200,21 @@ def test_load_policy_sections_from_file_validates_structure(valid_policy_data):
 
 def test_load_policy_sections_from_s3_missing_boto3():
     """Test that missing boto3 raises ImportError"""
-    # Temporarily remove boto3 from sys.modules if present
-    import sys
-    boto3_backup = sys.modules.pop('boto3', None)
-    boto3_client_backup = sys.modules.pop('boto3.client', None)
+    import importlib.util
     
-    try:
-        # Mock the import to raise ImportError
-        with patch.dict('sys.modules', {'boto3': None}):
-            with pytest.raises(ImportError, match="boto3"):
-                load_policy_sections_from_s3("bucket", "key")
-    finally:
-        # Restore boto3 if it was there
-        if boto3_backup:
-            sys.modules['boto3'] = boto3_backup
-        if boto3_client_backup:
-            sys.modules['boto3.client'] = boto3_client_backup
+    # Patch importlib.util.find_spec to return None for boto3
+    # This simulates boto3 not being installed
+    with patch('importlib.util.find_spec') as mock_find_spec:
+        def find_spec_side_effect(name):
+            if name == "boto3":
+                return None
+            # For other modules, use the real find_spec
+            return importlib.util.find_spec(name)
+        
+        mock_find_spec.side_effect = find_spec_side_effect
+        
+        with pytest.raises(ImportError, match="boto3"):
+            load_policy_sections_from_s3("bucket", "key")
 
 
 def test_extract_policy_id_from_key():

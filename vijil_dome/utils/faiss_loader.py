@@ -191,6 +191,77 @@ def load_faiss_index_from_s3(
     return str(index_file_path)
 
 
+def _normalize_section_ids_data(
+    raw_data: Any, json_file_path: Path, json_str: Optional[str] = None
+) -> Dict[str, str]:
+    """
+    Normalize section_ids.json data into a dictionary.
+    
+    Handles legacy/list formats and wrapped {"data": ...} formats,
+    and validates that the final result is a dict with string values.
+    
+    Args:
+        raw_data: Raw JSON data (can be list, dict, or wrapped dict)
+        json_file_path: Path to the JSON file (for error messages)
+        json_str: Optional JSON string (for error messages with content preview)
+        
+    Returns:
+        Normalized dictionary mapping index strings to section ID strings
+        
+    Raises:
+        ValueError: If data cannot be normalized to a dict or contains non-string values
+    """
+    section_ids_data = raw_data
+    
+    # Handle list format (convert to dict)
+    if isinstance(section_ids_data, list):
+        if len(section_ids_data) > 0:
+            if isinstance(section_ids_data[0], str):
+                # Simple list of strings - map index to section ID
+                section_ids_data = {
+                    str(i): section_id for i, section_id in enumerate(section_ids_data)
+                }
+            elif isinstance(section_ids_data[0], dict):
+                # List of objects - extract section_id field
+                section_ids_data = {
+                    str(i): item.get("section_id", item.get("id", str(i)))
+                    for i, item in enumerate(section_ids_data)
+                }
+            else:
+                error_msg = (
+                    "section_ids.json is a list but cannot be converted to dict. "
+                    "Expected list of strings or list of objects with 'section_id' field."
+                )
+                if json_str:
+                    error_msg += f" Content preview: {json_str[:500]}"
+                else:
+                    error_msg += f" Please delete cache file: {json_file_path}"
+                raise ValueError(error_msg)
+        else:
+            # Empty list - create empty dict
+            section_ids_data = {}
+    elif isinstance(section_ids_data, dict) and "data" in section_ids_data:
+        # Handle wrapped format: {"data": {...}}
+        section_ids_data = section_ids_data["data"]
+    
+    # Validate structure
+    if not isinstance(section_ids_data, dict):
+        error_msg = (
+            f"section_ids.json must be a dictionary, got {type(section_ids_data).__name__}."
+        )
+        if json_str:
+            error_msg += f" Content preview: {json_str[:500]}"
+        else:
+            error_msg += f" Please delete cache file: {json_file_path}"
+        raise ValueError(error_msg)
+    
+    # Validate all values are strings (section IDs)
+    for k, v in section_ids_data.items():
+        if not isinstance(v, str):
+            raise ValueError(f"Section ID at index {k} must be a string, got {type(v)}")
+    
+    return section_ids_data
+
 def load_section_ids_from_s3(
     bucket: str,
     key: str,
@@ -347,47 +418,10 @@ def load_section_ids_from_s3(
             json_str = json_bytes.decode("utf-8")
             section_ids_data = json.loads(json_str)
             
-            # Handle case where JSON might be wrapped in a list or have a "data" key
-            if isinstance(section_ids_data, list):
-                # Convert list to dict - handle both formats:
-                # 1. List of strings: ["section-1", "section-2", ...] -> {"0": "section-1", "1": "section-2", ...}
-                # 2. List of objects: [{"section_id": "section-1"}, ...] -> {"0": "section-1", ...}
-                if len(section_ids_data) > 0:
-                    if isinstance(section_ids_data[0], str):
-                        # Simple list of strings - map index to section ID
-                        section_ids_data = {
-                            str(i): section_id for i, section_id in enumerate(section_ids_data)
-                        }
-                    elif isinstance(section_ids_data[0], dict):
-                        # List of objects - extract section_id field
-                        section_ids_data = {
-                            str(i): item.get("section_id", item.get("id", str(i)))
-                            for i, item in enumerate(section_ids_data)
-                        }
-                    else:
-                        raise ValueError(
-                            f"section_ids.json is a list but cannot be converted to dict. "
-                            f"Expected list of strings or list of objects with 'section_id' field. "
-                            f"Content preview: {json_str[:500]}"
-                        )
-                else:
-                    # Empty list - create empty dict
-                    section_ids_data = {}
-            elif isinstance(section_ids_data, dict) and "data" in section_ids_data:
-                # Handle wrapped format: {"data": {...}}
-                section_ids_data = section_ids_data["data"]
-            
-            # Validate structure
-            if not isinstance(section_ids_data, dict):
-                raise ValueError(
-                    f"section_ids.json must be a dictionary, got {type(section_ids_data).__name__}. "
-                    f"Content preview: {json_str[:500]}"
-                )
-            
-            # Validate all values are strings (section IDs)
-            for k, v in section_ids_data.items():
-                if not isinstance(v, str):
-                    raise ValueError(f"Section ID at index {k} must be a string, got {type(v)}")
+            # Normalize the data structure
+            section_ids_data = _normalize_section_ids_data(
+                section_ids_data, json_file_path, json_str
+            )
             
             # Save to cache
             with open(json_file_path, 'w', encoding='utf-8') as f:
@@ -403,7 +437,7 @@ def load_section_ids_from_s3(
             with open(metadata_file_path, 'w') as f:
                 json.dump(metadata, f, indent=2)
             
-            logger.info(f"Cached section_ids.json to {json_file_path}")
+            logger.info("Cached section_ids.json to %s", json_file_path)
             return section_ids_data
         except json.JSONDecodeError as e:
             raise ValueError(f"Invalid JSON in section_ids.json: {e}")
@@ -411,40 +445,15 @@ def load_section_ids_from_s3(
             if json_file_path.exists():
                 logger.warning(f"S3 download failed, using stale cache: {e}")
                 with open(json_file_path, 'r', encoding='utf-8') as f:
-                    return json.load(f)
+                    cached_data = json.load(f)
+                    return _normalize_section_ids_data(cached_data, json_file_path)
             raise
     
     # Should not reach here, but return cached file if exists
     if json_file_path.exists():
         with open(json_file_path, 'r', encoding='utf-8') as f:
             cached_data = json.load(f)
-            # Handle list format (convert to dict)
-            if isinstance(cached_data, list):
-                if len(cached_data) > 0:
-                    if isinstance(cached_data[0], str):
-                        cached_data = {
-                            str(i): section_id for i, section_id in enumerate(cached_data)
-                        }
-                    elif isinstance(cached_data[0], dict):
-                        cached_data = {
-                            str(i): item.get("section_id", item.get("id", str(i)))
-                            for i, item in enumerate(cached_data)
-                        }
-                    else:
-                        raise ValueError(
-                            f"Cached section_ids.json is list but cannot convert. "
-                            f"Please delete cache file: {json_file_path}"
-                        )
-                else:
-                    cached_data = {}
-            elif isinstance(cached_data, dict) and "data" in cached_data:
-                cached_data = cached_data["data"]
-            if not isinstance(cached_data, dict):
-                raise ValueError(
-                    f"Cached section_ids.json is not a dict (got {type(cached_data).__name__}). "
-                    f"Please delete cache file: {json_file_path}"
-                )
-            return cached_data
+            return _normalize_section_ids_data(cached_data, json_file_path)
     
     raise FileNotFoundError("Could not load section_ids.json from S3 or cache")
 

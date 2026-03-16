@@ -17,6 +17,12 @@
 import os
 from typing import Optional
 
+try:
+    from botocore.exceptions import ProfileNotFound
+except ImportError:
+    # botocore not available, define a dummy exception class
+    ProfileNotFound = Exception
+
 
 def create_s3_client(
     aws_access_key_id: Optional[str] = None,
@@ -80,8 +86,8 @@ def create_s3_client(
             # Try to create session with profile
             session = boto3.Session(profile_name=profile_name)
             return session.client("s3")
-        except Exception:
-            # Profile doesn't exist or is invalid, fall back to default
+        except ProfileNotFound:
+            # Profile doesn't exist, fall back to default
             pass
     
     return boto3.client("s3")

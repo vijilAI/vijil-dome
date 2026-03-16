@@ -51,6 +51,7 @@ import asyncio
 import os
 import sys
 import tempfile
+import traceback
 from pathlib import Path
 
 # Load .env file if it exists
@@ -167,7 +168,8 @@ Classify whether an AI agent response violates customer support guidelines.
             os.unlink(policy_path)
 
     except Exception as e:
-        print(f"Error in example: {e}", exc_info=True)
+        print(f"Error in example: {e}")
+        traceback.print_exc()
 
 
 async def example_chunked_parallel_mode():
@@ -254,7 +256,8 @@ Mode: All sections evaluated in parallel batches with fast fail
                                 print(f"  → Triggered by section: {violating_section.get('section_id')}")
 
     except Exception as e:
-        print(f"Error in example: {e}", exc_info=True)
+        print(f"Error in example: {e}")
+        traceback.print_exc()
 
 
 async def example_rag_mode():
@@ -349,7 +352,8 @@ Mode: Retrieves only relevant sections using FAISS, then evaluates
                                 print(f"  → Total sections: {rag_info.get('total_sections')}")
 
     except Exception as e:
-        print(f"Error in example: {e}", exc_info=True)
+        print(f"Error in example: {e}")
+        traceback.print_exc()
 
 
 async def example_rate_limiting():
@@ -413,7 +417,8 @@ Demonstrates how to limit concurrent LLM calls to avoid rate limits
         print(f"Test completed - Result: {'FLAGGED' if result.flagged else 'ALLOWED'}")
 
     except Exception as e:
-        print(f"Error in example: {e}", exc_info=True)
+        print(f"Error in example: {e}")
+        traceback.print_exc()
 
 
 async def example_s3_auth():
@@ -475,7 +480,8 @@ Demonstrates explicit S3 credential configuration
         print(f"Test completed - Result: {'FLAGGED' if result.flagged else 'ALLOWED'}")
 
     except Exception as e:
-        print(f"Error in example: {e}", exc_info=True)
+        print(f"Error in example: {e}")
+        traceback.print_exc()
 
 
 async def example_local_file():
@@ -542,7 +548,8 @@ Demonstrates using local policy sections file for testing
             print(f"  Response: {result.response_string[:100]}...")
 
     except Exception as e:
-        print(f"Error in example: {e}", exc_info=True)
+        print(f"Error in example: {e}")
+        traceback.print_exc()
 
 
 async def main():
