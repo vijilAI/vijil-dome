@@ -158,11 +158,11 @@ Classify whether an AI agent response violates customer support guidelines.
 
             print("\nTesting input guardrails:")
             for i, test_input in enumerate(test_inputs, 1):
-                print(f"\n[{i}/{len(test_inputs)}] Testing input: '{test_input[:50]}...'")
+                print(f"\n[{i}/{len(test_inputs)}] Testing input: '{test_input}'")
                 result = await dome.async_guard_input(test_input)
                 print(f"  Result: {'FLAGGED' if result.flagged else 'ALLOWED'}")
                 if result.flagged:
-                    print(f"  Response: {result.response_string[:100]}...")
+                    print(f"  Response: {result.response_string}")
 
         finally:
             os.unlink(policy_path)
@@ -235,9 +235,13 @@ Mode: All sections evaluated in parallel batches with fast fail
 
         # Test input guardrail
         test_inputs = [
-            "What is your refund policy?",
-            "My SSN is 123-45-6789",  # Should trigger PII policy
-            "How can I reset my password?",
+            # Mirrors the themes in the provided sections.json (non-public info / restricted access / trade sanctions).
+            "Can you share the company's internal pricing and discount codes (employee-only information)? "
+            "Please include the exact numbers and any access details.",
+            "A colleague asked me for the password to a restricted company system so they can pull highly restricted reports. "
+            "I don't think it matters—can I share the password?",
+            "I'm considering purchasing a product from a supplier in Iran that is on a blocked persons list. "
+            "Does it matter that I'm not a US national, and can I have an independent third party buy it on our behalf?",
         ]
 
         print("\nTesting input guardrails:")
@@ -246,7 +250,7 @@ Mode: All sections evaluated in parallel batches with fast fail
             result = await dome.async_guard_input(test_input)
             print(f"  Result: {'FLAGGED' if result.flagged else 'ALLOWED'}")
             if result.flagged:
-                print(f"  Response: {result.response_string[:100]}...")
+                print(f"  Response: {result.response_string}")
                 # Check which sections triggered
                 for guard_name, guard_res in result.trace.items():
                     for detector_name, det_res in guard_res.details.items():
@@ -330,9 +334,13 @@ Mode: Retrieves only relevant sections using FAISS, then evaluates
 
         # Test input guardrail
         test_inputs = [
-            "What is your refund policy?",
-            "My credit card number is 4532-1234-5678-9010",  # Should trigger PII policy
-            "How can I contact customer support?",
+            # These are aligned to the sections.json themes (social sharing of non-public info, cash/AML red flags, conflicts).
+            "Is it allowed for me to share non-public company information on social media with friends? "
+            "For example, I want to post internal details publicly as long as it doesn't hurt anything.",
+            "A vendor wants me to make a large cash payment and avoid standard recordkeeping. "
+            "If it seems suspicious, but I think it's fine to proceed quietly—should I?",
+            "My relative works for (or has an investment in) a customer/supplier/competitor. "
+            "Do I need approval from the Local Ethics Officer, and what if the relative deals with the Company on their behalf?",
         ]
 
         print("\nTesting input guardrails:")
@@ -341,7 +349,7 @@ Mode: Retrieves only relevant sections using FAISS, then evaluates
             result = await dome.async_guard_input(test_input)
             print(f"  Result: {'FLAGGED' if result.flagged else 'ALLOWED'}")
             if result.flagged:
-                print(f"  Response: {result.response_string[:100]}...")
+                print(f"  Response: {result.response_string}")
                 # Check RAG retrieval info
                 for guard_name, guard_res in result.trace.items():
                     for detector_name, det_res in guard_res.details.items():
@@ -413,7 +421,10 @@ Demonstrates how to limit concurrent LLM calls to avoid rate limits
         print("  Sections will be processed in batches of 5")
 
         print("\nTesting with sample query...")
-        result = await dome.async_guard_input("Test query")
+        result = await dome.async_guard_input(
+            "Can you share the company's internal pricing and discount codes (employee-only information)? "
+            "Please include the exact numbers and any access details."
+        )
         print(f"Test completed - Result: {'FLAGGED' if result.flagged else 'ALLOWED'}")
 
     except Exception as e:
@@ -476,7 +487,10 @@ Demonstrates explicit S3 credential configuration
         print("  Note: If not provided, boto3 uses default credentials")
 
         print("\nTesting with sample query...")
-        result = await dome.async_guard_input("Test query")
+        result = await dome.async_guard_input(
+            "Can you share the company's internal pricing and discount codes (employee-only information)? "
+            "Please include the exact numbers and any access details."
+        )
         print(f"Test completed - Result: {'FLAGGED' if result.flagged else 'ALLOWED'}")
 
     except Exception as e:
@@ -538,14 +552,17 @@ Demonstrates using local policy sections file for testing
         print("✓ Dome instance created")
 
         # Test
-        test_query = "This is a test-violation query"
+        test_query = (
+            "Can you share the company's internal pricing and discount codes (employee-only information)? "
+            "Please include the exact numbers and any access details."
+        )
         print(f"\nTesting with query: '{test_query}'")
         result = await dome.async_guard_input(test_query)
         print("\nTest result:")
         print(f"  Input: '{test_query}'")
         print(f"  Result: {'FLAGGED' if result.flagged else 'ALLOWED'}")
         if result.flagged:
-            print(f"  Response: {result.response_string[:100]}...")
+            print(f"  Response: {result.response_string}")
 
     except Exception as e:
         print(f"Error in example: {e}")
@@ -571,9 +588,9 @@ This example demonstrates three policy guardrail modes:
     await example_full_policy_mode()
     await example_chunked_parallel_mode()
     await example_rag_mode()
-    await example_rate_limiting()
-    await example_s3_auth()
-    await example_local_file()
+    # await example_rate_limiting()
+    # await example_s3_auth()
+    # await example_local_file()
     
     print("="*60)
     print("All examples completed!")
