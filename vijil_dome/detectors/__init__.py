@@ -54,6 +54,7 @@ FACTCHECK_LLM = "fact-check-llm"
 
 GENERIC_LLM = "generic-llm"
 POLICY_GPT_OSS_SAFEGUARD = "policy-gpt-oss-safeguard"
+POLICY_SECTIONS = "policy-sections"
 
 # Define types for detection results and data
 DetectorType = Dict["type", str]
@@ -69,6 +70,7 @@ class DetectionCategory(Enum):
     Moderation = auto()
     Integrity = auto()
     Generic = auto()
+    Policy = auto()
 
 
 class DetectionTimingResult(BaseModel):

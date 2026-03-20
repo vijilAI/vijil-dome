@@ -1,0 +1,83 @@
+{
+  "_comment": "Sample policy sections JSON file for PolicySectionsDetector",
+  "_rationale": "Policies should be split into 400-600 token sections for optimal performance. Each section is evaluated independently by PolicyGptOssSafeguard, allowing parallel execution with fast fail.",
+  "_usage": "This file demonstrates the expected structure for policy sections loaded from S3 or provided directly to PolicySectionsDetector. Built from spam_policy.md.",
+  
+  "version": "1.0",
+  "last_updated": "2026-02-12T19:15:58.744641+00:00",
+  "etag": "b68fd4106c8524842f26e2bcc5ac778672a9b6930c67c72a1f7c8290667bfc0c",
+  "policy_id": "7750530f-2a9b-48a0-9ce7-05d00acb6bc9",
+  "policy_name": "Spam Detection Policy",
+  "source_file": "spam_policy.md",
+  
+  "sections": [
+    {
+      "section_id": "section-1",
+      "content": "# Spam Detection Policy\n\n## INSTRUCTIONS\nClassify content as spam or legitimate communication.\nReturn ONLY a single digit with no explanation:\n- 0 = Not spam (legitimate content)\n- 1 = Spam detected\n\n## DEFINITIONS\n- **Spam**: Unsolicited, repetitive, deceptive, or low-value promotional content\n- **Bulk Messaging**: Same or similar messages sent repeatedly\n- **Unsolicited Promotion**: Promotion without user request or established relationship\n- **Deceptive Spam**: Hidden or fraudulent intent (fake identity, fake offers)\n- **Link Farming**: Multiple irrelevant or commercial links to drive clicks",
+      "applies_to": [
+        "input",
+        "output"
+      ],
+      "metadata": {
+        "header": "Spam Detection Policy - Instructions and Definitions",
+        "level": 1,
+        "order": 1,
+        "token_count": 145,
+        "start_char": 0,
+        "end_char": 450,
+        "last_modified": "2024-01-01T00:00:00+00:00"
+      }
+    },
+    {
+      "section_id": "section-2",
+      "content": "## VIOLATES (1)\nContent that exhibits:\n- Cold promotional messages without context or relationship\n- Repetitive all-caps text or excessive punctuation\n- Multiple unrelated commercial links (link farming)\n- Fake urgency tactics (\"ACT NOW\", \"LIMITED TIME\", \"LAST CHANCE\")\n- Pyramid schemes or multi-level marketing recruitment\n- Misleading claims or unrealistic guarantees\n- Phishing attempts or suspicious links\n- Automated/bot-like repetitive messaging",
+      "applies_to": [
+        "input",
+        "output"
+      ],
+      "metadata": {
+        "header": "Spam Detection Policy - Violations",
+        "level": 2,
+        "order": 2,
+        "token_count": 95,
+        "start_char": 450,
+        "end_char": 750,
+        "last_modified": "2024-01-01T00:00:00+00:00"
+      }
+    },
+    {
+      "section_id": "section-3",
+      "content": "## SAFE (0)\nContent that is:\n- Normal questions or information requests\n- Personalized communication with context\n- Business support queries from legitimate users\n- Educational or informational content\n- Single contextual promotional message in appropriate context\n- Professional networking or outreach",
+      "applies_to": [
+        "input",
+        "output"
+      ],
+      "metadata": {
+        "header": "Spam Detection Policy - Safe Content",
+        "level": 2,
+        "order": 3,
+        "token_count": 65,
+        "start_char": 750,
+        "end_char": 950,
+        "last_modified": "2024-01-01T00:00:00+00:00"
+      }
+    },
+    {
+      "section_id": "section-4",
+      "content": "## EXAMPLES\nContent: \"How do I upload a product photo?\"\nAnswer: 0\n\nContent: \"Hi Sam, here is the report you requested\"\nAnswer: 0\n\nContent: \"Can you help me fix my order?\"\nAnswer: 0\n\nContent: \"BUY NOW!!! CLICK HERE FOR FREE MONEY $$$\"\nAnswer: 1\n\nContent: \"JOIN NOW JOIN NOW JOIN NOW\"\nAnswer: 1\n\nContent: \"Check out my Shopify course: shopcoach.biz\"\nAnswer: 1\n\nContent: [INPUT]\nAnswer:",
+      "applies_to": [
+        "input",
+        "output"
+      ],
+      "metadata": {
+        "header": "Spam Detection Policy - Examples",
+        "level": 2,
+        "order": 4,
+        "token_count": 120,
+        "start_char": 950,
+        "end_char": 1250,
+        "last_modified": "2024-01-01T00:00:00+00:00"
+      }
+    }
+  ]
+}
