@@ -14,6 +14,8 @@
 #
 # vijil and vijil-dome are trademarks owned by Vijil Inc.
 
+import hashlib
+import re
 import time
 from inspect import iscoroutinefunction
 from opentelemetry.metrics import Meter, Counter, Histogram
@@ -21,6 +23,36 @@ from functools import wraps
 from typing import Union, Callable, Coroutine, Optional
 from vijil_dome.guardrails import GuardResult, GuardrailResult
 from vijil_dome.detectors import DetectionTimingResult
+
+# OpenTelemetry / Prometheus instrument names must be ASCII and length <= 63.
+_OTEL_INSTRUMENT_NAME_MAX_LEN = 63
+
+
+def _instrument_name_for_otel(prefix_key: str, metric_suffix: str) -> str:
+    """Build a valid OpenTelemetry instrument name from a logical prefix (may contain spaces).
+
+    ``metric_suffix`` includes a leading hyphen, e.g. ``-requests_total``.
+    Guard display names like ``Privacy Input Guard`` are normalized; if the
+    combined string still exceeds the OTEL limit, the base is truncated and a
+    short hash of ``prefix_key`` is appended for uniqueness.
+    """
+    if not metric_suffix.startswith("-"):
+        metric_suffix = f"-{metric_suffix}"
+    normalized = re.sub(r"[^a-zA-Z0-9._]", "_", prefix_key)
+    normalized = re.sub(r"_+", "_", normalized).strip("_.")
+    if not normalized:
+        normalized = "vijil_dome_guard"
+    candidate = f"{normalized}{metric_suffix}"
+    if len(candidate) <= _OTEL_INSTRUMENT_NAME_MAX_LEN:
+        return candidate
+    digest = hashlib.sha1(prefix_key.encode("utf-8")).hexdigest()[:8]
+    budget = _OTEL_INSTRUMENT_NAME_MAX_LEN - len(metric_suffix) - 1 - len(digest)
+    if budget < 4:
+        short = f"g_{digest}"
+    else:
+        short = f"{normalized[:budget].rstrip('._')}_{digest}"
+    final = f"{short}{metric_suffix}"
+    return final[:_OTEL_INSTRUMENT_NAME_MAX_LEN]
 
 
 def _build_attributes(kwargs: dict) -> dict:
@@ -49,7 +81,7 @@ def _return_wrapper(
 
 def _create_request_counter(name: str, meter: Meter):
     request_counter = meter.create_counter(
-        f"{name}-requests_total",
+        _instrument_name_for_otel(name, "-requests_total"),
         description=f"Number of requests to {name}",
     )
     return request_counter
@@ -79,7 +111,7 @@ def _create_latency_histogram(name: str, meter: Meter):
     bucket_advisory = [0.05 * i for i in range(21)]
     bucket_advisory = bucket_advisory + [1.25, 1.5, 1.75, 2, 2.5, 3, 4, 5, 6, 10]
     request_latency = meter.create_histogram(
-        f"{name}-latency_seconds",
+        _instrument_name_for_otel(name, "-latency_seconds"),
         description=f"{name} latency",
         unit="seconds",
         explicit_bucket_boundaries_advisory=bucket_advisory,
@@ -115,7 +147,7 @@ def _add_request_latency_histogram(request_latency: Histogram):
 
 def _create_request_flagged_counter(name: str, meter: Meter):
     request_flagged_counter = meter.create_counter(
-        f"{name}-flagged_total",
+        _instrument_name_for_otel(name, "-flagged_total"),
         description=f"Number of requests to {name} that are flagged",
     )
     return request_flagged_counter
@@ -161,7 +193,7 @@ def _add_request_flagged_counter(request_flagged_counter: Counter):
 
 def _create_request_error_counter(name: str, meter: Meter):
     request_error_counter = meter.create_counter(
-        f"{name}-error_total",
+        _instrument_name_for_otel(name, "-error_total"),
         description=f"Number of requests to {name} that errored",
     )
     return request_error_counter
