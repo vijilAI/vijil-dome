@@ -42,7 +42,6 @@ from vijil_dome.detectors import (
     BatchDetectionResult,
 )
 from vijil_dome.detectors.utils.hf_model import HFBaseModel
-from vijil_dome.detectors.utils.sliding_window import chunk_text
 
 logger = logging.getLogger("vijil.dome")
 
@@ -173,7 +172,7 @@ class BiasEEOCAccurate(BiasEEOCBase):
         logger.info("Initialized EEOC bias detector (Safeguard/accurate mode)")
 
     async def detect(self, query_string: str) -> DetectionResult:
-        logger.info(f"Detecting bias using Safeguard (accurate mode)...")
+        logger.info("Detecting bias using Safeguard (accurate mode)...")
         try:
             async with httpx.AsyncClient(timeout=10.0) as client:
                 resp = await client.post(
@@ -244,7 +243,7 @@ class BiasEEOCHybrid(BiasEEOCBase):
         )
 
     async def detect(self, query_string: str) -> DetectionResult:
-        logger.info(f"Detecting bias using hybrid mode...")
+        logger.info("Detecting bias using hybrid mode...")
 
         # Stage 1: Fast ModernBERT classification
         import asyncio
