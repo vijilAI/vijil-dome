@@ -205,7 +205,7 @@ methods = ["bias-eeoc-hybrid"]  # or bias-eeoc-fast, bias-eeoc-accurate
 
 **Intersectional bias.** The model classifies bias against individual protected classes. Intersectional discrimination (e.g., race × gender) is not explicitly modeled, though the training data includes BBQ's `race_x_gender` and `race_x_ses` probes.
 
-**Output-side detection.** The current deployment scans input prompts. Scanning agent responses requires concatenating `prompt [SEP] response` — supported by the model but not yet wired in the Dome output guard pipeline.
+**Output-side detection.** The detector works on both input and output guards — add `"bias-detection"` to `output-guards` in the TOML config to scan agent responses. The model was trained on `prompt [SEP] response` pairs and handles both directions.
 
 **Path to F1 > 0.95.** The binary architecture at 149M params appears capacity-limited at 0.923. Options: (a) scale training data uniformly to 40K+, (b) ensemble of per-class binary detectors (BAGEL architecture), (c) focal loss for hard examples without distribution shift.
 
