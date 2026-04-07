@@ -13,6 +13,7 @@ from vijil_dome.detectors import (
     DetectionCategory,
     DetectionResult,
 )
+from vijil_dome.types import DomePayload
 
 
 def is_probably_base64(s):
@@ -377,11 +378,13 @@ class EncodingHeuristicsDetector(DetectionMethod):
                 flagged = True
         return flagged, results
 
-    async def detect(self, query_string: str) -> DetectionResult:
+    async def detect(self, dome_input: DomePayload) -> DetectionResult:
         """
         Detect the presence of encoded messages in the query string.
         Note: This method does not decode any messages, it only detects the presence of encoding patterns.
         """
+        dome_input = DomePayload.coerce(dome_input)
+        query_string = dome_input.query_string
 
         total_chars = max(len(query_string), 1)  # Prevent division by zero
 

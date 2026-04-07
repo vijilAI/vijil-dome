@@ -22,6 +22,7 @@ import logging
 
 from typing import Callable, Optional
 from vijil_dome import Dome
+from vijil_dome.types import DomePayload
 
 logger = logging.getLogger(__name__)
 
@@ -110,7 +111,7 @@ def generate_adk_output_callback(
 
         # Pass the message through dome
         if last_model_message_text:
-            scan = dome.guard_output(last_model_message_text)
+            scan = dome.guard_output(DomePayload(response=last_model_message_text))
             if scan.flagged and not scan.enforced:
                 logger.info("Dome shadow: output flagged but not enforced (score=%.2f)", scan.detection_score)
             elif scan.enforced:

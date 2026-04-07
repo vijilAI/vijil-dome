@@ -38,6 +38,7 @@ from vijil_dome.detectors.utils.prompt_templates.modifiable_prompts import (
 )
 from typing import Optional
 from string import Template
+from vijil_dome.types import DomePayload
 
 
 # A generic LLM detector - specify your sys prompt and trigger word
@@ -62,7 +63,9 @@ class GenericLLMDetector(LlmBaseDetector):
         self.sys_prompt_template = Template(sys_prompt_template)
         self.trigger_word_list = trigger_word_list
 
-    async def detect(self, query_string: str) -> DetectionResult:
+    async def detect(self, dome_input: DomePayload) -> DetectionResult:
+        dome_input = DomePayload.coerce(dome_input)
+        query_string = dome_input.query_string
         query_string = self._truncate_if_needed(query_string)
         llm_prompt = self.sys_prompt_template.substitute(query_string=query_string)
         llm_response = await litellm_acompletion(
@@ -108,7 +111,9 @@ class LlmModerations(LlmBaseDetector):
             max_input_chars=max_input_chars,
         )
 
-    async def detect(self, query_string: str) -> DetectionResult:
+    async def detect(self, dome_input: DomePayload) -> DetectionResult:
+        dome_input = DomePayload.coerce(dome_input)
+        query_string = dome_input.query_string
         query_string = self._truncate_if_needed(query_string)
         content = format_custom_llm_classifier_prompt(
             "user",
@@ -158,7 +163,9 @@ class LlmSecurity(LlmBaseDetector):
             max_input_chars=max_input_chars,
         )
 
-    async def detect(self, query_string: str) -> DetectionResult:
+    async def detect(self, dome_input: DomePayload) -> DetectionResult:
+        dome_input = DomePayload.coerce(dome_input)
+        query_string = dome_input.query_string
         query_string = self._truncate_if_needed(query_string)
         content = format_custom_llm_classifier_prompt(
             "user",
@@ -207,7 +214,9 @@ class LlmHallucination(LlmBaseDetectorWithContext):
             context=context,
         )
 
-    async def detect(self, query_string: str) -> DetectionResult:
+    async def detect(self, dome_input: DomePayload) -> DetectionResult:
+        dome_input = DomePayload.coerce(dome_input)
+        query_string = dome_input.query_string
         query_string = self._truncate_if_needed(query_string)
         if self.context is None:
             raise ValueError(
@@ -254,7 +263,9 @@ class LlmFactcheck(LlmBaseDetectorWithContext):
             context=context,
         )
 
-    async def detect(self, query_string: str) -> DetectionResult:
+    async def detect(self, dome_input: DomePayload) -> DetectionResult:
+        dome_input = DomePayload.coerce(dome_input)
+        query_string = dome_input.query_string
         query_string = self._truncate_if_needed(query_string)
         if self.context is None:
             raise ValueError("No context provided for LLM-Based fact-check")

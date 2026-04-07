@@ -21,6 +21,7 @@ from vijil_dome.detectors import (
     DetectionCategory,
     register_method,
 )
+from vijil_dome.types import DomePayload
 from presidio_analyzer import AnalyzerEngine
 from presidio_anonymizer import AnonymizerEngine
 from presidio_anonymizer.entities import OperatorConfig, RecognizerResult
@@ -110,7 +111,9 @@ class PresidioDetector(DetectionMethod):
             logger.error(f"Error loading Presidio PII detector: {str(e)}")
             raise
 
-    async def detect(self, query_string: str) -> DetectionResult:
+    async def detect(self, dome_input: DomePayload) -> DetectionResult:
+        dome_input = DomePayload.coerce(dome_input)
+        query_string = dome_input.query_string
         # For now, we only support en, but this could be extended later
         analysis_result = self.analyzer.analyze(
             text=query_string, language="en", allow_list=self.allow_list

@@ -32,6 +32,7 @@ from collections.abc import Sequence
 from typing import Any, Optional
 
 from vijil_dome import Dome
+from vijil_dome.types import DomePayload
 
 try:
     from strands.hooks import (
@@ -150,8 +151,15 @@ class DomeHookProvider(HookProvider):
         if not text:
             return
 
+        # Build structured payload with prompt context when available
+        user_text, _ = _extract_last_user_text(event.agent.messages)
+        if user_text:
+            payload = DomePayload(prompt=user_text, response=text)
+        else:
+            payload = DomePayload(response=text)
+
         scan = await self.dome.async_guard_output(
-            text,
+            payload,
             agent_id=self.agent_id,
             team_id=self.team_id,
             user_id=self.user_id,

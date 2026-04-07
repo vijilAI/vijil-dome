@@ -23,6 +23,7 @@ from vijil_dome.integrations.vijil.evaluate import (
     get_config_from_vijil_agent,
     get_config_from_vijil_evaluation,
 )
+from vijil_dome.types import DomePayload
 from openai import OpenAI
 from typing import Union, Dict, List, Optional, Callable, Iterator
 from .defaults import get_default_config
@@ -230,23 +231,25 @@ class Dome:
         return [self.input_guardrail, self.output_guardrail]
 
     @staticmethod
-    def _empty_guardrail_result(query_string: str):
+    def _empty_guardrail_result(query_string: Union[str, DomePayload]):
+        qs = DomePayload.coerce(query_string).query_string
         return ScanResult(
-            flagged=False, response_string=query_string, trace={}, exec_time=0.0
+            flagged=False, response_string=qs, trace={}, exec_time=0.0
         )
 
     def guard_input(
         self,
-        query_string: str,
+        query_string: Union[str, DomePayload],
         *,
         agent_id: Optional[str] = None,
         team_id: Optional[str] = None,
         user_id: Optional[str] = None,
     ):
+        dome_input = DomePayload.coerce(query_string)
         if self.input_guardrail is None:
-            return self._empty_guardrail_result(query_string)
+            return self._empty_guardrail_result(dome_input)
         result = self.input_guardrail.scan(
-            query_string, agent_id=agent_id, team_id=team_id, user_id=user_id
+            dome_input, agent_id=agent_id, team_id=team_id, user_id=user_id
         )
         return ScanResult(
             flagged=result.flagged,
@@ -260,16 +263,17 @@ class Dome:
 
     async def async_guard_input(
         self,
-        query_string: str,
+        query_string: Union[str, DomePayload],
         *,
         agent_id: Optional[str] = None,
         team_id: Optional[str] = None,
         user_id: Optional[str] = None,
     ):
+        dome_input = DomePayload.coerce(query_string)
         if self.input_guardrail is None:
-            return self._empty_guardrail_result(query_string)
+            return self._empty_guardrail_result(dome_input)
         result = await self.input_guardrail.async_scan(
-            query_string, agent_id=agent_id, team_id=team_id, user_id=user_id
+            dome_input, agent_id=agent_id, team_id=team_id, user_id=user_id
         )
         return ScanResult(
             flagged=result.flagged,
@@ -283,16 +287,17 @@ class Dome:
 
     def guard_output(
         self,
-        query_string: str,
+        query_string: Union[str, DomePayload],
         *,
         agent_id: Optional[str] = None,
         team_id: Optional[str] = None,
         user_id: Optional[str] = None,
     ):
+        dome_input = DomePayload.coerce(query_string)
         if self.output_guardrail is None:
-            return self._empty_guardrail_result(query_string)
+            return self._empty_guardrail_result(dome_input)
         result = self.output_guardrail.scan(
-            query_string, agent_id=agent_id, team_id=team_id, user_id=user_id
+            dome_input, agent_id=agent_id, team_id=team_id, user_id=user_id
         )
         return ScanResult(
             flagged=result.flagged,
@@ -306,16 +311,17 @@ class Dome:
 
     async def async_guard_output(
         self,
-        query_string: str,
+        query_string: Union[str, DomePayload],
         *,
         agent_id: Optional[str] = None,
         team_id: Optional[str] = None,
         user_id: Optional[str] = None,
     ):
+        dome_input = DomePayload.coerce(query_string)
         if self.output_guardrail is None:
-            return self._empty_guardrail_result(query_string)
+            return self._empty_guardrail_result(dome_input)
         result = await self.output_guardrail.async_scan(
-            query_string, agent_id=agent_id, team_id=team_id, user_id=user_id
+            dome_input, agent_id=agent_id, team_id=team_id, user_id=user_id
         )
         return ScanResult(
             flagged=result.flagged,
@@ -328,11 +334,14 @@ class Dome:
         )
 
     @staticmethod
-    def _empty_batch_result(inputs: List[str]) -> "BatchScanResult":
+    def _empty_batch_result(inputs: List[Union[str, DomePayload]]) -> "BatchScanResult":
         return BatchScanResult(
             items=[
                 ScanResult(
-                    flagged=False, response_string=s, trace={}, exec_time=0.0
+                    flagged=False,
+                    response_string=DomePayload.coerce(s).query_string,
+                    trace={},
+                    exec_time=0.0,
                 )
                 for s in inputs
             ],
@@ -357,7 +366,7 @@ class Dome:
 
     def guard_input_batch(
         self,
-        inputs: List[str],
+        inputs: List[Union[str, DomePayload]],
         *,
         agent_id: Optional[str] = None,
         team_id: Optional[str] = None,
@@ -372,7 +381,7 @@ class Dome:
 
     async def async_guard_input_batch(
         self,
-        inputs: List[str],
+        inputs: List[Union[str, DomePayload]],
         *,
         agent_id: Optional[str] = None,
         team_id: Optional[str] = None,
@@ -387,7 +396,7 @@ class Dome:
 
     def guard_output_batch(
         self,
-        inputs: List[str],
+        inputs: List[Union[str, DomePayload]],
         *,
         agent_id: Optional[str] = None,
         team_id: Optional[str] = None,
@@ -402,7 +411,7 @@ class Dome:
 
     async def async_guard_output_batch(
         self,
-        inputs: List[str],
+        inputs: List[Union[str, DomePayload]],
         *,
         agent_id: Optional[str] = None,
         team_id: Optional[str] = None,

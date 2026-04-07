@@ -25,13 +25,15 @@ from vijil_dome.detectors import (
     DetectionTimingResult,
 )
 from vijil_dome.guardrails import Guard, Guardrail, BatchGuardResult, BatchGuardrailResult
+from vijil_dome.types import DomePayload
 
 
 # ---------------------------------------------------------------------------
 # Helper: a simple mock detector that flags strings containing "UNSAFE"
 # ---------------------------------------------------------------------------
 class MockDetector(DetectionMethod):
-    async def detect(self, query_string: str) -> DetectionResult:
+    async def detect(self, dome_input: DomePayload) -> DetectionResult:
+        query_string = dome_input.query_string
         flagged = "UNSAFE" in query_string.upper()
         return flagged, {
             "type": type(self),
