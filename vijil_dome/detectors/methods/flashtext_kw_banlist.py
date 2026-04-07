@@ -26,6 +26,7 @@ from vijil_dome.detectors import (
     DetectionResult,
     DetectionCategory,
 )
+from vijil_dome.types import DomePayload
 
 logger = logging.getLogger("vijil.dome")
 
@@ -51,7 +52,9 @@ class KWBanList(DetectionMethod):
             logger.error(f"Error loading banlists: {str(e)}")
             raise
 
-    async def detect(self, query_string: str) -> DetectionResult:
+    async def detect(self, dome_input: DomePayload) -> DetectionResult:
+        dome_input = DomePayload.coerce(dome_input)
+        query_string = dome_input.query_string
         hits = self.processor.extract_keywords(query_string)
         flagged = bool(hits)
         return flagged, {

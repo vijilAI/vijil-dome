@@ -21,6 +21,7 @@ from vijil_dome.detectors import (
     DetectionMethod,
     DetectionCategory,
 )
+from vijil_dome.types import DomePayload
 import torch
 from transformers import GPT2LMHeadModel, GPT2TokenizerFast
 
@@ -97,7 +98,9 @@ class LengthPerPerplexityModel(PerplexityBaseModel):
         self.threshold = threshold
         self.blocked_response_string = f"Method:{JB_LENGTH_PER_PERPLEXITY}"
 
-    async def detect(self, query_string: str):
+    async def detect(self, dome_input: DomePayload):
+        dome_input = DomePayload.coerce(dome_input)
+        query_string = dome_input.query_string
         # Handle empty inputs
         if not len(query_string):
             return False, {"type": type(self)}
@@ -138,7 +141,9 @@ class PrefixSuffixPerplexityModel(PerplexityBaseModel):
         self.suffix_length = suffix_length
         self.blocked_response_string = f"Method:{JB_PREFIX_SUFFIX_PERPLEXITY}"
 
-    async def detect(self, query_string: str):
+    async def detect(self, dome_input: DomePayload):
+        dome_input = DomePayload.coerce(dome_input)
+        query_string = dome_input.query_string
         # Handle empty inputs
         if not len(query_string):
             return False, {"type": type(self)}

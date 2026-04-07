@@ -26,6 +26,7 @@ from vijil_dome.detectors import (
 from vijil_dome.detectors.utils.llm_api_base import (
     LlmBaseDetector,
 )
+from vijil_dome.types import DomePayload
 
 
 @register_method(DetectionCategory.Moderation, MODERATION_OPENAI)
@@ -41,7 +42,9 @@ class OpenAIModerations(LlmBaseDetector):
         # See: https://platform.openai.com/docs/guides/moderation/overview for a list of categories
         self.score_threshold_dict = score_threshold_dict
 
-    async def detect(self, query_string: str) -> DetectionResult:
+    async def detect(self, dome_input: DomePayload) -> DetectionResult:
+        dome_input = DomePayload.coerce(dome_input)
+        query_string = dome_input.query_string
         oai_response = await litellm_amoderation(input=query_string)
         oai_moderation = oai_response.results
         if not oai_moderation or len(oai_moderation) == 0:

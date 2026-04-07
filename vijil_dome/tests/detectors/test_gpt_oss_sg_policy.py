@@ -266,11 +266,11 @@ async def test_policy_detector_models(model_name: str):
         model_name=model_name,
     )
 
-    result = await detector.detect("How do I upload a file?")
+    result = await detector.detect("How do I upload a file?")  # type: ignore[arg-type]
     assert not result[0]
     assert result[1]["config"]["model"] == model_name
 
-    result = await detector.detect("BUY NOW CLICK HERE!!!")
+    result = await detector.detect("BUY NOW CLICK HERE!!!")  # type: ignore[arg-type]
     assert result[0]
     assert result[1]["config"]["model"] == model_name
 
@@ -333,7 +333,7 @@ async def test_policy_detector_config_matrix(
     assert detector.policy.count("Reasoning:") == 1
 
     flagged, metadata = await detector.detect(
-        "User request: Need campaign advice\n"
+        "User request: Need campaign advice\n"  # type: ignore[arg-type]
         "Agent response: BUY NOW!!! CLICK HERE FOR FREE MONEY $$$"
     )
 

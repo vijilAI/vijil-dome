@@ -17,10 +17,11 @@
 import logging
 import os
 from abc import ABC, abstractmethod
-from typing import List, Optional
+from typing import List, Optional, Union
 from litellm import ModelResponse
 
 from vijil_dome.detectors import DetectionResult, BatchDetectionResult, DetectionMethod
+from vijil_dome.types import DomePayload
 
 logger = logging.getLogger("vijil.dome")
 
@@ -74,12 +75,12 @@ class LlmBaseDetector(DetectionMethod, ABC):
         return text
 
     @abstractmethod
-    async def detect(self, query_string: str) -> DetectionResult:
+    async def detect(self, dome_input: DomePayload) -> DetectionResult:
         pass
 
-    async def detect_batch(self, inputs: List[str]) -> BatchDetectionResult:
+    async def detect_batch(self, inputs: List[Union[str, DomePayload]]) -> BatchDetectionResult:
         return await self._gather_with_concurrency(
-            [self.detect(query) for query in inputs]
+            [self.detect(DomePayload.coerce(item)) for item in inputs]
         )
 
 

@@ -19,6 +19,7 @@ from abc import ABC, abstractmethod
 from typing import Optional
 from transformers import AutoTokenizer, AutoModelForSequenceClassification
 from vijil_dome.detectors import DetectionMethod, DetectionResult
+from vijil_dome.types import DomePayload
 
 logger = logging.getLogger("vijil.dome")
 
@@ -49,12 +50,12 @@ class HFBaseModel(DetectionMethod, ABC):
         )
 
     @abstractmethod
-    async def detect(self, query_string: str) -> DetectionResult:
+    async def detect(self, dome_input: DomePayload) -> DetectionResult:
         """
         Abstract method to be implemented by subclasses to execute the detection logic.
 
         Args:
-            input (str): The input text to be analyzed by the detector.
+            dome_input: The structured input to be analyzed by the detector.
 
         Returns:
             DetectionResult: A tuple containing a boolean indicating whether the input was flagged,

@@ -26,6 +26,7 @@ from vijil_dome.detectors import (
     register_method,
     POLICY_SECTIONS,
 )
+from vijil_dome.types import DomePayload
 from vijil_dome.detectors.methods.gpt_oss_safeguard_policy import PolicyGptOssSafeguard
 from vijil_dome.utils.policy_loader import (
     load_policy_sections_from_s3,
@@ -561,17 +562,19 @@ class PolicySectionsDetector(DetectionMethod):
             )
             self.use_rag = False
     
-    async def detect(self, query_string: str) -> DetectionResult:
+    async def detect(self, dome_input: DomePayload) -> DetectionResult:
         """
         Detect policy violations by running section detectors in parallel batches.
         If RAG is enabled, retrieves only the most relevant sections first.
 
         Args:
-            query_string: Content to classify
+            dome_input: DomePayload containing content to classify
 
         Returns:
             DetectionResult with violation status and aggregated metadata
         """
+        dome_input = DomePayload.coerce(dome_input)
+        query_string = dome_input.query_string
         if len(self.detectors) == 0:
             return False, {"error": "No detectors configured"}
 

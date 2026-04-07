@@ -21,6 +21,7 @@ from vijil_dome.embeds import EmbeddingsItem
 from vijil_dome.embeds.embedder import Embedder
 from vijil_dome.embeds.index.basic import InMemEmbeddingsIndex, AnnoyEmbeddingsIndex
 from vijil_dome.detectors import DetectionMethod, DetectionResult
+from vijil_dome.types import DomePayload
 from vijil_dome.utils.readers import normalize_string, read_lines
 
 
@@ -65,7 +66,9 @@ class BaseEmbeddingsDetector(DetectionMethod):
         # Build the index
         asyncio.run(self.embedding_index.build())
 
-    async def detect(self, query_string: str) -> DetectionResult:
+    async def detect(self, dome_input: DomePayload) -> DetectionResult:
+        dome_input = DomePayload.coerce(dome_input)
+        query_string = dome_input.query_string
         res = await self.embedding_index.nearest_neighbor(
             normalize_string(query_string.lower()), k=1, with_distance=True
         )

@@ -26,11 +26,12 @@ from vijil_dome.detectors import (
     DetectionResult,
     BatchDetectionResult,
 )
-from typing import List, Optional
+from typing import List, Optional, Union
 from transformers import pipeline
 from torch.nn.functional import softmax
 from vijil_dome.detectors.utils.hf_model import HFBaseModel
 from vijil_dome.detectors.utils.sliding_window import chunk_text
+from vijil_dome.types import DomePayload
 
 logger = logging.getLogger("vijil.dome")
 
@@ -98,11 +99,13 @@ class BaseDebertaPromptInjectionModel(HFBaseModel):
 
     def sync_detect(
         self,
-        query_string: str,
+        dome_input: DomePayload,
         agent_id: Optional[str] = None,
         team_id: Optional[str] = None,
         user_id: Optional[str] = None,
     ) -> DetectionResult:
+        dome_input = DomePayload.coerce(dome_input)
+        query_string = dome_input.query_string
         chunks = chunk_text(
             query_string, self.tokenizer, self.max_length, self.window_stride
         )
@@ -134,17 +137,20 @@ class BaseDebertaPromptInjectionModel(HFBaseModel):
             "num_windows": num_windows,
         }
 
-    async def detect(self, query_string: str) -> DetectionResult:
+    async def detect(self, dome_input: DomePayload) -> DetectionResult:
+        dome_input = DomePayload.coerce(dome_input)
         logger.info(f"Detecting using {self.__class__.__name__}...")
-        return self.sync_detect(query_string)
+        return self.sync_detect(dome_input)
 
-    async def detect_batch(self, inputs: List[str]) -> BatchDetectionResult:
+    async def detect_batch(self, inputs: List[Union[str, DomePayload]]) -> BatchDetectionResult:
+        dome_inputs = [DomePayload.coerce(x) for x in inputs]
         # Phase 1: chunk each input, build flat list + per-input ranges
         flat_chunks: List[str] = []
         ranges = []
-        for text in inputs:
+        for di in dome_inputs:
+            query_string = di.query_string
             chunks = chunk_text(
-                text, self.tokenizer, self.max_length, self.window_stride
+                query_string, self.tokenizer, self.max_length, self.window_stride
             )
             start = len(flat_chunks)
             flat_chunks.extend(chunks)
@@ -155,7 +161,8 @@ class BaseDebertaPromptInjectionModel(HFBaseModel):
 
         # Phase 3: re-aggregate per input using any-positive
         results = []
-        for query_string, (start, end) in zip(inputs, ranges):
+        for dome_item, (start, end) in zip(dome_inputs, ranges):
+            query_string = dome_item.query_string
             chunk_preds = all_preds[start:end]
             num_windows = end - start
             flagged = False
@@ -321,11 +328,13 @@ class PromptGuardSecurityModel(HFBaseModel):
 
     def sync_detect(
         self,
-        query_string: str,
+        dome_input: DomePayload,
         agent_id: Optional[str] = None,
         team_id: Optional[str] = None,
         user_id: Optional[str] = None,
     ) -> DetectionResult:
+        dome_input = DomePayload.coerce(dome_input)
+        query_string = dome_input.query_string
         logger.debug("Detecting using Prompt Guard...")
         chunks = chunk_text(
             query_string, self.tokenizer, self.max_length, self.window_stride
@@ -359,5 +368,6 @@ class PromptGuardSecurityModel(HFBaseModel):
             "num_windows": num_windows,
         }
 
-    async def detect(self, query_string: str) -> DetectionResult:
-        return self.sync_detect(query_string)
+    async def detect(self, dome_input: DomePayload) -> DetectionResult:
+        dome_input = DomePayload.coerce(dome_input)
+        return self.sync_detect(dome_input)

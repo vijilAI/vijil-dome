@@ -15,6 +15,7 @@
 # vijil and vijil-dome are trademarks owned by Vijil Inc.
 
 from vijil_dome.detectors import DetectionMethod, DetectionTimingResult
+from vijil_dome.types import DomePayload
 import asyncio
 from asyncio import Task  # noqa: F401
 import concurrent.futures
@@ -113,7 +114,7 @@ class BatchGuardrailResult(BaseModel):
 async def run_detector_via_executor(
     executor,
     detector,
-    query_string,
+    dome_input: DomePayload,
     agent_id: Optional[str] = None,
     team_id: Optional[str] = None,
     user_id: Optional[str] = None,
@@ -121,20 +122,20 @@ async def run_detector_via_executor(
     start_time = time.time()
     loop = asyncio.get_running_loop()
     # Preserve compatibility with detector implementations that may only accept
-    # (query_string) or (query_string, agent_id).
+    # (dome_input) or (dome_input, agent_id).
     def _invoke_sync_detect():
         try:
             return detector.sync_detect(
-                query_string,
+                dome_input,
                 agent_id=agent_id,
                 team_id=team_id,
                 user_id=user_id,
             )
         except TypeError:
             try:
-                return detector.sync_detect(query_string, agent_id)
+                return detector.sync_detect(dome_input, agent_id)
             except TypeError:
-                return detector.sync_detect(query_string)
+                return detector.sync_detect(dome_input)
 
     future = loop.run_in_executor(executor, _invoke_sync_detect)
     try:
@@ -173,18 +174,20 @@ class Guard:
     # Sequential guard
     async def sequential_guard(
         self,
-        query_string: str,
+        query_string: Union[str, DomePayload],
         agent_id: Optional[str] = None,
         team_id: Optional[str] = None,
         user_id: Optional[str] = None,
     ) -> GuardResult:
+        dome_input = DomePayload.coerce(query_string)
+        qs = dome_input.query_string
         st_time = time.time()
         flagged = False
         detector_results = {}
-        response_string = query_string
+        response_string = qs
         for detector in self.detector_list:
             detector_scan_result = await detector.detect_with_time(
-                query_string,
+                dome_input,
                 agent_id=agent_id,
                 team_id=team_id,
                 user_id=user_id,
@@ -200,7 +203,7 @@ class Guard:
                 if self.early_exit:
                     break
             if not flagged:
-                if detector_scan_result.result["response_string"] != query_string:
+                if detector_scan_result.result["response_string"] != qs:
                     response_string = detector_scan_result.result[
                         "response_string"
                     ]  # For guards with passthroughs
@@ -226,20 +229,22 @@ class Guard:
     # Parallel Guard
     async def parallel_guard(
         self,
-        query_string: str,
+        query_string: Union[str, DomePayload],
         executor,
         agent_id: Optional[str] = None,
         team_id: Optional[str] = None,
         user_id: Optional[str] = None,
     ) -> GuardResult:
+        dome_input = DomePayload.coerce(query_string)
+        qs = dome_input.query_string
         st_time = time.time()
         detector_results = {}
         flagged = False
-        response_string = query_string
+        response_string = qs
 
         # Helper function - enable parallel execution of guards which can stop once a single guard is triggered
         async def detector_wrapper(
-            detector: DetectionMethod, query_string: str, executor
+            detector: DetectionMethod, dome_input: DomePayload, executor
         ):
             asyncio_timeout_limit = 5  # Timeout limit for any detector - 5 seconds
             if hasattr(detector, "run_in_executor") and detector.run_in_executor:
@@ -249,7 +254,7 @@ class Guard:
                             result = await run_detector_via_executor(
                                 executor,
                                 detector,
-                                query_string,
+                                dome_input,
                                 agent_id=agent_id,
                                 team_id=team_id,
                                 user_id=user_id,
@@ -268,7 +273,7 @@ class Guard:
                 try:
                     async with asyncio.timeout(asyncio_timeout_limit):
                         result = await detector.detect_with_time(
-                            query_string,
+                            dome_input,
                             agent_id=agent_id,
                             team_id=team_id,
                             user_id=user_id,
@@ -287,7 +292,7 @@ class Guard:
         tasks = []  # type: Union[set[Task[Any]], list[Task[Any]]]
         for detector in self.detector_list:
             task = asyncio.create_task(
-                detector_wrapper(detector, query_string, executor)
+                detector_wrapper(detector, dome_input, executor)
             )
             task.set_name(f"{self.guard_name}{detector.__class__.__name__}_detect")
             tasks.append(task)
@@ -328,7 +333,7 @@ class Guard:
                             f"No response string was found from result in task {task.get_name()}"
                         )
                     else:
-                        if task_result.result["response_string"] != query_string:
+                        if task_result.result["response_string"] != qs:
                             response_string = task_result.result.get(
                                 "response_string", ""
                             )
@@ -357,7 +362,7 @@ class Guard:
     # This is never invoked by the guardrail class, but is useful for debugging
     def scan(
         self,
-        query_string: str,
+        query_string: Union[str, DomePayload],
         executor,
         agent_id: Optional[str] = None,
         team_id: Optional[str] = None,
@@ -386,7 +391,7 @@ class Guard:
     # Async scan
     async def async_scan(
         self,
-        query_string: str,
+        query_string: Union[str, DomePayload],
         executor,
         agent_id: Optional[str] = None,
         team_id: Optional[str] = None,
@@ -411,20 +416,22 @@ class Guard:
     # Batch guard - processes all inputs through all detectors
     async def sequential_guard_batch(
         self,
-        inputs: List[str],
+        inputs: List[Union[str, DomePayload]],
         agent_id: Optional[str] = None,
         team_id: Optional[str] = None,
         user_id: Optional[str] = None,
     ) -> BatchGuardResult:
+        dome_inputs: List[Union[str, DomePayload]] = [DomePayload.coerce(item) for item in inputs]
+        query_strings = [DomePayload.coerce(di).query_string for di in dome_inputs]
         st_time = time.time()
-        n = len(inputs)
+        n = len(dome_inputs)
         item_flagged = [False] * n
-        item_response = list(inputs)
+        item_response = list(query_strings)
         item_detector_results: List[Dict[str, DetectionTimingResult]] = [{} for _ in range(n)]
 
         for detector in self.detector_list:
             batch_timing = await detector.detect_batch_with_time(
-                inputs,
+                dome_inputs,
                 agent_id=agent_id,
                 team_id=team_id,
                 user_id=user_id,
@@ -440,9 +447,9 @@ class Guard:
                     )
                     item_flagged[i] = True
                 elif not item_flagged[i]:
-                    if det_result.result.get("response_string") != inputs[i]:
+                    if det_result.result.get("response_string") != query_strings[i]:
                         item_response[i] = det_result.result.get(
-                            "response_string", inputs[i]
+                            "response_string", query_strings[i]
                         )
 
         items = []
@@ -472,7 +479,7 @@ class Guard:
 
     async def async_scan_batch(
         self,
-        inputs: List[str],
+        inputs: List[Union[str, DomePayload]],
         executor=None,
         agent_id: Optional[str] = None,
         team_id: Optional[str] = None,
@@ -487,7 +494,7 @@ class Guard:
 
     def scan_batch(
         self,
-        inputs: List[str],
+        inputs: List[Union[str, DomePayload]],
         executor=None,
         agent_id: Optional[str] = None,
         team_id: Optional[str] = None,
@@ -530,18 +537,20 @@ class Guardrail:
 
     async def sequential_guard(
         self,
-        query_string: str,
+        query_string: Union[str, DomePayload],
         agent_id: Optional[str] = None,
         team_id: Optional[str] = None,
         user_id: Optional[str] = None,
     ) -> GuardrailResult:
+        dome_input = DomePayload.coerce(query_string)
+        qs = dome_input.query_string
         st_time = time.time()
         flagged = False
         guard_results = {}
-        response_string = query_string
+        response_string = qs
         for guard in self.guard_list:
             guard_scan_result = await guard.async_scan(
-                query_string,
+                dome_input,
                 self.executor,
                 agent_id=agent_id,
                 team_id=team_id,
@@ -556,7 +565,7 @@ class Guardrail:
                 if self.early_exit:
                     break
             if not flagged:
-                if guard_scan_result.response != query_string:
+                if guard_scan_result.response != qs:
                     response_string = guard_scan_result.response
         exec_time = time.time() - st_time
         detection_score = max(
@@ -581,20 +590,22 @@ class Guardrail:
     # Parallel guard
     async def parallel_guard(
         self,
-        query_string: str,
+        query_string: Union[str, DomePayload],
         agent_id: Optional[str] = None,
         team_id: Optional[str] = None,
         user_id: Optional[str] = None,
     ) -> GuardrailResult:
+        dome_input = DomePayload.coerce(query_string)
+        qs = dome_input.query_string
         guard_results = {}
         flagged = False
-        response_string = query_string
+        response_string = qs
         st_time = time.time()
 
         # Helper function - enable parallel execution of guards which can stop once a single guard is triggered
-        async def guard_wrapper(guard: Guard, query_string: str, executor):
+        async def guard_wrapper(guard: Guard, dome_input: DomePayload, executor):
             result = await guard.async_scan(
-                query_string,
+                dome_input,
                 executor,
                 agent_id=agent_id,
                 team_id=team_id,
@@ -603,7 +614,7 @@ class Guardrail:
             return {"name": guard.guard_name, "result": result}
 
         tasks = [
-            asyncio.create_task(guard_wrapper(guard, query_string, self.executor))
+            asyncio.create_task(guard_wrapper(guard, dome_input, self.executor))
             for guard in self.guard_list
         ]  # type: Union[set[Task[Any]], list[Task[Any]]]
         while tasks:
@@ -637,7 +648,7 @@ class Guardrail:
                         p.cancel()
                     break
                 if not flagged:
-                    if task_result.response != query_string:
+                    if task_result.response != qs:
                         response_string = task_result.response
             tasks = pending
         exec_time = time.time() - st_time
@@ -663,7 +674,7 @@ class Guardrail:
     # Sync method that runs the regular guard or parallel guard based on config
     def scan(
         self,
-        query_string: str,
+        query_string: Union[str, DomePayload],
         agent_id: Optional[str] = None,
         team_id: Optional[str] = None,
         user_id: Optional[str] = None,
@@ -690,7 +701,7 @@ class Guardrail:
     # Async scan
     async def async_scan(
         self,
-        query_string: str,
+        query_string: Union[str, DomePayload],
         agent_id: Optional[str] = None,
         team_id: Optional[str] = None,
         user_id: Optional[str] = None,
@@ -715,20 +726,22 @@ class Guardrail:
     # Batch guardrail - processes all inputs through all guards
     async def sequential_guard_batch(
         self,
-        inputs: List[str],
+        inputs: List[Union[str, DomePayload]],
         agent_id: Optional[str] = None,
         team_id: Optional[str] = None,
         user_id: Optional[str] = None,
     ) -> BatchGuardrailResult:
+        dome_inputs: List[Union[str, DomePayload]] = [DomePayload.coerce(item) for item in inputs]
+        query_strings = [DomePayload.coerce(di).query_string for di in dome_inputs]
         st_time = time.time()
-        n = len(inputs)
+        n = len(dome_inputs)
         item_flagged = [False] * n
-        item_response = list(inputs)
+        item_response = list(query_strings)
         item_guard_results: List[Dict[str, GuardResult]] = [{} for _ in range(n)]
 
         for guard in self.guard_list:
             batch_guard_result = await guard.async_scan_batch(
-                inputs,
+                dome_inputs,
                 self.executor,
                 agent_id=agent_id,
                 team_id=team_id,
@@ -742,7 +755,7 @@ class Guardrail:
                     )
                     item_flagged[i] = True
                 elif not item_flagged[i]:
-                    if guard_result.response != inputs[i]:
+                    if guard_result.response != query_strings[i]:
                         item_response[i] = guard_result.response
 
         items = []
@@ -775,7 +788,7 @@ class Guardrail:
 
     async def async_scan_batch(
         self,
-        inputs: List[str],
+        inputs: List[Union[str, DomePayload]],
         agent_id: Optional[str] = None,
         team_id: Optional[str] = None,
         user_id: Optional[str] = None,
@@ -789,7 +802,7 @@ class Guardrail:
 
     def scan_batch(
         self,
-        inputs: List[str],
+        inputs: List[Union[str, DomePayload]],
         agent_id: Optional[str] = None,
         team_id: Optional[str] = None,
         user_id: Optional[str] = None,
