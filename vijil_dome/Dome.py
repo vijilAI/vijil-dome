@@ -24,6 +24,10 @@ from vijil_dome.integrations.vijil.evaluate import (
     get_config_from_vijil_evaluation,
 )
 from vijil_dome.types import DomePayload
+from vijil_dome.utils.config_loader import (
+    load_dome_config_from_s3,
+    config_has_changed as _config_has_changed,
+)
 from openai import OpenAI
 from typing import Union, Dict, List, Optional, Callable, Iterator
 from .defaults import get_default_config
@@ -160,6 +164,12 @@ class Dome:
         self.agent_id = None  # type: Optional[str]
         self.team_id = None  # type: Optional[str]
         self.user_id = None  # type: Optional[str]
+        # S3 origin tracking (set by create_from_s3)
+        self._s3_bucket = None  # type: Optional[str]
+        self._s3_key = None  # type: Optional[str]
+        self._s3_config_dict = None  # type: Optional[Dict]
+        self._s3_aws_kwargs = None  # type: Optional[Dict]
+        self._s3_cache_dir = None  # type: Optional[str]
         if dome_config is not None:
             if isinstance(dome_config, DomeConfig):
                 self._init_from_dome_config(dome_config)
@@ -210,6 +220,82 @@ class Dome:
                 f"No Dome configuration recommendation could be generated for evaluation ID {evaluation_id}"
             )
         return Dome(dome_config=config_dict, client=client, enforce=enforce)
+
+    @staticmethod
+    def create_from_s3(
+        bucket: str,
+        key: Optional[str] = None,
+        team_id: Optional[str] = None,
+        agent_id: Optional[str] = None,
+        aws_access_key_id: Optional[str] = None,
+        aws_secret_access_key: Optional[str] = None,
+        aws_session_token: Optional[str] = None,
+        region_name: Optional[str] = None,
+        cache_dir: Optional[str] = None,
+        cache_ttl_seconds: int = 300,
+        client: Optional[OpenAI] = None,
+        enforce: bool = True,
+    ) -> "Dome":
+        """Create a Dome instance from a config stored in S3.
+
+        The S3 key can be provided directly, or constructed from
+        *team_id* and *agent_id* using the standard path
+        ``teams/{team_id}/agents/{agent_id}/dome/config.json``.
+
+        The loaded config is cached locally and the S3 coordinates are
+        stored on the instance so that :meth:`config_has_changed` can
+        later check for remote updates.
+        """
+        aws_kwargs = {
+            "aws_access_key_id": aws_access_key_id,
+            "aws_secret_access_key": aws_secret_access_key,
+            "aws_session_token": aws_session_token,
+            "region_name": region_name,
+        }
+        config_dict = load_dome_config_from_s3(
+            bucket=bucket,
+            key=key,
+            team_id=team_id,
+            agent_id=agent_id,
+            cache_dir=cache_dir,
+            cache_ttl_seconds=cache_ttl_seconds,
+            **aws_kwargs,
+        )
+        dome = Dome(dome_config=config_dict, client=client, enforce=enforce)
+        # Store S3 origin for config_has_changed()
+        from vijil_dome.utils.config_loader import _resolve_key
+
+        dome._s3_bucket = bucket
+        dome._s3_key = _resolve_key(key, team_id, agent_id)
+        dome._s3_config_dict = config_dict
+        dome._s3_aws_kwargs = aws_kwargs
+        dome._s3_cache_dir = cache_dir
+        return dome
+
+    def config_has_changed(self) -> bool:
+        """Check whether the S3 config has changed since this instance was created.
+
+        Only works for instances created via :meth:`create_from_s3`.
+
+        Returns:
+            ``True`` if the remote config differs from the one used to
+            create this instance, ``False`` otherwise.
+
+        Raises:
+            ValueError: If the instance was not created from S3.
+        """
+        if self._s3_bucket is None or self._s3_key is None:
+            raise ValueError(
+                "config_has_changed() is only available for Dome instances "
+                "created via Dome.create_from_s3()."
+            )
+        return _config_has_changed(
+            local_config=self._s3_config_dict,  # type: ignore[arg-type]
+            bucket=self._s3_bucket,
+            key=self._s3_key,
+            cache_dir=self._s3_cache_dir,
+            **(self._s3_aws_kwargs or {}),
+        )
 
     def _init_from_dome_config(self, dome_config: DomeConfig):
         self.input_guardrail = dome_config.input_guardrail
