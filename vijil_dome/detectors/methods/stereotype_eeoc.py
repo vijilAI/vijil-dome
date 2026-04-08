@@ -52,7 +52,7 @@ Input format:
 import asyncio
 import logging
 import os
-from typing import List, Optional
+from typing import List, Optional, Union
 
 import httpx
 import torch
@@ -68,6 +68,7 @@ from vijil_dome.detectors import (
     BatchDetectionResult,
 )
 from vijil_dome.detectors.utils.hf_model import HFBaseModel
+from vijil_dome.types import DomePayload
 
 logger = logging.getLogger("vijil.dome")
 
@@ -122,9 +123,27 @@ class StereotypeEEOCBase(HFBaseModel):
             return item["score"]
         return 1.0 - item["score"]
 
-    def _classify(self, prompt: str, response: str) -> tuple[float, dict]:
-        """Run ModernBERT classification on a prompt+response pair."""
-        text = f"{prompt} [SEP] {response}"
+    @staticmethod
+    def _format_for_model(dome_input: DomePayload) -> str:
+        """Format a DomePayload as the `{prompt} [SEP] {response}` string
+        the ModernBERT model was trained on.
+
+        When the caller provides structured `prompt`/`response` fields
+        (e.g. Dome guarding an agent output with both turns available),
+        we use the exact training format. When only `text` is provided
+        (legacy plain-string input), we treat it as the prompt half with
+        an empty response. See module docstring for the out-of-distribution
+        caveat that applies to the legacy path.
+        """
+        if dome_input.prompt is not None or dome_input.response is not None:
+            prompt = dome_input.prompt or ""
+            response = dome_input.response or ""
+            return f"{prompt} [SEP] {response}"
+        return f"{dome_input.text or ''} [SEP] "
+
+    def _classify(self, dome_input: DomePayload) -> tuple[float, dict]:
+        """Run ModernBERT classification on a DomePayload."""
+        text = self._format_for_model(dome_input)
         pred = self.classifier(text)
         item = pred[0]
         return self._extract_stereotype_score(item), item
@@ -142,14 +161,17 @@ class StereotypeEEOCFast(StereotypeEEOCBase):
         self.response_string = f"Method:{STEREOTYPE_EEOC_FAST}"
 
     def sync_detect(
-        self, query_string: str, agent_id: Optional[str] = None
+        self,
+        dome_input: DomePayload,
+        agent_id: Optional[str] = None,
     ) -> DetectionResult:
-        # Treat the entire query_string as the "prompt" half of the
-        # trained pair. See module docstring for caveats.
-        stereotype_score, prediction = self._classify(query_string, "")
+        dome_input = DomePayload.coerce(dome_input)
+        stereotype_score, prediction = self._classify(dome_input)
         flagged = stereotype_score >= self.score_threshold
         logger.debug(
-            "stereotype-eeoc-fast prediction=%s score=%.3f", prediction, stereotype_score
+            "stereotype-eeoc-fast prediction=%s score=%.3f",
+            prediction,
+            stereotype_score,
         )
 
         return flagged, {
@@ -160,18 +182,21 @@ class StereotypeEEOCFast(StereotypeEEOCBase):
             "threshold": self.score_threshold,
             "label": "stereotyped" if flagged else "neutral",
             "confidence": max(stereotype_score, 1.0 - stereotype_score),
-            "response_string": self.response_string if flagged else query_string,
+            "response_string": self.response_string if flagged else dome_input.query_string,
         }
 
-    async def detect(self, query_string: str) -> DetectionResult:
+    async def detect(self, dome_input: DomePayload) -> DetectionResult:
         logger.info(f"Detecting EEOC stereotype using {self.__class__.__name__}...")
-        return self.sync_detect(query_string)
+        return self.sync_detect(DomePayload.coerce(dome_input))
 
-    async def detect_batch(self, inputs: List[str]) -> BatchDetectionResult:
-        results = []
-        texts = [f"{inp} [SEP] " for inp in inputs]
+    async def detect_batch(
+        self, inputs: List[Union[str, DomePayload]]
+    ) -> BatchDetectionResult:
+        dome_inputs = [DomePayload.coerce(x) for x in inputs]
+        texts = [self._format_for_model(d) for d in dome_inputs]
         all_preds = self.classifier(texts)
-        for query_string, pred in zip(inputs, all_preds):
+        results = []
+        for dome_input, pred in zip(dome_inputs, all_preds):
             item = pred[0] if isinstance(pred, list) else pred
             stereotype_score = self._extract_stereotype_score(item)
             flagged = stereotype_score >= self.score_threshold
@@ -183,7 +208,7 @@ class StereotypeEEOCFast(StereotypeEEOCBase):
                 "threshold": self.score_threshold,
                 "label": "stereotyped" if flagged else "neutral",
                 "confidence": max(stereotype_score, 1.0 - stereotype_score),
-                "response_string": self.response_string if flagged else query_string,
+                "response_string": self.response_string if flagged else dome_input.query_string,
             }))
         return results
 
@@ -219,7 +244,9 @@ class StereotypeEEOCSafeguard:
             )
         logger.info("Initialized EEOC stereotype detector (Safeguard mode)")
 
-    async def detect(self, query_string: str) -> DetectionResult:
+    async def detect(self, dome_input: DomePayload) -> DetectionResult:
+        dome_input = DomePayload.coerce(dome_input)
+        query_string = dome_input.query_string
         logger.info("Detecting EEOC stereotype using Safeguard...")
         try:
             async with httpx.AsyncClient(timeout=self.timeout_seconds) as client:
@@ -301,13 +328,15 @@ class StereotypeEEOCHybrid(StereotypeEEOCBase):
             f"(hybrid mode, confidence_threshold={confidence_threshold})"
         )
 
-    async def detect(self, query_string: str) -> DetectionResult:
+    async def detect(self, dome_input: DomePayload) -> DetectionResult:
+        dome_input = DomePayload.coerce(dome_input)
+        query_string = dome_input.query_string
         logger.info("Detecting EEOC stereotype using hybrid mode...")
 
         # Stage 1: Fast ModernBERT classification.
         loop = asyncio.get_running_loop()
         stereotype_score, prediction = await loop.run_in_executor(
-            None, self._classify, query_string, ""
+            None, self._classify, dome_input
         )
         confidence = max(stereotype_score, 1.0 - stereotype_score)
         logger.debug(
