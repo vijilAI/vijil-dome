@@ -188,6 +188,7 @@ def config_has_changed(
     key: Optional[str] = None,
     team_id: Optional[str] = None,
     agent_id: Optional[str] = None,
+    config_id: Optional[str] = None,
     cache_dir: Optional[str] = None,
     aws_access_key_id: Optional[str] = None,
     aws_secret_access_key: Optional[str] = None,
@@ -195,6 +196,10 @@ def config_has_changed(
     region_name: Optional[str] = None,
 ) -> bool:
     """Check whether the S3 config differs from *local_config*.
+
+    When *config_id* is provided, the remote config's ``"id"`` field is
+    compared first as a fast path — if the IDs match, the configs are
+    assumed identical and a full deep comparison is skipped.
 
     Forces an ETag check (``cache_ttl_seconds=0``) so the comparison is
     always against the latest S3 version.
@@ -205,6 +210,7 @@ def config_has_changed(
         key: Full S3 key (overrides team_id/agent_id).
         team_id: Team identifier.
         agent_id: Agent identifier.
+        config_id: The ``id`` of the local config for fast comparison.
         cache_dir: Override local cache directory.
         aws_access_key_id: AWS access key (optional).
         aws_secret_access_key: AWS secret key (optional).
@@ -226,4 +232,11 @@ def config_has_changed(
         region_name=region_name,
         cache_ttl_seconds=0,
     )
+
+    # Fast path: if both configs have an "id" field, compare IDs only
+    remote_id = remote_config.get("id")
+    if config_id is not None and remote_id is not None:
+        return config_id != remote_id
+
+    # Fallback: deep comparison
     return remote_config != local_config

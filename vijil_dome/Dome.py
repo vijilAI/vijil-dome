@@ -42,12 +42,14 @@ class DomeConfig(GuardrailConfig):
         agent_id: Optional[str] = None,
         team_id: Optional[str] = None,
         user_id: Optional[str] = None,
+        config_id: Optional[str] = None,
     ):
         self.input_guardrail = input_guardrail
         self.output_guardrail = output_guardrail
         self.agent_id = agent_id
         self.team_id = team_id
         self.user_id = user_id
+        self.config_id = config_id
 
     def get_input_guardrail(self) -> Guardrail:
         return self.input_guardrail
@@ -63,6 +65,9 @@ class DomeConfig(GuardrailConfig):
 
     def get_user_id(self) -> Optional[str]:
         return self.user_id
+
+    def get_config_id(self) -> Optional[str]:
+        return self.config_id
 
 
 def create_dome_config(config: Union[Dict, str]) -> DomeConfig:
@@ -82,12 +87,14 @@ def create_dome_config(config: Union[Dict, str]) -> DomeConfig:
         input_guardrail, output_guardrail, agent_id, team_id, user_id = (
             convert_dict_to_guardrails(config)
         )
+        config_id = config.get("id")
         config_object = DomeConfig(
             input_guardrail,
             output_guardrail,
             agent_id=agent_id,
             team_id=team_id,
             user_id=user_id,
+            config_id=config_id,
         )
         return config_object
     else:
@@ -164,6 +171,7 @@ class Dome:
         self.agent_id = None  # type: Optional[str]
         self.team_id = None  # type: Optional[str]
         self.user_id = None  # type: Optional[str]
+        self.config_id = None  # type: Optional[str]
         # S3 origin tracking (set by create_from_s3)
         self._s3_bucket = None  # type: Optional[str]
         self._s3_key = None  # type: Optional[str]
@@ -293,6 +301,7 @@ class Dome:
             local_config=self._s3_config_dict,  # type: ignore[arg-type]
             bucket=self._s3_bucket,
             key=self._s3_key,
+            config_id=self.config_id,
             cache_dir=self._s3_cache_dir,
             **(self._s3_aws_kwargs or {}),
         )
@@ -303,6 +312,7 @@ class Dome:
         self.agent_id = dome_config.agent_id
         self.team_id = dome_config.team_id
         self.user_id = dome_config.user_id
+        self.config_id = dome_config.config_id
 
     def get_agent_id(self) -> Optional[str]:
         return self.agent_id
