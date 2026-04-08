@@ -21,6 +21,7 @@ from vijil_dome.detectors import (
     register_method,
     DetectionResult,
 )
+from vijil_dome.types import DomePayload
 from detect_secrets.core.scan import scan_line, PotentialSecret
 from detect_secrets.settings import transient_settings
 
@@ -73,7 +74,9 @@ class SecretDetector(DetectionMethod):
 
         self.blocked_response_string = f"Method:{DETECT_SECRETS}"
 
-    async def detect(self, query_string: str) -> DetectionResult:
+    async def detect(self, dome_input: DomePayload) -> DetectionResult:
+        dome_input = DomePayload.coerce(dome_input)
+        query_string = dome_input.query_string
         flagged = False
         secrets = []
         with transient_settings(self._plugins_used):

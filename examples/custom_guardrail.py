@@ -5,6 +5,7 @@ from vijil_dome.detectors import (
     DetectionMethod,
     register_method,
 )
+from vijil_dome.types import DomePayload
 
 # Define our custom detector name
 PHONE_NUMBER_DETECTOR = "phone-number-detector"
@@ -28,24 +29,26 @@ class PhoneNumberDetector(DetectionMethod):
             r'(\+\d{1,3}[-.\s]?\(?\d{1,4}\)?[-.\s]?\d{1,4}[-.\s]?\d{1,4}[-.\s]?\d{1,9})'
         )
     
-    async def detect(self, query_string: str) -> DetectionResult:
+    async def detect(self, dome_input: DomePayload) -> DetectionResult:
+        dome_input = DomePayload.coerce(dome_input)
+        query_string = dome_input.query_string
         # Check for US phone numbers
         us_matches = self.us_pattern.findall(query_string)
-        
+
         # Check for international numbers if enabled
         intl_matches = []
         if self.block_international:
             intl_matches = self.international_pattern.findall(query_string)
-        
+
         # Determine if we should flag this query
         flagged = bool(us_matches or intl_matches)
-        
+
         # In strict mode, be more aggressive about potential numbers
         if self.strict_mode and not flagged:
             # Look for sequences that might be phone numbers
             digit_sequences = re.findall(r'\d{7,}', query_string)
             flagged = len(digit_sequences) > 0
-        
+
         # Build metadata for logging and analysis
         metadata = {
             "type": type(self),
@@ -57,7 +60,7 @@ class PhoneNumberDetector(DetectionMethod):
                 "I can't process requests containing phone numbers to protect your privacy. "
                 "Please remove any phone numbers and try again."
             ) if flagged else "Query processed successfully"
-        }        
+        }
         return flagged, metadata
 
 
@@ -91,7 +94,9 @@ class CustomLengthDetector(DetectionMethod):
         self.min_length = min_length
         self.max_length = max_length
     # The detection method must be async, and must produce a DetectionResult
-    async def detect(self, query_string: str) -> DetectionResult:
+    async def detect(self, dome_input: DomePayload) -> DetectionResult:
+        dome_input = DomePayload.coerce(dome_input)
+        query_string = dome_input.query_string
         flagged = len(query_string) < self.min_length or len(query_string) > self.max_length
         # The detection result is a tuple comprising of a boolean and a dictionary
         # The dictionary can contain any metadata you wish to record. We HIGHLY recommend including the original query string, type and response string

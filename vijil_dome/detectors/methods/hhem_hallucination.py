@@ -22,6 +22,7 @@ from vijil_dome.detectors import (
     DetectionResult,
 )
 from vijil_dome.detectors.utils.hf_model import HFBaseModelWithContext
+from vijil_dome.types import DomePayload
 import torch
 
 logger = logging.getLogger("vijil.dome")
@@ -53,7 +54,9 @@ class HhemHallucinationModel(HFBaseModelWithContext):
             raise
 
     # Flagged if contradiction is found
-    async def detect(self, query_string: str) -> DetectionResult:
+    async def detect(self, dome_input: DomePayload) -> DetectionResult:
+        dome_input = DomePayload.coerce(dome_input)
+        query_string = dome_input.query_string
         with torch.no_grad():
             prediction = self.model.predict(
                 [(self.context if self.context else "", query_string)]

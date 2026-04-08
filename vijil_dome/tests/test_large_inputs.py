@@ -37,6 +37,7 @@ from vijil_dome.detectors import (
     DetectionCategory,
 )
 from vijil_dome.detectors.utils.llm_api_base import LlmBaseDetector
+from vijil_dome.types import DomePayload
 
 
 # ---------------------------------------------------------------------------
@@ -577,8 +578,8 @@ class TestLlmTruncation:
         """_truncate_if_needed() truncates when limit set."""
 
         class ConcreteLlm(LlmBaseDetector):
-            async def detect(self, query_string):
-                pass
+            async def detect(self, dome_input: DomePayload):
+                pass  # pragma: no cover
 
         detector = ConcreteLlm(
             method_name="test", max_input_chars=100
@@ -592,8 +593,8 @@ class TestLlmTruncation:
         """Without max_input_chars, text passes through unchanged."""
 
         class ConcreteLlm(LlmBaseDetector):
-            async def detect(self, query_string):
-                pass
+            async def detect(self, dome_input: DomePayload):
+                pass  # pragma: no cover
 
         detector = ConcreteLlm(method_name="test")
         long_text = "a" * 200

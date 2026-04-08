@@ -21,9 +21,11 @@ import logging
 import inspect
 from enum import Enum, auto
 from abc import ABC, abstractmethod
-from typing import Type, Dict, List, Tuple, Callable, Coroutine, Any, Optional
+from typing import Type, Dict, List, Tuple, Callable, Coroutine, Any, Optional, Union
 from collections import defaultdict
 from pydantic import BaseModel
+
+from vijil_dome.types import DomePayload
 
 
 MODERATION_FLASHTXT_BANLIST = "moderation-flashtext"
@@ -144,7 +146,7 @@ class DetectionMethod(ABC):
         return func(*args, **filtered_kwargs)
 
     @abstractmethod
-    async def detect(self, query_string: str) -> DetectionResult:
+    async def detect(self, dome_input: DomePayload) -> DetectionResult:
         """
         Perform the detection logic.
         """
@@ -152,7 +154,7 @@ class DetectionMethod(ABC):
 
     async def detect_with_time(
         self,
-        query_string: str,
+        query_string: Union[str, DomePayload],
         agent_id: Optional[str] = None,
         team_id: Optional[str] = None,
         user_id: Optional[str] = None,
@@ -160,10 +162,11 @@ class DetectionMethod(ABC):
         """
         Perform the detection and return the result along with the execution time.
         """
+        dome_input = DomePayload.coerce(query_string)
         start_time = time.time()
         result = await self._call_with_supported_kwargs(
             self.detect,
-            query_string,
+            dome_input,
             agent_id=agent_id,
             team_id=team_id,
             user_id=user_id,
@@ -186,20 +189,23 @@ class DetectionMethod(ABC):
 
         return detection_result
 
-    async def detect_batch(self, inputs: List[str]) -> BatchDetectionResult:
+    async def detect_batch(
+        self, inputs: List[Union[str, DomePayload]]
+    ) -> BatchDetectionResult:
         """
         Process a batch of inputs. Default implementation loops over detect().
         Subclasses can override for optimized batch processing.
         """
         results = []
-        for query_string in inputs:
-            result = await self.detect(query_string)
+        for item in inputs:
+            dome_input = DomePayload.coerce(item)
+            result = await self.detect(dome_input)
             results.append(result)
         return results
 
     async def detect_batch_with_time(
         self,
-        inputs: List[str],
+        inputs: List[Union[str, DomePayload]],
         agent_id: Optional[str] = None,
         team_id: Optional[str] = None,
         user_id: Optional[str] = None,
@@ -298,17 +304,17 @@ class DetectionFactory:
     @staticmethod
     async def get_detect(
         category: DetectionCategory, method_name: str, **kwargs
-    ) -> Callable[[str], Coroutine[Any, Any, DetectionResult]]:
+    ) -> Callable[..., Coroutine[Any, Any, DetectionResult]]:
         detector = DetectionFactory.get_detector(category, method_name, **kwargs)
         return detector.detect
 
     @staticmethod
     async def get_detect_with_time(
         category: DetectionCategory, method_name: str, **kwargs
-    ) -> Callable[[str], Coroutine[Any, Any, DetectionTimingResult]]:
+    ) -> Callable[[Union[str, DomePayload]], Coroutine[Any, Any, DetectionTimingResult]]:
         detector = DetectionFactory.get_detector(category, method_name, **kwargs)
         # warm the model
-        await detector.detect("")
+        await detector.detect(DomePayload(text=""))
 
         return detector.detect_with_time
 

@@ -30,6 +30,7 @@ from vijil_dome.detectors import (
     DetectionResult,
     MODERATION_PERSPECTIVE,
 )
+from vijil_dome.types import DomePayload
 
 
 @register_method(DetectionCategory.Moderation, MODERATION_PERSPECTIVE)
@@ -54,7 +55,9 @@ class PerspectiveAPI(DetectionMethod):
         self.score_threshold = score_threshold
         self.blocked_response_string = f"Method:{MODERATION_PERSPECTIVE}"
 
-    async def detect(self, query_string: str) -> DetectionResult:
+    async def detect(self, dome_input: DomePayload) -> DetectionResult:
+        dome_input = DomePayload.coerce(dome_input)
+        query_string = dome_input.query_string
         # Handle empty query string gracefully
         if not len(query_string):
             return False, {"type": type(self), "response": None}

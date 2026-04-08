@@ -35,6 +35,7 @@ from litellm import acompletion
 
 from vijil_dome.detectors import DetectionCategory, DetectionResult, register_method
 from vijil_dome.detectors.utils.llm_api_base import LlmBaseDetector
+from vijil_dome.types import DomePayload
 
 POLICY_GPT_OSS_SAFEGUARD = "policy-gpt-oss-safeguard"
 
@@ -527,7 +528,9 @@ class PolicyGptOssSafeguard(LlmBaseDetector):
             "policy_source": self.policy_source,
         }
 
-    async def detect(self, query_string: str) -> DetectionResult:
+    async def detect(self, dome_input: DomePayload) -> DetectionResult:
+        dome_input = DomePayload.coerce(dome_input)
+        query_string = dome_input.query_string
         try:
             query_string = self._truncate_if_needed(query_string)
             normalized_query = normalize_query_for_classification(query_string)
