@@ -32,6 +32,7 @@ __all__ = [
     "encoding_heuristics",
     "gpt_oss_safeguard_policy",
     "policy_sections_detector",
+    "stereotype_eeoc",
 ]
 
 try:
