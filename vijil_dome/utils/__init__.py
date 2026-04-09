@@ -21,6 +21,11 @@ from vijil_dome.utils.policy_loader import (
     validate_policy_json,
 )
 from vijil_dome.utils.policy_config_builder import build_dome_config_from_sections
+from vijil_dome.utils.config_loader import (
+    build_s3_config_key,
+    load_dome_config_from_s3,
+    config_has_changed,
+)
 
 __all__ = [
     "normalize_string",
@@ -29,4 +34,7 @@ __all__ = [
     "load_policy_sections_from_file",
     "validate_policy_json",
     "build_dome_config_from_sections",
+    "build_s3_config_key",
+    "load_dome_config_from_s3",
+    "config_has_changed",
 ]
