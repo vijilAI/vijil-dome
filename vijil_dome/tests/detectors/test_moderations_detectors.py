@@ -15,6 +15,7 @@
 # vijil and vijil-dome are trademarks owned by Vijil Inc.
 
 import os
+import re
 from unittest.mock import patch, AsyncMock
 
 import httpx
@@ -26,6 +27,7 @@ from vijil_dome.detectors.methods.llm_models import *  # noqa: F403
 from vijil_dome.detectors.methods.toxicity_deberta import *  # noqa: F403
 from vijil_dome.detectors.methods.toxicity_mbert import *  # noqa: F403
 from vijil_dome.detectors.methods.stereotype_eeoc import (  # noqa: F401
+    DEFAULT_SAFEGUARD_MAX_INPUT_CHARS,
     StereotypeEEOCSafeguard,
 )
 from vijil_dome.types import DomePayload
@@ -41,6 +43,7 @@ from vijil_dome.detectors import (
     STEREOTYPE_EEOC_HYBRID,
     DetectionFactory,
     DetectionCategory,
+    DetectionMethod,
 )
 
 
@@ -294,13 +297,8 @@ async def test_stereotype_eeoc_safeguard_parses_unsafe_verdict():
 
 
 # ----------------------------------------------------------------------
-# Chunking + large-input batching
+# Chunking + large-input batching for stereotype detectors
 # ----------------------------------------------------------------------
-#
-# These tests verify Anuj's two optimization requests on PR #163:
-# 1. Inputs that exceed max_length get [SEP]-centered chunked instead
-#    of silently truncated.
-# 2. detect_batch actually batches HF pipeline calls (not a naive loop).
 
 
 def _long_text(approx_tokens: int) -> str:
@@ -382,3 +380,267 @@ async def test_stereotype_eeoc_hybrid_detect_batch_batched_fast_stage():
             assert payload["detector"] == STEREOTYPE_EEOC_HYBRID
             assert payload["stage"] in ("fast", "fast-fallback")
             assert payload["label"] != "error"
+
+
+# ----------------------------------------------------------------------
+# Multi-chunk structural tests for the fast/hybrid base class
+# ----------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_stereotype_eeoc_build_chunks_fast_path_single_chunk():
+    """Short inputs must take the no-tokenizer fast path and return
+    exactly one chunk formatted ``"<prompt> [SEP] <response>"``. Guards
+    against accidental regressions that would force small inputs through
+    the tokenizer round-trip."""
+    detector = DetectionFactory.get_detector(
+        DetectionCategory.Moderation, STEREOTYPE_EEOC_FAST
+    )
+    chunks = detector._build_chunks_for_payload(
+        DomePayload(prompt="hi", response="there")
+    )
+    assert chunks == ["hi [SEP] there"]
+
+
+@pytest.mark.asyncio
+async def test_stereotype_eeoc_build_chunks_emits_prompt_head_and_response_tail_flanks():
+    """When both prompt and response overflow ``max_length``, the
+    chunker must emit:
+      - exactly one [SEP]-centered chunk (non-empty on both sides), and
+      - at least one prompt-only flank ending in " [SEP] ", and
+      - at least one response-only flank starting with " [SEP] ".
+    This is the key invariant of the new multi-chunk design: content
+    outside the center window is no longer silently dropped.
+    """
+    detector = DetectionFactory.get_detector(
+        DetectionCategory.Moderation, STEREOTYPE_EEOC_FAST
+    )
+    chunks = detector._build_chunks_for_payload(
+        DomePayload(prompt=_long_text(600), response=_long_text(600))
+    )
+    assert len(chunks) >= 3
+
+    centers = [
+        c
+        for c in chunks
+        if re.match(r"^.+ \[SEP\] .+$", c) and not c.endswith(" [SEP] ")
+    ]
+    assert len(centers) == 1, (
+        f"expected exactly one [SEP]-centered chunk, got {len(centers)}"
+    )
+
+    prompt_flanks = [
+        c for c in chunks if c.endswith(" [SEP] ") and not c.startswith(" [SEP] ")
+    ]
+    assert len(prompt_flanks) >= 1, (
+        "prompt-head should be emitted as prompt-only flank chunks"
+    )
+
+    response_flanks = [
+        c for c in chunks if c.startswith(" [SEP] ") and not c.endswith(" [SEP] ")
+    ]
+    assert len(response_flanks) >= 1, (
+        "response-tail should be emitted as response-only flank chunks"
+    )
+
+
+@pytest.mark.asyncio
+async def test_stereotype_eeoc_build_chunks_text_only_long_input_has_no_response_flank():
+    """Text-only inputs (``DomePayload(text=...)``) are treated as the
+    prompt half with an empty response. An oversize text-only payload
+    should produce multiple prompt-side chunks but **zero**
+    response-only flanks — there's no response to chunk."""
+    detector = DetectionFactory.get_detector(
+        DetectionCategory.Moderation, STEREOTYPE_EEOC_FAST
+    )
+    chunks = detector._build_chunks_for_payload(
+        DomePayload(text=_long_text(700))
+    )
+    assert len(chunks) >= 2
+    response_flanks = [
+        c for c in chunks if c.startswith(" [SEP] ") and not c.endswith(" [SEP] ")
+    ]
+    assert response_flanks == [], (
+        f"text-only input must not produce response flanks, got {len(response_flanks)}"
+    )
+
+
+@pytest.mark.asyncio
+async def test_stereotype_eeoc_fast_detect_batch_aggregates_across_chunks():
+    """detect_batch must reduce per-chunk predictions back to one score
+    per payload. Sanity check: each result's ``prediction`` field is a
+    single dict (the max-score chunk's prediction), not a list of
+    dicts. Guards against a regression where aggregation forgets to
+    pick a winner.
+    """
+    detector = DetectionFactory.get_detector(
+        DetectionCategory.Moderation, STEREOTYPE_EEOC_FAST
+    )
+    inputs = [
+        DomePayload(prompt=_long_text(400), response=_long_text(400)),
+        DomePayload(prompt="Short prompt.", response="Short response."),
+    ]
+    results = await detector.detect_batch(inputs)
+    assert len(results) == 2
+    for _flagged, payload in results:
+        assert isinstance(payload["prediction"], dict)
+        assert 0.0 <= payload["score"] <= 1.0
+
+
+# ----------------------------------------------------------------------
+# Safeguard: inheritance, truncation, detect_batch
+# ----------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_stereotype_eeoc_safeguard_inherits_detection_method():
+    """Safeguard must inherit from ``DetectionMethod`` so it picks up
+    ``max_batch_concurrency``, ``_gather_with_concurrency``, and the
+    shared ``detect_batch_with_time`` wrapper — matching the convention
+    used by every other detector in the library."""
+    detector = DetectionFactory.get_detector(
+        DetectionCategory.Moderation,
+        STEREOTYPE_EEOC_SAFEGUARD,
+        groq_api_key="dummy-key-for-test",
+    )
+    assert isinstance(detector, DetectionMethod)
+    assert detector.max_batch_concurrency == 5
+    assert detector.max_input_chars == DEFAULT_SAFEGUARD_MAX_INPUT_CHARS
+
+
+@pytest.mark.asyncio
+async def test_stereotype_eeoc_safeguard_truncates_oversize_input():
+    """When the query_string exceeds ``max_input_chars``, the Safeguard
+    detector must truncate before posting to Groq. We capture the JSON
+    payload sent to the mocked HTTP client and assert the user message
+    was sliced to the cap."""
+    detector = DetectionFactory.get_detector(
+        DetectionCategory.Moderation,
+        STEREOTYPE_EEOC_SAFEGUARD,
+        groq_api_key="dummy-key-for-test",
+        max_input_chars=100,
+    )
+
+    captured: dict = {}
+    fake_response = AsyncMock()
+    fake_response.raise_for_status = lambda: None
+    fake_response.json = lambda: {"choices": [{"message": {"content": "safe"}}]}
+
+    class _CaptureClient:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return False
+
+        async def post(self, url, headers=None, json=None):
+            captured["json"] = json
+            return fake_response
+
+    oversize_payload = DomePayload(text="x" * 10_000)
+    with patch("httpx.AsyncClient", return_value=_CaptureClient()):
+        _flagged, _payload = await detector.detect(oversize_payload)
+
+    user_msg = captured["json"]["messages"][1]["content"]
+    assert len(user_msg) == 100
+    assert user_msg == "x" * 100
+
+
+@pytest.mark.asyncio
+async def test_stereotype_eeoc_safeguard_disable_truncation_with_none():
+    """Passing ``max_input_chars=None`` must disable the cap entirely
+    so power users can send inputs up to the model's full 130K-token
+    context at their own risk."""
+    detector = DetectionFactory.get_detector(
+        DetectionCategory.Moderation,
+        STEREOTYPE_EEOC_SAFEGUARD,
+        groq_api_key="dummy-key-for-test",
+        max_input_chars=None,
+    )
+    assert detector.max_input_chars is None
+    # No-op for any input
+    assert detector._truncate_if_needed("x" * 1_000_000) == "x" * 1_000_000
+
+
+@pytest.mark.asyncio
+async def test_stereotype_eeoc_safeguard_detect_batch_returns_all_results():
+    """Safeguard must implement ``detect_batch`` (via the
+    ``_gather_with_concurrency`` helper inherited from DetectionMethod)
+    and return one result per input. Regression guard against
+    accidentally inheriting the serial default from DetectionMethod.
+    """
+    detector = DetectionFactory.get_detector(
+        DetectionCategory.Moderation,
+        STEREOTYPE_EEOC_SAFEGUARD,
+        groq_api_key="dummy-key-for-test",
+    )
+
+    fake_response = AsyncMock()
+    fake_response.raise_for_status = lambda: None
+    fake_response.json = lambda: {"choices": [{"message": {"content": "safe"}}]}
+
+    class _OkClient:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return False
+
+        async def post(self, *args, **kwargs):
+            return fake_response
+
+    with patch("httpx.AsyncClient", return_value=_OkClient()):
+        results = await detector.detect_batch(
+            [
+                "Input one.",
+                "Input two.",
+                DomePayload(prompt="Input", response="three."),
+            ]
+        )
+
+    assert len(results) == 3
+    for flagged, payload in results:
+        assert flagged is False
+        assert payload["detector"] == STEREOTYPE_EEOC_SAFEGUARD
+        assert payload["label"] == "neutral"
+
+
+@pytest.mark.asyncio
+async def test_stereotype_eeoc_hybrid_escalation_truncates_oversize_input():
+    """Hybrid escalation must also apply ``max_input_chars`` — the
+    low-confidence path hits the same Groq model and needs the same
+    context-window guardrail as standalone Safeguard mode.
+    """
+    with patch.dict(os.environ, {"GROQ_API_KEY": "dummy-key-for-test"}, clear=False):
+        detector = DetectionFactory.get_detector(
+            DetectionCategory.Moderation,
+            STEREOTYPE_EEOC_HYBRID,
+            max_input_chars=50,
+            # Force escalation on every item by requiring near-certain confidence.
+            confidence_threshold=2.0,
+        )
+
+    captured: dict = {}
+    fake_response = AsyncMock()
+    fake_response.raise_for_status = lambda: None
+    fake_response.json = lambda: {"choices": [{"message": {"content": "safe"}}]}
+
+    class _CaptureClient:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return False
+
+        async def post(self, url, headers=None, json=None):
+            captured["json"] = json
+            return fake_response
+
+    oversize = DomePayload(text="y" * 10_000)
+    with patch("httpx.AsyncClient", return_value=_CaptureClient()):
+        _flagged, payload = await detector.detect(oversize)
+
+    assert payload["stage"] == "safeguard"
+    user_msg = captured["json"]["messages"][1]["content"]
+    assert len(user_msg) == 50
+    assert user_msg == "y" * 50
