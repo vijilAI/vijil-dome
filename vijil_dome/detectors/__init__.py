@@ -58,6 +58,10 @@ GENERIC_LLM = "generic-llm"
 POLICY_GPT_OSS_SAFEGUARD = "policy-gpt-oss-safeguard"
 POLICY_SECTIONS = "policy-sections"
 
+STEREOTYPE_EEOC_FAST = "stereotype-eeoc-fast"
+STEREOTYPE_EEOC_SAFEGUARD = "stereotype-eeoc-safeguard"
+STEREOTYPE_EEOC_HYBRID = "stereotype-eeoc-hybrid"
+
 # Define types for detection results and data
 DetectorType = Dict["type", str]
 Hit = bool
