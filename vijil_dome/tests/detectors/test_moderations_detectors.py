@@ -38,6 +38,8 @@ from vijil_dome.detectors import (
     MODERATION_LLM,
     MODERATION_DEBERTA,
     MODERATION_MBERT,
+    MODERATION_MBERT_SAFEGUARD,
+    MODERATION_MBERT_HYBRID,
     STEREOTYPE_EEOC_FAST,
     STEREOTYPE_EEOC_SAFEGUARD,
     STEREOTYPE_EEOC_HYBRID,
@@ -644,3 +646,287 @@ async def test_stereotype_eeoc_hybrid_escalation_truncates_oversize_input():
     user_msg = captured["json"]["messages"][1]["content"]
     assert len(user_msg) == 50
     assert user_msg == "y" * 50
+
+
+# ----------------------------------------------------------------------
+# Moderation mbert: Safeguard and Hybrid modes
+# ----------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_moderation_mbert_safeguard_factory_resolves():
+    """Safeguard mode must resolve from the factory without loading ModernBERT."""
+    detector = DetectionFactory.get_detector(
+        DetectionCategory.Moderation, MODERATION_MBERT_SAFEGUARD
+    )
+    assert detector is not None
+    assert detector.temperature == 0.0
+    assert detector.max_tokens == 8
+
+
+@pytest.mark.asyncio
+async def test_moderation_mbert_safeguard_inherits_detection_method():
+    """Safeguard must inherit from DetectionMethod."""
+    detector = DetectionFactory.get_detector(
+        DetectionCategory.Moderation,
+        MODERATION_MBERT_SAFEGUARD,
+        groq_api_key="dummy-key-for-test",
+    )
+    assert isinstance(detector, DetectionMethod)
+    assert detector.max_batch_concurrency == 5
+
+
+@pytest.mark.asyncio
+async def test_moderation_mbert_safeguard_handles_api_error():
+    """When the Groq API raises, the detector must return label='error'."""
+    detector = DetectionFactory.get_detector(
+        DetectionCategory.Moderation,
+        MODERATION_MBERT_SAFEGUARD,
+        groq_api_key="dummy-key-for-test",
+    )
+
+    class _BoomClient:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return False
+
+        async def post(self, *args, **kwargs):
+            raise httpx.ConnectError("simulated network failure")
+
+    with patch("httpx.AsyncClient", return_value=_BoomClient()):
+        flagged, payload = await detector.detect("Any input.")
+
+    assert flagged is False
+    assert payload["label"] == "error"
+    assert "simulated network failure" in payload["error"]
+
+
+@pytest.mark.asyncio
+async def test_moderation_mbert_safeguard_parses_unsafe_verdict():
+    """When Groq returns 'unsafe', the detector must flag and surface the verdict."""
+    detector = DetectionFactory.get_detector(
+        DetectionCategory.Moderation,
+        MODERATION_MBERT_SAFEGUARD,
+        groq_api_key="dummy-key-for-test",
+    )
+
+    fake_response = AsyncMock()
+    fake_response.raise_for_status = lambda: None
+    fake_response.json = lambda: {
+        "choices": [{"message": {"content": "unsafe"}}]
+    }
+
+    class _OkClient:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return False
+
+        async def post(self, *args, **kwargs):
+            return fake_response
+
+    with patch("httpx.AsyncClient", return_value=_OkClient()):
+        flagged, payload = await detector.detect(
+            "I want to hurt everyone around me."
+        )
+
+    assert flagged
+    assert payload["label"] == "toxic"
+    assert payload["safeguard_verdict"] == "unsafe"
+    assert payload["response_string"].startswith("Method:moderation-mbert-safeguard")
+
+
+@pytest.mark.asyncio
+async def test_moderation_mbert_safeguard_parses_safe_verdict():
+    """When Groq returns 'safe', the detector must not flag."""
+    detector = DetectionFactory.get_detector(
+        DetectionCategory.Moderation,
+        MODERATION_MBERT_SAFEGUARD,
+        groq_api_key="dummy-key-for-test",
+    )
+
+    fake_response = AsyncMock()
+    fake_response.raise_for_status = lambda: None
+    fake_response.json = lambda: {
+        "choices": [{"message": {"content": "safe"}}]
+    }
+
+    class _OkClient:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return False
+
+        async def post(self, *args, **kwargs):
+            return fake_response
+
+    with patch("httpx.AsyncClient", return_value=_OkClient()):
+        flagged, payload = await detector.detect("What is the capital of France?")
+
+    assert not flagged
+    assert payload["label"] == "safe"
+
+
+@pytest.mark.asyncio
+async def test_moderation_mbert_safeguard_truncates_oversize_input():
+    """Oversize inputs must be truncated before posting to Groq."""
+    detector = DetectionFactory.get_detector(
+        DetectionCategory.Moderation,
+        MODERATION_MBERT_SAFEGUARD,
+        groq_api_key="dummy-key-for-test",
+        max_input_chars=100,
+    )
+
+    captured: dict = {}
+    fake_response = AsyncMock()
+    fake_response.raise_for_status = lambda: None
+    fake_response.json = lambda: {"choices": [{"message": {"content": "safe"}}]}
+
+    class _CaptureClient:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return False
+
+        async def post(self, url, headers=None, json=None):
+            captured["json"] = json
+            return fake_response
+
+    oversize_payload = DomePayload(text="x" * 10_000)
+    with patch("httpx.AsyncClient", return_value=_CaptureClient()):
+        _flagged, _payload = await detector.detect(oversize_payload)
+
+    user_msg = captured["json"]["messages"][1]["content"]
+    assert len(user_msg) == 100
+
+
+@pytest.mark.asyncio
+async def test_moderation_mbert_safeguard_detect_batch_returns_all_results():
+    """detect_batch must return one result per input."""
+    detector = DetectionFactory.get_detector(
+        DetectionCategory.Moderation,
+        MODERATION_MBERT_SAFEGUARD,
+        groq_api_key="dummy-key-for-test",
+    )
+
+    fake_response = AsyncMock()
+    fake_response.raise_for_status = lambda: None
+    fake_response.json = lambda: {"choices": [{"message": {"content": "safe"}}]}
+
+    class _OkClient:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return False
+
+        async def post(self, *args, **kwargs):
+            return fake_response
+
+    with patch("httpx.AsyncClient", return_value=_OkClient()):
+        results = await detector.detect_batch(
+            ["Input one.", "Input two.", "Input three."]
+        )
+
+    assert len(results) == 3
+    for flagged, payload in results:
+        assert flagged is False
+        assert payload["detector"] == MODERATION_MBERT_SAFEGUARD
+        assert payload["label"] == "safe"
+
+
+@pytest.mark.asyncio
+async def test_moderation_mbert_hybrid_falls_back_without_groq_key():
+    """When GROQ_API_KEY is missing, hybrid must degrade to fast result."""
+    with patch.dict(os.environ, {}, clear=False):
+        os.environ.pop("GROQ_API_KEY", None)
+        detector = DetectionFactory.get_detector(
+            DetectionCategory.Moderation, MODERATION_MBERT_HYBRID
+        )
+        _flagged, payload = await detector.detect("What is the capital of France?")
+        assert payload["stage"] in ("fast", "fast-fallback")
+        assert payload["label"] != "error"
+
+
+@pytest.mark.asyncio
+async def test_moderation_mbert_hybrid_detect_batch_batched_fast_stage():
+    """Hybrid detect_batch must use the batched fast stage.
+    When GROQ_API_KEY is absent every item falls back to the fast result.
+    """
+    with patch.dict(os.environ, {}, clear=False):
+        os.environ.pop("GROQ_API_KEY", None)
+        detector = DetectionFactory.get_detector(
+            DetectionCategory.Moderation, MODERATION_MBERT_HYBRID
+        )
+        inputs = [
+            "What is the capital of France?",
+            "Tell me a joke.",
+            DomePayload(text="How does photosynthesis work?"),
+        ]
+        results = await detector.detect_batch(inputs)
+        assert len(results) == 3
+        for flagged, payload in results:
+            assert payload["detector"] == MODERATION_MBERT_HYBRID
+            assert payload["stage"] in ("fast", "fast-fallback")
+            assert payload["label"] != "error"
+
+
+@pytest.mark.asyncio
+async def test_moderation_mbert_hybrid_escalation_truncates_oversize_input():
+    """Hybrid escalation must apply max_input_chars before posting to Groq."""
+    with patch.dict(os.environ, {"GROQ_API_KEY": "dummy-key-for-test"}, clear=False):
+        detector = DetectionFactory.get_detector(
+            DetectionCategory.Moderation,
+            MODERATION_MBERT_HYBRID,
+            max_input_chars=50,
+            confidence_threshold=2.0,  # force escalation
+        )
+
+    captured: dict = {}
+    fake_response = AsyncMock()
+    fake_response.raise_for_status = lambda: None
+    fake_response.json = lambda: {"choices": [{"message": {"content": "safe"}}]}
+
+    class _CaptureClient:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return False
+
+        async def post(self, url, headers=None, json=None):
+            captured["json"] = json
+            return fake_response
+
+    oversize = DomePayload(text="y" * 10_000)
+    with patch("httpx.AsyncClient", return_value=_CaptureClient()):
+        _flagged, payload = await detector.detect(oversize)
+
+    assert payload["stage"] == "safeguard"
+    user_msg = captured["json"]["messages"][1]["content"]
+    assert len(user_msg) == 50
+
+
+@pytest.mark.asyncio
+async def test_moderation_mbert_classify_methods_exist():
+    """_classify() and _classify_batch() must be callable and return
+    expected tuple shapes."""
+    detector = DetectionFactory.get_detector(
+        DetectionCategory.Moderation, MODERATION_MBERT
+    )
+    dome_input = DomePayload(text="What is the capital of France?")
+    score, prediction = detector._classify(dome_input)
+    assert isinstance(score, float)
+    assert 0.0 <= score <= 1.0
+    assert isinstance(prediction, dict)
+
+    results = detector._classify_batch([dome_input, dome_input])
+    assert len(results) == 2
+    for s, p in results:
+        assert isinstance(s, float)
+        assert isinstance(p, dict)
