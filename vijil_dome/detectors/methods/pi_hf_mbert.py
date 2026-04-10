@@ -148,8 +148,8 @@ class MBertPromptInjectionModel(HFBaseModel):
         all_preds = self.classifier(chunks, batch_size=self.max_batch_concurrency)
         best_score = 0.0
         best_item: dict = {}
-        for pred in all_preds:
-            item = pred[0] if isinstance(pred, list) else pred
+        for window_pred in all_preds:
+            item = window_pred[0] if isinstance(window_pred, list) else window_pred  # type: ignore[assignment]
             score = self._extract_injection_score(item)
             if score > best_score:
                 best_score = score
