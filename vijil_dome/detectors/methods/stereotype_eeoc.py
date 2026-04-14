@@ -98,7 +98,12 @@ SAFEGUARD_SYSTEM_PROMPT = (
 
 # Safeguard call defaults — single-word verdict, deterministic, low cost.
 DEFAULT_SAFEGUARD_TEMPERATURE = 0.0
-DEFAULT_SAFEGUARD_MAX_TOKENS = 8
+# gpt-oss-safeguard-20b is a reasoning model and reserves a chunk of the
+# token budget for internal reasoning before emitting any assistant content.
+# A small cap (e.g. 8) lets the reasoning alone blow the budget, hit
+# finish_reason=length, and return an empty `content` — which silently
+# classifies everything as safe. Keep this generous.
+DEFAULT_SAFEGUARD_MAX_TOKENS = 2000
 
 # GPT-OSS-Safeguard-20B has a ~130K token context window. We don't load
 # the tokenizer in Safeguard mode (API-only), so we cap in characters

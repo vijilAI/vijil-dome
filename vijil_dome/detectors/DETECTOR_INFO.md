@@ -55,6 +55,60 @@ tokens natively, so sliding windows only activate for very long inputs.
 - **Class**: `MBertPromptInjectionModel`
 - **Model**: [vijil/vijil_dome_prompt_injection_detection](https://huggingface.co/vijil/vijil_dome_prompt_injection_detection)
 
+### `prompt-injection-mbert-safeguard`
+
+API-only prompt injection detection using GPT-OSS-Safeguard-20B via Groq.
+~200ms latency, high accuracy, no ModernBERT loaded. Oversize inputs are
+truncated (not chunked) to `max_input_chars` before being sent — the
+~130K token context window makes truncation a rare safety net.
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `groq_api_key` | `str` | `None` | Groq API key (falls back to `GROQ_API_KEY`) |
+| `groq_model` | `str` | `"openai/gpt-oss-safeguard-20b"` | Groq model ID |
+| `temperature` | `float` | `0.0` | Sampling temperature |
+| `max_tokens` | `int` | `2000` | Response token budget (must leave room for reasoning tokens — see note below) |
+| `timeout_seconds` | `float` | `10.0` | Request timeout |
+| `max_input_chars` | `int` | `400000` | Character cap applied before the request (pass `None` to disable) |
+
+> **Note on `max_tokens`**: `gpt-oss-safeguard-20b` is a reasoning model that
+> consumes part of its token budget on internal reasoning before emitting any
+> assistant content. Setting `max_tokens` too low (e.g. 8) causes the
+> response to hit `finish_reason=length` with an empty `content` field,
+> which the detector silently classifies as safe. Keep this generous.
+
+- **Class**: `PImbertSafeguard`
+- **Requires**: `GROQ_API_KEY` environment variable
+
+### `prompt-injection-mbert-hybrid`
+
+Two-stage detector: ModernBERT classifies first, and low-confidence
+predictions are escalated to GPT-OSS-Safeguard-20B. ~5ms average latency,
+near-100% accuracy, API cost only on uncertain examples. Accepts all
+parameters from both `prompt-injection-mbert` and
+`prompt-injection-mbert-safeguard`.
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `confidence_threshold` | `float` | `0.85` | Fast-stage confidence below which the input is escalated to Safeguard |
+| `score_threshold` | `float` | `0.5` | Injection probability threshold (fast stage) |
+| `truncation` | `bool` | `True` | Truncate inputs exceeding `max_length` |
+| `max_length` | `int` | `8192` | Maximum tokens per window (fast stage) |
+| `window_stride` | `int` | `4096` | Token step size between sliding windows |
+| `groq_api_key` | `str` | `None` | Groq API key (falls back to `GROQ_API_KEY`) |
+| `groq_model` | `str` | `"openai/gpt-oss-safeguard-20b"` | Groq model ID |
+| `temperature` | `float` | `0.0` | Sampling temperature |
+| `max_tokens` | `int` | `2000` | Response token budget for the Safeguard escalation |
+| `timeout_seconds` | `float` | `10.0` | Request timeout |
+| `max_input_chars` | `int` | `400000` | Character cap applied before the escalation request |
+
+If `GROQ_API_KEY` is not set, the hybrid mode silently falls back to
+fast-only classification instead of failing.
+
+- **Class**: `PImbertHybrid`
+- **Model**: [vijil/vijil_dome_prompt_injection_detection](https://huggingface.co/vijil/vijil_dome_prompt_injection_detection)
+- **Requires**: `GROQ_API_KEY` environment variable (optional; falls back to fast-only if absent)
+
 ### `security-promptguard`
 
 Meta Prompt Guard model for jailbreak and prompt injection detection.
@@ -188,6 +242,59 @@ tokens natively.
 - **Class**: `MBertToxicContentModel`
 - **Model**: [vijil/vijil_dome_toxic_content_detection](https://huggingface.co/vijil/vijil_dome_toxic_content_detection)
 
+### `moderation-mbert-safeguard`
+
+API-only toxicity / moderation detection using GPT-OSS-Safeguard-20B via
+Groq. ~200ms latency, high accuracy, no ModernBERT loaded. Oversize inputs
+are truncated (not chunked) to `max_input_chars` before being sent — the
+~130K token context window makes truncation a rare safety net.
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `groq_api_key` | `str` | `None` | Groq API key (falls back to `GROQ_API_KEY`) |
+| `groq_model` | `str` | `"openai/gpt-oss-safeguard-20b"` | Groq model ID |
+| `temperature` | `float` | `0.0` | Sampling temperature |
+| `max_tokens` | `int` | `2000` | Response token budget (must leave room for reasoning tokens — see note below) |
+| `timeout_seconds` | `float` | `10.0` | Request timeout |
+| `max_input_chars` | `int` | `400000` | Character cap applied before the request (pass `None` to disable) |
+
+> **Note on `max_tokens`**: `gpt-oss-safeguard-20b` is a reasoning model that
+> consumes part of its token budget on internal reasoning before emitting any
+> assistant content. Setting `max_tokens` too low (e.g. 8) causes the
+> response to hit `finish_reason=length` with an empty `content` field,
+> which the detector silently classifies as safe. Keep this generous.
+
+- **Class**: `ModerationMbertSafeguard`
+- **Requires**: `GROQ_API_KEY` environment variable
+
+### `moderation-mbert-hybrid`
+
+Two-stage detector: ModernBERT classifies first, and low-confidence
+predictions are escalated to GPT-OSS-Safeguard-20B. ~5ms average latency,
+near-100% accuracy, API cost only on uncertain examples. Accepts all
+parameters from both `moderation-mbert` and `moderation-mbert-safeguard`.
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `confidence_threshold` | `float` | `0.85` | Fast-stage confidence below which the input is escalated to Safeguard |
+| `score_threshold` | `float` | `0.5` | Toxicity probability threshold (fast stage) |
+| `truncation` | `bool` | `True` | Truncate inputs exceeding `max_length` |
+| `max_length` | `int` | `8192` | Maximum tokens per window (fast stage) |
+| `window_stride` | `int` | `4096` | Token step size between sliding windows |
+| `groq_api_key` | `str` | `None` | Groq API key (falls back to `GROQ_API_KEY`) |
+| `groq_model` | `str` | `"openai/gpt-oss-safeguard-20b"` | Groq model ID |
+| `temperature` | `float` | `0.0` | Sampling temperature |
+| `max_tokens` | `int` | `2000` | Response token budget for the Safeguard escalation |
+| `timeout_seconds` | `float` | `10.0` | Request timeout |
+| `max_input_chars` | `int` | `400000` | Character cap applied before the escalation request |
+
+If `GROQ_API_KEY` is not set, the hybrid mode silently falls back to
+fast-only classification instead of failing.
+
+- **Class**: `ModerationMbertHybrid`
+- **Model**: [vijil/vijil_dome_toxic_content_detection](https://huggingface.co/vijil/vijil_dome_toxic_content_detection)
+- **Requires**: `GROQ_API_KEY` environment variable (optional; falls back to fast-only if absent)
+
 ### `moderations-oai-api`
 
 OpenAI Moderation API with per-category score thresholds.
@@ -242,6 +349,84 @@ Keyword ban-list detector using FlashText for fast matching.
 | `banlist_filepaths` | `list[str]` | `None` | Paths to ban-list files (uses built-in default list if omitted) |
 
 - **Class**: `KWBanList`
+
+### `stereotype-eeoc-fast`
+
+Vijil ModernBERT classifier for stereotypes and harmful generalizations about
+EEOC protected classes (Race/Color, Sex/Gender/Sexual Orientation, Religion,
+National Origin, Age 40+, Disability). Distilled from GPT-OSS-Safeguard-20B
+against a custom EEOC discrimination policy. Self-hosted, <5ms latency,
+F1=0.923, zero API cost.
+
+Detects stereotyping within a *single* prompt or response. Does **not**
+detect counterfactual bias (whether varying only the protected class in a
+prompt produces different outputs) — that requires comparing pairs of
+prompt-response outputs and is out of scope.
+
+When given a `DomePayload` with both `prompt` and `response`, the detector
+reconstructs the training format (`prompt [SEP] response`). When only `text`
+is set, it is treated as the prompt half with an empty response. Inputs
+longer than `max_length` are split into multiple `[SEP]`-centered chunks;
+any chunk flagged flags the whole input, and the max score wins.
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `score_threshold` | `float` | `0.5` | Stereotype probability threshold |
+| `max_length` | `int` | `512` | Maximum tokens per chunk |
+
+- **Class**: `StereotypeEEOCFast`
+- **Model**: [vijil/stereotype-eeoc-detector](https://huggingface.co/vijil/stereotype-eeoc-detector)
+
+### `stereotype-eeoc-safeguard`
+
+API-only EEOC stereotype detection using GPT-OSS-Safeguard-20B via Groq.
+~200ms latency, ~100% accuracy, no ModernBERT loaded. Oversize inputs are
+truncated (not chunked) to `max_input_chars` before being sent — the
+~130K token context window makes truncation a rare safety net.
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `groq_api_key` | `str` | `None` | Groq API key (falls back to `GROQ_API_KEY`) |
+| `groq_model` | `str` | `"openai/gpt-oss-safeguard-20b"` | Groq model ID |
+| `temperature` | `float` | `0.0` | Sampling temperature |
+| `max_tokens` | `int` | `2000` | Response token budget (must leave room for reasoning tokens — see note below) |
+| `timeout_seconds` | `float` | `10.0` | Request timeout |
+| `max_input_chars` | `int` | `400000` | Character cap applied before the request (pass `None` to disable) |
+
+> **Note on `max_tokens`**: `gpt-oss-safeguard-20b` is a reasoning model that
+> consumes part of its token budget on internal reasoning before emitting any
+> assistant content. Setting `max_tokens` too low (e.g. 8) causes the
+> response to hit `finish_reason=length` with an empty `content` field,
+> which the detector silently classifies as safe. Keep this generous.
+
+- **Class**: `StereotypeEEOCSafeguard`
+- **Requires**: `GROQ_API_KEY` environment variable
+
+### `stereotype-eeoc-hybrid`
+
+Two-stage detector: ModernBERT classifies first, and low-confidence
+predictions are escalated to GPT-OSS-Safeguard-20B. ~5ms average latency,
+near-100% accuracy, API cost only on uncertain examples. Accepts all
+parameters from both `stereotype-eeoc-fast` and `stereotype-eeoc-safeguard`.
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `confidence_threshold` | `float` | `0.85` | Fast-stage confidence below which the input is escalated to Safeguard |
+| `score_threshold` | `float` | `0.5` | Stereotype probability threshold (fast stage) |
+| `max_length` | `int` | `512` | Maximum tokens per chunk (fast stage) |
+| `groq_api_key` | `str` | `None` | Groq API key (falls back to `GROQ_API_KEY`) |
+| `groq_model` | `str` | `"openai/gpt-oss-safeguard-20b"` | Groq model ID |
+| `temperature` | `float` | `0.0` | Sampling temperature |
+| `max_tokens` | `int` | `2000` | Response token budget for the Safeguard escalation |
+| `timeout_seconds` | `float` | `10.0` | Request timeout |
+| `max_input_chars` | `int` | `400000` | Character cap applied before the escalation request |
+
+If `GROQ_API_KEY` is not set, the hybrid mode silently falls back to
+fast-only classification instead of failing.
+
+- **Class**: `StereotypeEEOCHybrid`
+- **Model**: [vijil/stereotype-eeoc-detector](https://huggingface.co/vijil/stereotype-eeoc-detector)
+- **Requires**: `GROQ_API_KEY` environment variable (optional; falls back to fast-only if absent)
 
 ---
 
