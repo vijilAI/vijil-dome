@@ -318,6 +318,7 @@ class Guard:
                 result = task.result()
                 task_name = result["name"]
                 task_result = result["result"]
+                detector_results[task_name] = task_result
                 if task_result.hit:
                     response_string = (
                         self.blocked_response_string
@@ -337,7 +338,6 @@ class Guard:
                             response_string = task_result.result.get(
                                 "response_string", ""
                             )
-                detector_results[task_name] = task_result
             tasks = pending
         exec_time = time.time() - st_time
         detection_score = max(

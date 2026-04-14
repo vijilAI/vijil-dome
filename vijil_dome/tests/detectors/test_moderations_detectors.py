@@ -231,7 +231,7 @@ async def test_stereotype_eeoc_safeguard_factory_resolves():
     )
     assert detector is not None
     assert detector.temperature == 0.0
-    assert detector.max_tokens == 8
+    assert detector.max_tokens == 2000
 
 
 @pytest.mark.asyncio
@@ -661,7 +661,7 @@ async def test_moderation_mbert_safeguard_factory_resolves():
     )
     assert detector is not None
     assert detector.temperature == 0.0
-    assert detector.max_tokens == 8
+    assert detector.max_tokens == 2000
 
 
 @pytest.mark.asyncio
