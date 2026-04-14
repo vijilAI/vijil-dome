@@ -64,7 +64,13 @@ DEFAULT_SAFEGUARD_TEMPERATURE = 0.0
 DEFAULT_SAFEGUARD_MAX_TOKENS = 2000
 DEFAULT_SAFEGUARD_MAX_INPUT_CHARS = 400_000
 
-GROQ_CHAT_COMPLETIONS_URL = "https://api.groq.com/openai/v1/chat/completions"
+# The safeguard endpoint is OpenAI-compatible. Groq is the default, but
+# callers can point at any OpenAI-compatible `/chat/completions` endpoint
+# (local vLLM, Together, Fireworks, OpenAI itself, ...) by overriding
+# `base_url`, `model`, and `api_key_name` on the detector.
+DEFAULT_SAFEGUARD_API_KEY_NAME = "GROQ_API_KEY"
+DEFAULT_SAFEGUARD_BASE_URL = "https://api.groq.com/openai/v1"
+DEFAULT_SAFEGUARD_MODEL = "openai/gpt-oss-safeguard-20b"
 
 
 # ----------------------------------------------------------------------
@@ -298,35 +304,48 @@ class MBertToxicContentModel(HFBaseModel):
 @register_method(DetectionCategory.Moderation, MODERATION_MBERT_SAFEGUARD)
 class ModerationMbertSafeguard(DetectionMethod):
     """
-    Toxicity / moderation detection using GPT-OSS-Safeguard-20B via Groq.
-    ~200ms latency, high accuracy, requires GROQ_API_KEY.
+    Toxicity / moderation detection backed by an OpenAI-compatible chat
+    completions endpoint. Defaults to GPT-OSS-Safeguard-20B on Groq
+    (~200ms, high accuracy), but the endpoint, model, and credential
+    name are all overridable so callers can point at any OpenAI-style
+    deployment (local vLLM, Together, Fireworks, OpenAI proper, ...).
 
     Does not load ModernBERT \u2014 this mode is API-only.
     """
 
     def __init__(
         self,
-        groq_api_key: Optional[str] = None,
-        groq_model: str = "openai/gpt-oss-safeguard-20b",
+        api_key: Optional[str] = None,
+        api_key_name: str = DEFAULT_SAFEGUARD_API_KEY_NAME,
+        base_url: str = DEFAULT_SAFEGUARD_BASE_URL,
+        model: str = DEFAULT_SAFEGUARD_MODEL,
         temperature: float = DEFAULT_SAFEGUARD_TEMPERATURE,
         max_tokens: int = DEFAULT_SAFEGUARD_MAX_TOKENS,
+        reasoning_effort: Optional[str] = "low",
         timeout_seconds: float = 10.0,
         max_input_chars: Optional[int] = DEFAULT_SAFEGUARD_MAX_INPUT_CHARS,
         **kwargs,
     ):
-        self.groq_api_key = groq_api_key or os.environ.get("GROQ_API_KEY", "")
-        self.groq_model = groq_model
+        self.api_key_name = api_key_name
+        self.api_key = api_key or os.environ.get(api_key_name, "")
+        self.base_url = base_url.rstrip("/")
+        self.chat_completions_url = f"{self.base_url}/chat/completions"
+        self.model = model
         self.temperature = temperature
         self.max_tokens = max_tokens
+        self.reasoning_effort = reasoning_effort
         self.timeout_seconds = timeout_seconds
         self.max_input_chars = max_input_chars
         self.response_string = f"Method:{MODERATION_MBERT_SAFEGUARD}"
         self.run_in_executor = False
-        if not self.groq_api_key:
+        if not self.api_key:
             logger.warning(
-                f"GROQ_API_KEY not set \u2014 {MODERATION_MBERT_SAFEGUARD} will fail at runtime"
+                f"{api_key_name} not set \u2014 {MODERATION_MBERT_SAFEGUARD} will fail at runtime"
             )
-        logger.info("Initialized moderation mbert detector (Safeguard mode)")
+        logger.info(
+            "Initialized moderation mbert detector "
+            f"(Safeguard mode, model={model}, base_url={self.base_url})"
+        )
 
     def _truncate_if_needed(self, text: str) -> str:
         if self.max_input_chars is not None and len(text) > self.max_input_chars:
@@ -338,28 +357,30 @@ class ModerationMbertSafeguard(DetectionMethod):
             return text[: self.max_input_chars]
         return text
 
-    def _groq_payload(self, query_string: str) -> dict:
-        return {
-            "model": self.groq_model,
+    def _build_payload(self, query_string: str) -> dict:
+        payload = {
+            "model": self.model,
             "messages": [
                 {"role": "system", "content": MODERATION_SAFEGUARD_SYSTEM_PROMPT},
                 {"role": "user", "content": query_string},
             ],
             "temperature": self.temperature,
             "max_tokens": self.max_tokens,
-            "reasoning_effort": "low",
         }
+        if self.reasoning_effort is not None:
+            payload["reasoning_effort"] = self.reasoning_effort
+        return payload
 
     async def _call_safeguard(
         self, client: httpx.AsyncClient, query_string: str
     ) -> str:
         resp = await client.post(
-            GROQ_CHAT_COMPLETIONS_URL,
+            self.chat_completions_url,
             headers={
-                "Authorization": f"Bearer {self.groq_api_key}",
+                "Authorization": f"Bearer {self.api_key}",
                 "Content-Type": "application/json",
             },
-            json=self._groq_payload(query_string),
+            json=self._build_payload(query_string),
         )
         resp.raise_for_status()
         return resp.json()["choices"][0]["message"].get("content", "").strip().lower()
@@ -415,32 +436,40 @@ class ModerationMbertHybrid(MBertToxicContentModel):
     def __init__(
         self,
         confidence_threshold: float = 0.85,
-        groq_api_key: Optional[str] = None,
-        groq_model: str = "openai/gpt-oss-safeguard-20b",
+        api_key: Optional[str] = None,
+        api_key_name: str = DEFAULT_SAFEGUARD_API_KEY_NAME,
+        base_url: str = DEFAULT_SAFEGUARD_BASE_URL,
+        model: str = DEFAULT_SAFEGUARD_MODEL,
         temperature: float = DEFAULT_SAFEGUARD_TEMPERATURE,
         max_tokens: int = DEFAULT_SAFEGUARD_MAX_TOKENS,
+        reasoning_effort: Optional[str] = "low",
         timeout_seconds: float = 10.0,
         max_input_chars: Optional[int] = DEFAULT_SAFEGUARD_MAX_INPUT_CHARS,
         **kwargs,
     ):
         super().__init__(**kwargs)
         self.confidence_threshold = confidence_threshold
-        self.groq_api_key = groq_api_key or os.environ.get("GROQ_API_KEY", "")
-        self.groq_model = groq_model
+        self.api_key_name = api_key_name
+        self.api_key = api_key or os.environ.get(api_key_name, "")
+        self.base_url = base_url.rstrip("/")
+        self.chat_completions_url = f"{self.base_url}/chat/completions"
+        self.model = model
         self.temperature = temperature
         self.max_tokens = max_tokens
+        self.reasoning_effort = reasoning_effort
         self.timeout_seconds = timeout_seconds
         self.max_input_chars = max_input_chars
         self.response_string = f"Method:{MODERATION_MBERT_HYBRID}"
         self.run_in_executor = False  # async for Safeguard fallback
 
-        if not self.groq_api_key:
+        if not self.api_key:
             logger.warning(
-                f"GROQ_API_KEY not set \u2014 {MODERATION_MBERT_HYBRID} will fall back to fast-only"
+                f"{api_key_name} not set \u2014 {MODERATION_MBERT_HYBRID} will fall back to fast-only"
             )
         logger.info(
             "Initialized moderation mbert detector "
-            f"(hybrid mode, confidence_threshold={confidence_threshold})"
+            f"(hybrid mode, confidence_threshold={confidence_threshold}, "
+            f"model={model}, base_url={self.base_url})"
         )
 
     # ------------------------------------------------------------------
@@ -513,23 +542,25 @@ class ModerationMbertHybrid(MBertToxicContentModel):
     ) -> DetectionResult:
         """Run Safeguard on one low-confidence item, with graceful fallback."""
         query_string = self._truncate_if_needed(dome_input.query_string)
+        payload = {
+            "model": self.model,
+            "messages": [
+                {"role": "system", "content": MODERATION_SAFEGUARD_SYSTEM_PROMPT},
+                {"role": "user", "content": query_string},
+            ],
+            "temperature": self.temperature,
+            "max_tokens": self.max_tokens,
+        }
+        if self.reasoning_effort is not None:
+            payload["reasoning_effort"] = self.reasoning_effort
         try:
             resp = await client.post(
-                GROQ_CHAT_COMPLETIONS_URL,
+                self.chat_completions_url,
                 headers={
-                    "Authorization": f"Bearer {self.groq_api_key}",
+                    "Authorization": f"Bearer {self.api_key}",
                     "Content-Type": "application/json",
                 },
-                json={
-                    "model": self.groq_model,
-                    "messages": [
-                        {"role": "system", "content": MODERATION_SAFEGUARD_SYSTEM_PROMPT},
-                        {"role": "user", "content": query_string},
-                    ],
-                    "temperature": self.temperature,
-                    "max_tokens": self.max_tokens,
-                    "reasoning_effort": "low",
-                },
+                json=payload,
             )
             resp.raise_for_status()
             content = (
@@ -575,7 +606,7 @@ class ModerationMbertHybrid(MBertToxicContentModel):
             )
 
         # Low confidence -> escalate to Safeguard if we have a key.
-        if not self.groq_api_key:
+        if not self.api_key:
             flagged = score >= self.score_threshold
             return flagged, self._fast_payload(
                 dome_input, score, prediction, stage="fast-fallback"
@@ -618,7 +649,7 @@ class ModerationMbertHybrid(MBertToxicContentModel):
                     flagged,
                     self._fast_payload(dome_input, score, prediction, stage="fast"),
                 )
-            elif not self.groq_api_key:
+            elif not self.api_key:
                 flagged = score >= self.score_threshold
                 results[idx] = (
                     flagged,

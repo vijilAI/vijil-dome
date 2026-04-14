@@ -241,7 +241,7 @@ async def test_stereotype_eeoc_safeguard_handles_api_error():
     detector = DetectionFactory.get_detector(
         DetectionCategory.Moderation,
         STEREOTYPE_EEOC_SAFEGUARD,
-        groq_api_key="dummy-key-for-test",
+        api_key="dummy-key-for-test",
     )
 
     class _BoomClient:
@@ -268,7 +268,7 @@ async def test_stereotype_eeoc_safeguard_parses_unsafe_verdict():
     detector = DetectionFactory.get_detector(
         DetectionCategory.Moderation,
         STEREOTYPE_EEOC_SAFEGUARD,
-        groq_api_key="dummy-key-for-test",
+        api_key="dummy-key-for-test",
     )
 
     fake_response = AsyncMock()
@@ -503,7 +503,7 @@ async def test_stereotype_eeoc_safeguard_inherits_detection_method():
     detector = DetectionFactory.get_detector(
         DetectionCategory.Moderation,
         STEREOTYPE_EEOC_SAFEGUARD,
-        groq_api_key="dummy-key-for-test",
+        api_key="dummy-key-for-test",
     )
     assert isinstance(detector, DetectionMethod)
     assert detector.max_batch_concurrency == 5
@@ -519,7 +519,7 @@ async def test_stereotype_eeoc_safeguard_truncates_oversize_input():
     detector = DetectionFactory.get_detector(
         DetectionCategory.Moderation,
         STEREOTYPE_EEOC_SAFEGUARD,
-        groq_api_key="dummy-key-for-test",
+        api_key="dummy-key-for-test",
         max_input_chars=100,
     )
 
@@ -556,7 +556,7 @@ async def test_stereotype_eeoc_safeguard_disable_truncation_with_none():
     detector = DetectionFactory.get_detector(
         DetectionCategory.Moderation,
         STEREOTYPE_EEOC_SAFEGUARD,
-        groq_api_key="dummy-key-for-test",
+        api_key="dummy-key-for-test",
         max_input_chars=None,
     )
     assert detector.max_input_chars is None
@@ -574,7 +574,7 @@ async def test_stereotype_eeoc_safeguard_detect_batch_returns_all_results():
     detector = DetectionFactory.get_detector(
         DetectionCategory.Moderation,
         STEREOTYPE_EEOC_SAFEGUARD,
-        groq_api_key="dummy-key-for-test",
+        api_key="dummy-key-for-test",
     )
 
     fake_response = AsyncMock()
@@ -670,7 +670,7 @@ async def test_moderation_mbert_safeguard_inherits_detection_method():
     detector = DetectionFactory.get_detector(
         DetectionCategory.Moderation,
         MODERATION_MBERT_SAFEGUARD,
-        groq_api_key="dummy-key-for-test",
+        api_key="dummy-key-for-test",
     )
     assert isinstance(detector, DetectionMethod)
     assert detector.max_batch_concurrency == 5
@@ -682,7 +682,7 @@ async def test_moderation_mbert_safeguard_handles_api_error():
     detector = DetectionFactory.get_detector(
         DetectionCategory.Moderation,
         MODERATION_MBERT_SAFEGUARD,
-        groq_api_key="dummy-key-for-test",
+        api_key="dummy-key-for-test",
     )
 
     class _BoomClient:
@@ -709,7 +709,7 @@ async def test_moderation_mbert_safeguard_parses_unsafe_verdict():
     detector = DetectionFactory.get_detector(
         DetectionCategory.Moderation,
         MODERATION_MBERT_SAFEGUARD,
-        groq_api_key="dummy-key-for-test",
+        api_key="dummy-key-for-test",
     )
 
     fake_response = AsyncMock()
@@ -745,7 +745,7 @@ async def test_moderation_mbert_safeguard_parses_safe_verdict():
     detector = DetectionFactory.get_detector(
         DetectionCategory.Moderation,
         MODERATION_MBERT_SAFEGUARD,
-        groq_api_key="dummy-key-for-test",
+        api_key="dummy-key-for-test",
     )
 
     fake_response = AsyncMock()
@@ -777,7 +777,7 @@ async def test_moderation_mbert_safeguard_truncates_oversize_input():
     detector = DetectionFactory.get_detector(
         DetectionCategory.Moderation,
         MODERATION_MBERT_SAFEGUARD,
-        groq_api_key="dummy-key-for-test",
+        api_key="dummy-key-for-test",
         max_input_chars=100,
     )
 
@@ -811,7 +811,7 @@ async def test_moderation_mbert_safeguard_detect_batch_returns_all_results():
     detector = DetectionFactory.get_detector(
         DetectionCategory.Moderation,
         MODERATION_MBERT_SAFEGUARD,
-        groq_api_key="dummy-key-for-test",
+        api_key="dummy-key-for-test",
     )
 
     fake_response = AsyncMock()

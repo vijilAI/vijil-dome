@@ -57,17 +57,24 @@ tokens natively, so sliding windows only activate for very long inputs.
 
 ### `prompt-injection-mbert-safeguard`
 
-API-only prompt injection detection using GPT-OSS-Safeguard-20B via Groq.
-~200ms latency, high accuracy, no ModernBERT loaded. Oversize inputs are
-truncated (not chunked) to `max_input_chars` before being sent — the
-~130K token context window makes truncation a rare safety net.
+API-only prompt injection detection backed by an OpenAI-compatible chat
+completions endpoint. Defaults to GPT-OSS-Safeguard-20B on Groq
+(~200ms, high accuracy), but `base_url`, `model`, and `api_key_name`
+can be overridden to point at any OpenAI-style deployment (local vLLM,
+Together, Fireworks, OpenAI itself, ...). No ModernBERT loaded.
+Oversize inputs are truncated (not chunked) to `max_input_chars` before
+being sent — the default Groq model's ~130K token context window makes
+truncation a rare safety net.
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
-| `groq_api_key` | `str` | `None` | Groq API key (falls back to `GROQ_API_KEY`) |
-| `groq_model` | `str` | `"openai/gpt-oss-safeguard-20b"` | Groq model ID |
+| `api_key` | `str` | `None` | API key; falls back to the env var named by `api_key_name` |
+| `api_key_name` | `str` | `"GROQ_API_KEY"` | Name of the env var to read the API key from when `api_key` is not supplied |
+| `base_url` | `str` | `"https://api.groq.com/openai/v1"` | OpenAI-compatible base URL (`/chat/completions` is appended) |
+| `model` | `str` | `"openai/gpt-oss-safeguard-20b"` | Model ID sent to the endpoint |
 | `temperature` | `float` | `0.0` | Sampling temperature |
 | `max_tokens` | `int` | `2000` | Response token budget (must leave room for reasoning tokens — see note below) |
+| `reasoning_effort` | `str \| None` | `"low"` | Passed through when non-null; set to `null` (JSON) / `None` (Python) to omit (required for non-reasoning models like `gpt-4o-mini`) |
 | `timeout_seconds` | `float` | `10.0` | Request timeout |
 | `max_input_chars` | `int` | `400000` | Character cap applied before the request (pass `None` to disable) |
 
@@ -78,7 +85,7 @@ truncated (not chunked) to `max_input_chars` before being sent — the
 > which the detector silently classifies as safe. Keep this generous.
 
 - **Class**: `PImbertSafeguard`
-- **Requires**: `GROQ_API_KEY` environment variable
+- **Requires**: the env var named by `api_key_name` (defaults to `GROQ_API_KEY`)
 
 ### `prompt-injection-mbert-hybrid`
 
@@ -95,10 +102,13 @@ parameters from both `prompt-injection-mbert` and
 | `truncation` | `bool` | `True` | Truncate inputs exceeding `max_length` |
 | `max_length` | `int` | `8192` | Maximum tokens per window (fast stage) |
 | `window_stride` | `int` | `4096` | Token step size between sliding windows |
-| `groq_api_key` | `str` | `None` | Groq API key (falls back to `GROQ_API_KEY`) |
-| `groq_model` | `str` | `"openai/gpt-oss-safeguard-20b"` | Groq model ID |
+| `api_key` | `str` | `None` | API key; falls back to the env var named by `api_key_name` |
+| `api_key_name` | `str` | `"GROQ_API_KEY"` | Name of the env var to read the API key from when `api_key` is not supplied |
+| `base_url` | `str` | `"https://api.groq.com/openai/v1"` | OpenAI-compatible base URL (`/chat/completions` is appended) |
+| `model` | `str` | `"openai/gpt-oss-safeguard-20b"` | Model ID sent to the endpoint |
 | `temperature` | `float` | `0.0` | Sampling temperature |
 | `max_tokens` | `int` | `2000` | Response token budget for the Safeguard escalation |
+| `reasoning_effort` | `str \| None` | `"low"` | Passed through when non-null; set to `null` (JSON) / `None` (Python) to omit (required for non-reasoning models like `gpt-4o-mini`) |
 | `timeout_seconds` | `float` | `10.0` | Request timeout |
 | `max_input_chars` | `int` | `400000` | Character cap applied before the escalation request |
 
@@ -107,7 +117,7 @@ fast-only classification instead of failing.
 
 - **Class**: `PImbertHybrid`
 - **Model**: [vijil/vijil_dome_prompt_injection_detection](https://huggingface.co/vijil/vijil_dome_prompt_injection_detection)
-- **Requires**: `GROQ_API_KEY` environment variable (optional; falls back to fast-only if absent)
+- **Requires**: the env var named by `api_key_name` (defaults to `GROQ_API_KEY`); optional — falls back to fast-only if absent
 
 ### `security-promptguard`
 
@@ -244,17 +254,24 @@ tokens natively.
 
 ### `moderation-mbert-safeguard`
 
-API-only toxicity / moderation detection using GPT-OSS-Safeguard-20B via
-Groq. ~200ms latency, high accuracy, no ModernBERT loaded. Oversize inputs
-are truncated (not chunked) to `max_input_chars` before being sent — the
-~130K token context window makes truncation a rare safety net.
+API-only toxicity / moderation detection backed by an OpenAI-compatible
+chat completions endpoint. Defaults to GPT-OSS-Safeguard-20B on Groq
+(~200ms, high accuracy), but `base_url`, `model`, and `api_key_name`
+can be overridden to point at any OpenAI-style deployment (local vLLM,
+Together, Fireworks, OpenAI itself, ...). No ModernBERT loaded.
+Oversize inputs are truncated (not chunked) to `max_input_chars` before
+being sent — the default Groq model's ~130K token context window makes
+truncation a rare safety net.
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
-| `groq_api_key` | `str` | `None` | Groq API key (falls back to `GROQ_API_KEY`) |
-| `groq_model` | `str` | `"openai/gpt-oss-safeguard-20b"` | Groq model ID |
+| `api_key` | `str` | `None` | API key; falls back to the env var named by `api_key_name` |
+| `api_key_name` | `str` | `"GROQ_API_KEY"` | Name of the env var to read the API key from when `api_key` is not supplied |
+| `base_url` | `str` | `"https://api.groq.com/openai/v1"` | OpenAI-compatible base URL (`/chat/completions` is appended) |
+| `model` | `str` | `"openai/gpt-oss-safeguard-20b"` | Model ID sent to the endpoint |
 | `temperature` | `float` | `0.0` | Sampling temperature |
 | `max_tokens` | `int` | `2000` | Response token budget (must leave room for reasoning tokens — see note below) |
+| `reasoning_effort` | `str \| None` | `"low"` | Passed through when non-null; set to `null` (JSON) / `None` (Python) to omit (required for non-reasoning models like `gpt-4o-mini`) |
 | `timeout_seconds` | `float` | `10.0` | Request timeout |
 | `max_input_chars` | `int` | `400000` | Character cap applied before the request (pass `None` to disable) |
 
@@ -265,7 +282,7 @@ are truncated (not chunked) to `max_input_chars` before being sent — the
 > which the detector silently classifies as safe. Keep this generous.
 
 - **Class**: `ModerationMbertSafeguard`
-- **Requires**: `GROQ_API_KEY` environment variable
+- **Requires**: the env var named by `api_key_name` (defaults to `GROQ_API_KEY`)
 
 ### `moderation-mbert-hybrid`
 
@@ -281,10 +298,13 @@ parameters from both `moderation-mbert` and `moderation-mbert-safeguard`.
 | `truncation` | `bool` | `True` | Truncate inputs exceeding `max_length` |
 | `max_length` | `int` | `8192` | Maximum tokens per window (fast stage) |
 | `window_stride` | `int` | `4096` | Token step size between sliding windows |
-| `groq_api_key` | `str` | `None` | Groq API key (falls back to `GROQ_API_KEY`) |
-| `groq_model` | `str` | `"openai/gpt-oss-safeguard-20b"` | Groq model ID |
+| `api_key` | `str` | `None` | API key; falls back to the env var named by `api_key_name` |
+| `api_key_name` | `str` | `"GROQ_API_KEY"` | Name of the env var to read the API key from when `api_key` is not supplied |
+| `base_url` | `str` | `"https://api.groq.com/openai/v1"` | OpenAI-compatible base URL (`/chat/completions` is appended) |
+| `model` | `str` | `"openai/gpt-oss-safeguard-20b"` | Model ID sent to the endpoint |
 | `temperature` | `float` | `0.0` | Sampling temperature |
 | `max_tokens` | `int` | `2000` | Response token budget for the Safeguard escalation |
+| `reasoning_effort` | `str \| None` | `"low"` | Passed through when non-null; set to `null` (JSON) / `None` (Python) to omit (required for non-reasoning models like `gpt-4o-mini`) |
 | `timeout_seconds` | `float` | `10.0` | Request timeout |
 | `max_input_chars` | `int` | `400000` | Character cap applied before the escalation request |
 
@@ -293,7 +313,7 @@ fast-only classification instead of failing.
 
 - **Class**: `ModerationMbertHybrid`
 - **Model**: [vijil/vijil_dome_toxic_content_detection](https://huggingface.co/vijil/vijil_dome_toxic_content_detection)
-- **Requires**: `GROQ_API_KEY` environment variable (optional; falls back to fast-only if absent)
+- **Requires**: the env var named by `api_key_name` (defaults to `GROQ_API_KEY`); optional — falls back to fast-only if absent
 
 ### `moderations-oai-api`
 
@@ -379,17 +399,24 @@ any chunk flagged flags the whole input, and the max score wins.
 
 ### `stereotype-eeoc-safeguard`
 
-API-only EEOC stereotype detection using GPT-OSS-Safeguard-20B via Groq.
-~200ms latency, ~100% accuracy, no ModernBERT loaded. Oversize inputs are
-truncated (not chunked) to `max_input_chars` before being sent — the
-~130K token context window makes truncation a rare safety net.
+API-only EEOC stereotype detection backed by an OpenAI-compatible chat
+completions endpoint. Defaults to GPT-OSS-Safeguard-20B on Groq
+(~200ms, ~100% accuracy), but `base_url`, `model`, and `api_key_name`
+can be overridden to point at any OpenAI-style deployment (local vLLM,
+Together, Fireworks, OpenAI itself, ...). No ModernBERT loaded.
+Oversize inputs are truncated (not chunked) to `max_input_chars` before
+being sent — the default Groq model's ~130K token context window makes
+truncation a rare safety net.
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
-| `groq_api_key` | `str` | `None` | Groq API key (falls back to `GROQ_API_KEY`) |
-| `groq_model` | `str` | `"openai/gpt-oss-safeguard-20b"` | Groq model ID |
+| `api_key` | `str` | `None` | API key; falls back to the env var named by `api_key_name` |
+| `api_key_name` | `str` | `"GROQ_API_KEY"` | Name of the env var to read the API key from when `api_key` is not supplied |
+| `base_url` | `str` | `"https://api.groq.com/openai/v1"` | OpenAI-compatible base URL (`/chat/completions` is appended) |
+| `model` | `str` | `"openai/gpt-oss-safeguard-20b"` | Model ID sent to the endpoint |
 | `temperature` | `float` | `0.0` | Sampling temperature |
 | `max_tokens` | `int` | `2000` | Response token budget (must leave room for reasoning tokens — see note below) |
+| `reasoning_effort` | `str \| None` | `"low"` | Passed through when non-null; set to `null` (JSON) / `None` (Python) to omit (required for non-reasoning models like `gpt-4o-mini`) |
 | `timeout_seconds` | `float` | `10.0` | Request timeout |
 | `max_input_chars` | `int` | `400000` | Character cap applied before the request (pass `None` to disable) |
 
@@ -400,7 +427,7 @@ truncated (not chunked) to `max_input_chars` before being sent — the
 > which the detector silently classifies as safe. Keep this generous.
 
 - **Class**: `StereotypeEEOCSafeguard`
-- **Requires**: `GROQ_API_KEY` environment variable
+- **Requires**: the env var named by `api_key_name` (defaults to `GROQ_API_KEY`)
 
 ### `stereotype-eeoc-hybrid`
 
@@ -414,10 +441,13 @@ parameters from both `stereotype-eeoc-fast` and `stereotype-eeoc-safeguard`.
 | `confidence_threshold` | `float` | `0.85` | Fast-stage confidence below which the input is escalated to Safeguard |
 | `score_threshold` | `float` | `0.5` | Stereotype probability threshold (fast stage) |
 | `max_length` | `int` | `512` | Maximum tokens per chunk (fast stage) |
-| `groq_api_key` | `str` | `None` | Groq API key (falls back to `GROQ_API_KEY`) |
-| `groq_model` | `str` | `"openai/gpt-oss-safeguard-20b"` | Groq model ID |
+| `api_key` | `str` | `None` | API key; falls back to the env var named by `api_key_name` |
+| `api_key_name` | `str` | `"GROQ_API_KEY"` | Name of the env var to read the API key from when `api_key` is not supplied |
+| `base_url` | `str` | `"https://api.groq.com/openai/v1"` | OpenAI-compatible base URL (`/chat/completions` is appended) |
+| `model` | `str` | `"openai/gpt-oss-safeguard-20b"` | Model ID sent to the endpoint |
 | `temperature` | `float` | `0.0` | Sampling temperature |
 | `max_tokens` | `int` | `2000` | Response token budget for the Safeguard escalation |
+| `reasoning_effort` | `str \| None` | `"low"` | Passed through when non-null; set to `null` (JSON) / `None` (Python) to omit (required for non-reasoning models like `gpt-4o-mini`) |
 | `timeout_seconds` | `float` | `10.0` | Request timeout |
 | `max_input_chars` | `int` | `400000` | Character cap applied before the escalation request |
 
@@ -426,7 +456,7 @@ fast-only classification instead of failing.
 
 - **Class**: `StereotypeEEOCHybrid`
 - **Model**: [vijil/stereotype-eeoc-detector](https://huggingface.co/vijil/stereotype-eeoc-detector)
-- **Requires**: `GROQ_API_KEY` environment variable (optional; falls back to fast-only if absent)
+- **Requires**: the env var named by `api_key_name` (defaults to `GROQ_API_KEY`); optional — falls back to fast-only if absent
 
 ---
 

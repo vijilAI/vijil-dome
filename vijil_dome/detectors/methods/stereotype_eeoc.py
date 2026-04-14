@@ -120,7 +120,13 @@ _SEP_STRING_TOKEN_BUDGET = 6
 # Model special-token overhead (CLS + SEP emitted by the tokenizer).
 _SPECIAL_TOKEN_OVERHEAD = 2
 
-GROQ_CHAT_COMPLETIONS_URL = "https://api.groq.com/openai/v1/chat/completions"
+# The safeguard endpoint is OpenAI-compatible. Groq is the default, but
+# callers can point at any OpenAI-compatible `/chat/completions` endpoint
+# (local vLLM, Together, Fireworks, OpenAI itself, ...) by overriding
+# `base_url`, `model`, and `api_key_name` on the detector.
+DEFAULT_SAFEGUARD_API_KEY_NAME = "GROQ_API_KEY"
+DEFAULT_SAFEGUARD_BASE_URL = "https://api.groq.com/openai/v1"
+DEFAULT_SAFEGUARD_MODEL = "openai/gpt-oss-safeguard-20b"
 
 
 class StereotypeEEOCBase(HFBaseModel):
@@ -434,42 +440,55 @@ class StereotypeEEOCFast(StereotypeEEOCBase):
 @register_method(DetectionCategory.Moderation, STEREOTYPE_EEOC_SAFEGUARD)
 class StereotypeEEOCSafeguard(DetectionMethod):
     """
-    Accurate EEOC stereotype detection using GPT-OSS-Safeguard-20B via Groq.
-    ~200ms latency, ~100% accuracy, requires GROQ_API_KEY.
+    Accurate EEOC stereotype detection backed by an OpenAI-compatible chat
+    completions endpoint. Defaults to GPT-OSS-Safeguard-20B on Groq
+    (~200ms, ~100% accuracy), but the endpoint, model, and credential
+    name are all overridable so callers can point at any OpenAI-style
+    deployment (local vLLM, Together, Fireworks, OpenAI proper, ...).
 
     Does not load ModernBERT — this mode is API-only.
 
     Oversize inputs are **truncated** (not chunked) to ``max_input_chars``
-    before being sent to Groq, matching the convention used by other
-    API-backed detectors in this library (see ``LlmBaseDetector``). The
-    default is intentionally generous — GPT-OSS-Safeguard-20B has a
+    before being sent to the endpoint, matching the convention used by
+    other API-backed detectors in this library (see ``LlmBaseDetector``).
+    The default is intentionally generous — GPT-OSS-Safeguard-20B has a
     ~130K token context window, so truncation should be a rare
     safety-net rather than something callers hit routinely.
     """
 
     def __init__(
         self,
-        groq_api_key: Optional[str] = None,
-        groq_model: str = "openai/gpt-oss-safeguard-20b",
+        api_key: Optional[str] = None,
+        api_key_name: str = DEFAULT_SAFEGUARD_API_KEY_NAME,
+        base_url: str = DEFAULT_SAFEGUARD_BASE_URL,
+        model: str = DEFAULT_SAFEGUARD_MODEL,
         temperature: float = DEFAULT_SAFEGUARD_TEMPERATURE,
         max_tokens: int = DEFAULT_SAFEGUARD_MAX_TOKENS,
+        reasoning_effort: Optional[str] = "low",
         timeout_seconds: float = 10.0,
         max_input_chars: Optional[int] = DEFAULT_SAFEGUARD_MAX_INPUT_CHARS,
         **kwargs,
     ):
-        self.groq_api_key = groq_api_key or os.environ.get("GROQ_API_KEY", "")
-        self.groq_model = groq_model
+        self.api_key_name = api_key_name
+        self.api_key = api_key or os.environ.get(api_key_name, "")
+        self.base_url = base_url.rstrip("/")
+        self.chat_completions_url = f"{self.base_url}/chat/completions"
+        self.model = model
         self.temperature = temperature
         self.max_tokens = max_tokens
+        self.reasoning_effort = reasoning_effort
         self.timeout_seconds = timeout_seconds
         self.max_input_chars = max_input_chars
         self.response_string = f"Method:{STEREOTYPE_EEOC_SAFEGUARD}"
         self.run_in_executor = False  # async HTTP, no executor needed
-        if not self.groq_api_key:
+        if not self.api_key:
             logger.warning(
-                f"GROQ_API_KEY not set — {STEREOTYPE_EEOC_SAFEGUARD} will fail at runtime"
+                f"{api_key_name} not set — {STEREOTYPE_EEOC_SAFEGUARD} will fail at runtime"
             )
-        logger.info("Initialized EEOC stereotype detector (Safeguard mode)")
+        logger.info(
+            "Initialized EEOC stereotype detector "
+            f"(Safeguard mode, model={model}, base_url={self.base_url})"
+        )
 
     def _truncate_if_needed(self, text: str) -> str:
         """Cap ``text`` at ``self.max_input_chars`` to stay under the
@@ -483,28 +502,30 @@ class StereotypeEEOCSafeguard(DetectionMethod):
             return text[: self.max_input_chars]
         return text
 
-    def _groq_payload(self, query_string: str) -> dict:
-        return {
-            "model": self.groq_model,
+    def _build_payload(self, query_string: str) -> dict:
+        payload = {
+            "model": self.model,
             "messages": [
                 {"role": "system", "content": SAFEGUARD_SYSTEM_PROMPT},
                 {"role": "user", "content": query_string},
             ],
             "temperature": self.temperature,
             "max_tokens": self.max_tokens,
-            "reasoning_effort": "low",
         }
+        if self.reasoning_effort is not None:
+            payload["reasoning_effort"] = self.reasoning_effort
+        return payload
 
     async def _call_safeguard(
         self, client: httpx.AsyncClient, query_string: str
     ) -> str:
         resp = await client.post(
-            GROQ_CHAT_COMPLETIONS_URL,
+            self.chat_completions_url,
             headers={
-                "Authorization": f"Bearer {self.groq_api_key}",
+                "Authorization": f"Bearer {self.api_key}",
                 "Content-Type": "application/json",
             },
-            json=self._groq_payload(query_string),
+            json=self._build_payload(query_string),
         )
         resp.raise_for_status()
         return resp.json()["choices"][0]["message"].get("content", "").strip().lower()
@@ -567,32 +588,40 @@ class StereotypeEEOCHybrid(StereotypeEEOCBase):
     def __init__(
         self,
         confidence_threshold: float = 0.85,
-        groq_api_key: Optional[str] = None,
-        groq_model: str = "openai/gpt-oss-safeguard-20b",
+        api_key: Optional[str] = None,
+        api_key_name: str = DEFAULT_SAFEGUARD_API_KEY_NAME,
+        base_url: str = DEFAULT_SAFEGUARD_BASE_URL,
+        model: str = DEFAULT_SAFEGUARD_MODEL,
         temperature: float = DEFAULT_SAFEGUARD_TEMPERATURE,
         max_tokens: int = DEFAULT_SAFEGUARD_MAX_TOKENS,
+        reasoning_effort: Optional[str] = "low",
         timeout_seconds: float = 10.0,
         max_input_chars: Optional[int] = DEFAULT_SAFEGUARD_MAX_INPUT_CHARS,
         **kwargs,
     ):
         super().__init__(**kwargs)
         self.confidence_threshold = confidence_threshold
-        self.groq_api_key = groq_api_key or os.environ.get("GROQ_API_KEY", "")
-        self.groq_model = groq_model
+        self.api_key_name = api_key_name
+        self.api_key = api_key or os.environ.get(api_key_name, "")
+        self.base_url = base_url.rstrip("/")
+        self.chat_completions_url = f"{self.base_url}/chat/completions"
+        self.model = model
         self.temperature = temperature
         self.max_tokens = max_tokens
+        self.reasoning_effort = reasoning_effort
         self.timeout_seconds = timeout_seconds
         self.max_input_chars = max_input_chars
         self.response_string = f"Method:{STEREOTYPE_EEOC_HYBRID}"
         self.run_in_executor = False  # async for Safeguard fallback
 
-        if not self.groq_api_key:
+        if not self.api_key:
             logger.warning(
-                f"GROQ_API_KEY not set — {STEREOTYPE_EEOC_HYBRID} will fall back to fast-only"
+                f"{api_key_name} not set — {STEREOTYPE_EEOC_HYBRID} will fall back to fast-only"
             )
         logger.info(
             "Initialized EEOC stereotype detector "
-            f"(hybrid mode, confidence_threshold={confidence_threshold})"
+            f"(hybrid mode, confidence_threshold={confidence_threshold}, "
+            f"model={model}, base_url={self.base_url})"
         )
 
     # Fast-stage payload builder — shared between detect and detect_batch.
@@ -661,23 +690,25 @@ class StereotypeEEOCHybrid(StereotypeEEOCBase):
     ) -> DetectionResult:
         """Run Safeguard on one low-confidence item, with graceful fallback."""
         query_string = self._truncate_if_needed(dome_input.query_string)
+        payload = {
+            "model": self.model,
+            "messages": [
+                {"role": "system", "content": SAFEGUARD_SYSTEM_PROMPT},
+                {"role": "user", "content": query_string},
+            ],
+            "temperature": self.temperature,
+            "max_tokens": self.max_tokens,
+        }
+        if self.reasoning_effort is not None:
+            payload["reasoning_effort"] = self.reasoning_effort
         try:
             resp = await client.post(
-                GROQ_CHAT_COMPLETIONS_URL,
+                self.chat_completions_url,
                 headers={
-                    "Authorization": f"Bearer {self.groq_api_key}",
+                    "Authorization": f"Bearer {self.api_key}",
                     "Content-Type": "application/json",
                 },
-                json={
-                    "model": self.groq_model,
-                    "messages": [
-                        {"role": "system", "content": SAFEGUARD_SYSTEM_PROMPT},
-                        {"role": "user", "content": query_string},
-                    ],
-                    "temperature": self.temperature,
-                    "max_tokens": self.max_tokens,
-                    "reasoning_effort": "low",
-                },
+                json=payload,
             )
             resp.raise_for_status()
             content = (
@@ -716,7 +747,7 @@ class StereotypeEEOCHybrid(StereotypeEEOCBase):
             return flagged, self._fast_payload(dome_input, score, prediction, stage="fast")
 
         # Low confidence → escalate to Safeguard if we have a key.
-        if not self.groq_api_key:
+        if not self.api_key:
             flagged = score >= self.score_threshold
             return flagged, self._fast_payload(
                 dome_input, score, prediction, stage="fast-fallback"
@@ -759,7 +790,7 @@ class StereotypeEEOCHybrid(StereotypeEEOCBase):
                     flagged,
                     self._fast_payload(dome_input, score, prediction, stage="fast"),
                 )
-            elif not self.groq_api_key:
+            elif not self.api_key:
                 flagged = score >= self.score_threshold
                 results[idx] = (
                     flagged,
