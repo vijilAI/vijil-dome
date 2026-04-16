@@ -33,6 +33,7 @@ __all__ = [
     "gpt_oss_safeguard_policy",
     "policy_sections_detector",
     "stereotype_eeoc",
+    "prompt_harmfulness",
 ]
 
 try:

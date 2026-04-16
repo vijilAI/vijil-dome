@@ -30,6 +30,9 @@ from vijil_dome.detectors.methods.stereotype_eeoc import (  # noqa: F401
     DEFAULT_SAFEGUARD_MAX_INPUT_CHARS,
     StereotypeEEOCSafeguard,
 )
+from vijil_dome.detectors.methods.prompt_harmfulness import (  # noqa: F401
+    PromptHarmfulnessSafeguard,
+)
 from vijil_dome.types import DomePayload
 
 from vijil_dome.detectors import (
@@ -43,6 +46,8 @@ from vijil_dome.detectors import (
     STEREOTYPE_EEOC_FAST,
     STEREOTYPE_EEOC_SAFEGUARD,
     STEREOTYPE_EEOC_HYBRID,
+    PROMPT_HARMFULNESS_FAST,
+    PROMPT_HARMFULNESS_SAFEGUARD,
     DetectionFactory,
     DetectionCategory,
     DetectionMethod,
@@ -930,3 +935,130 @@ async def test_moderation_mbert_classify_methods_exist():
     for s, p in results:
         assert isinstance(s, float)
         assert isinstance(p, dict)
+
+
+# ----------------------------------------------------------------------
+# Prompt Harmfulness detectors
+# ----------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_prompt_harmfulness_fast_factory_resolves():
+    """Factory must resolve the registered prompt-harmfulness-fast method."""
+    detector = DetectionFactory.get_detector(
+        DetectionCategory.Moderation, PROMPT_HARMFULNESS_FAST
+    )
+    assert detector is not None
+    assert detector.score_threshold == 0.95
+
+
+@pytest.mark.asyncio
+async def test_prompt_harmfulness_fast_clears_benign_input():
+    """A benign, factual prompt must not be flagged."""
+    detector = DetectionFactory.get_detector(
+        DetectionCategory.Moderation, PROMPT_HARMFULNESS_FAST
+    )
+    flagged, payload = await detector.detect("What is the capital of France?")
+    assert not flagged
+    assert payload["label"] == "safe"
+
+
+@pytest.mark.asyncio
+async def test_prompt_harmfulness_fast_detect_batch():
+    """detect_batch must handle a mix of inputs and return correct count."""
+    detector = DetectionFactory.get_detector(
+        DetectionCategory.Moderation, PROMPT_HARMFULNESS_FAST
+    )
+    inputs = [
+        "What is photosynthesis?",
+        "Tell me about the weather today.",
+        DomePayload(text="How does gravity work?"),
+    ]
+    results = await detector.detect_batch(inputs)
+    assert len(results) == 3
+    for flagged, payload in results:
+        assert payload["detector"] == PROMPT_HARMFULNESS_FAST
+        assert isinstance(payload["score"], float)
+
+
+@pytest.mark.asyncio
+async def test_prompt_harmfulness_safeguard_factory_resolves():
+    """Safeguard mode must resolve without loading ModernBERT."""
+    detector = DetectionFactory.get_detector(
+        DetectionCategory.Moderation, PROMPT_HARMFULNESS_SAFEGUARD
+    )
+    assert detector is not None
+    assert detector.temperature == 0.0
+    assert detector.max_tokens == 2000
+
+
+@pytest.mark.asyncio
+async def test_prompt_harmfulness_safeguard_handles_api_error():
+    """When the API raises, the detector must return label='error'."""
+    detector = DetectionFactory.get_detector(
+        DetectionCategory.Moderation,
+        PROMPT_HARMFULNESS_SAFEGUARD,
+        api_key="dummy-key-for-test",
+    )
+
+    class _BoomClient:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return False
+
+        async def post(self, *args, **kwargs):
+            raise httpx.ConnectError("simulated network failure")
+
+    with patch("httpx.AsyncClient", return_value=_BoomClient()):
+        flagged, payload = await detector.detect("Any input.")
+
+    assert flagged is False
+    assert payload["label"] == "error"
+    assert "simulated network failure" in payload["error"]
+
+
+@pytest.mark.asyncio
+async def test_prompt_harmfulness_safeguard_parses_unsafe_verdict():
+    """When API returns 'unsafe', the detector must flag."""
+    detector = DetectionFactory.get_detector(
+        DetectionCategory.Moderation,
+        PROMPT_HARMFULNESS_SAFEGUARD,
+        api_key="dummy-key-for-test",
+    )
+
+    fake_response = AsyncMock()
+    fake_response.raise_for_status = lambda: None
+    fake_response.json = lambda: {
+        "choices": [{"message": {"content": "unsafe"}}]
+    }
+
+    class _OkClient:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return False
+
+        async def post(self, *args, **kwargs):
+            return fake_response
+
+    with patch("httpx.AsyncClient", return_value=_OkClient()):
+        flagged, payload = await detector.detect("A harmful prompt.")
+
+    assert flagged
+    assert payload["label"] == "harmful"
+    assert payload["safeguard_verdict"] == "unsafe"
+    assert payload["response_string"].startswith("Method:prompt-harmfulness-safeguard")
+
+
+@pytest.mark.asyncio
+async def test_prompt_harmfulness_safeguard_inherits_detection_method():
+    """Safeguard must inherit from DetectionMethod."""
+    detector = DetectionFactory.get_detector(
+        DetectionCategory.Moderation,
+        PROMPT_HARMFULNESS_SAFEGUARD,
+        api_key="dummy-key-for-test",
+    )
+    assert isinstance(detector, DetectionMethod)
+    assert detector.max_batch_concurrency == 5
