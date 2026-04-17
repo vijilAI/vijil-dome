@@ -140,13 +140,27 @@ class PromptHarmfulnessFast(HFBaseModel):
             return item["score"]
         return 1.0 - item["score"]
 
+    @staticmethod
+    def _extract_prompt_text(dome_input: DomePayload) -> str:
+        """Extract only the prompt/text portion — ignore the response.
+
+        This detector classifies the user's *prompt*, not the agent's
+        response. Using ``query_string`` would include both sides when
+        a structured ``DomePayload(prompt=..., response=...)`` is
+        provided, which could cause false positives driven by the
+        response text.
+        """
+        if dome_input.prompt is not None:
+            return dome_input.prompt
+        return dome_input.text or ""
+
     def sync_detect(
         self,
         dome_input: DomePayload,
         agent_id: Optional[str] = None,
     ) -> DetectionResult:
         dome_input = DomePayload.coerce(dome_input)
-        query_string = dome_input.query_string
+        query_string = self._extract_prompt_text(dome_input)
 
         chunks = chunk_text(
             query_string, self.tokenizer, self.max_length, self.window_stride
@@ -173,9 +187,9 @@ class PromptHarmfulnessFast(HFBaseModel):
         # Multi-window: batch all chunks, any-positive with max score
         all_preds = self.classifier(chunks, batch_size=self.max_batch_concurrency)
         max_score = 0.0
-        best_pred = {}
-        for pred in all_preds:
-            item = pred[0] if isinstance(pred, list) else pred
+        best_pred: dict = {}
+        for pred in all_preds:  # type: ignore[assignment]
+            item = pred[0] if isinstance(pred, list) else pred  # type: ignore[assignment]
             score = self._extract_harmful_score(item)
             if score > max_score:
                 max_score = score
@@ -208,7 +222,7 @@ class PromptHarmfulnessFast(HFBaseModel):
         flat_chunks: List[str] = []
         ranges = []
         for di in dome_inputs:
-            query_string = di.query_string
+            query_string = self._extract_prompt_text(di)
             chunks = chunk_text(
                 query_string, self.tokenizer, self.max_length, self.window_stride
             )
@@ -224,13 +238,13 @@ class PromptHarmfulnessFast(HFBaseModel):
         # Phase 3: re-aggregate per input using max score
         results: BatchDetectionResult = []
         for dome_input, (start, end) in zip(dome_inputs, ranges):
-            query_string = dome_input.query_string
+            query_string = self._extract_prompt_text(dome_input)
             chunk_preds = all_preds[start:end]
             num_windows = end - start
             max_score = 0.0
-            best_pred = {}
+            best_pred: dict = {}
             for pred in chunk_preds:
-                item = pred[0] if isinstance(pred, list) else pred
+                item = pred[0] if isinstance(pred, list) else pred  # type: ignore[assignment]
                 score = self._extract_harmful_score(item)
                 if score > max_score:
                     max_score = score
@@ -322,9 +336,16 @@ class PromptHarmfulnessSafeguard(DetectionMethod):
             payload["reasoning_effort"] = self.reasoning_effort
         return payload
 
+    @staticmethod
+    def _extract_prompt_text(dome_input: DomePayload) -> str:
+        """Extract only the prompt/text — same logic as the fast mode."""
+        if dome_input.prompt is not None:
+            return dome_input.prompt
+        return dome_input.text or ""
+
     async def detect(self, dome_input: DomePayload) -> DetectionResult:
         dome_input = DomePayload.coerce(dome_input)
-        query_string = self._truncate_if_needed(dome_input.query_string)
+        query_string = self._truncate_if_needed(self._extract_prompt_text(dome_input))
         logger.info("Detecting prompt harmfulness using Safeguard...")
         try:
             async with httpx.AsyncClient(timeout=self.timeout_seconds) as client:
