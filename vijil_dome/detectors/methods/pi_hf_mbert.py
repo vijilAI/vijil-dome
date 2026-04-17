@@ -547,6 +547,7 @@ class PImbertHybrid(MBertPromptInjectionModel):
 
         if self._use_vijil_inference:
             from vijil_dome.detectors.utils.vijil_inference import VijilInferenceClient
+            assert vijil_inference_url is not None
             self.score_threshold = kwargs.get("score_threshold", 0.5)
             self._vijil_client = VijilInferenceClient(
                 base_url=vijil_inference_url,
