@@ -37,6 +37,7 @@ MODERATION_DEBERTA = "moderation-deberta"
 MODERATION_MBERT = "moderation-mbert"
 MODERATION_MBERT_SAFEGUARD = "moderation-mbert-safeguard"
 MODERATION_MBERT_HYBRID = "moderation-mbert-hybrid"
+MODERATION_MBERT_REMOTE = "moderation-mbert-remote"
 
 PRIVACY_PRESIDIO = "privacy-presidio"
 DETECT_SECRETS = "detect-secrets"
@@ -48,6 +49,7 @@ PI_DEBERTA_FINETUNED_11122024 = "prompt-injection-deberta-finetuned-11122024"
 PI_MBERT = "prompt-injection-mbert"
 PI_MBERT_SAFEGUARD = "prompt-injection-mbert-safeguard"
 PI_MBERT_HYBRID = "prompt-injection-mbert-hybrid"
+PI_MBERT_REMOTE = "prompt-injection-mbert-remote"
 SECURITY_LLM = "security-llm"
 SECURITY_EMBEDDINGS = "security-embeddings"
 SECURITY_PROMPTGUARD = "security-promptguard"
@@ -65,6 +67,7 @@ POLICY_SECTIONS = "policy-sections"
 STEREOTYPE_EEOC_FAST = "stereotype-eeoc-fast"
 STEREOTYPE_EEOC_SAFEGUARD = "stereotype-eeoc-safeguard"
 STEREOTYPE_EEOC_HYBRID = "stereotype-eeoc-hybrid"
+STEREOTYPE_EEOC_REMOTE = "stereotype-eeoc-remote"
 
 # Define types for detection results and data
 DetectorType = Dict["type", str]
