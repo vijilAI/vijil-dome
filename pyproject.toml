@@ -4,7 +4,7 @@ build-backend = "poetry.core.masonry.api"
 
 [tool.poetry]
 name = "vijil-dome"
-version = "1.6.5"
+version = "1.6.6"
 description = ""
 authors = [
     "Pradeep Das <pradeep@vijil.ai>",
