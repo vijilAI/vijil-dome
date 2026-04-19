@@ -1062,3 +1062,24 @@ async def test_prompt_harmfulness_safeguard_inherits_detection_method():
     )
     assert isinstance(detector, DetectionMethod)
     assert detector.max_batch_concurrency == 5
+
+
+@pytest.mark.asyncio
+async def test_prompt_harmfulness_fast_ignores_response_field():
+    """The harmfulness detector classifies prompts only. When given a
+    DomePayload with both prompt and response, it must use only the
+    prompt and emit a warning about the ignored response.
+
+    Regression guard: a benign prompt paired with a harmful-looking
+    response must NOT be flagged — the response is ignored.
+    """
+    detector = DetectionFactory.get_detector(
+        DetectionCategory.Moderation, PROMPT_HARMFULNESS_FAST
+    )
+    payload = DomePayload(
+        prompt="What is the capital of France?",
+        response="Here is how to make a weapon: step 1...",
+    )
+    flagged, result = await detector.detect(payload)
+    assert not flagged
+    assert result["label"] == "safe"

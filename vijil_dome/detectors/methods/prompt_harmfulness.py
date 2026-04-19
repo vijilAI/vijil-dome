@@ -150,6 +150,12 @@ class PromptHarmfulnessFast(HFBaseModel):
         provided, which could cause false positives driven by the
         response text.
         """
+        if dome_input.response is not None:
+            logger.warning(
+                "prompt-harmfulness detector received a DomePayload with "
+                "a response field. This detector classifies prompts only; "
+                "the response will be ignored."
+            )
         if dome_input.prompt is not None:
             return dome_input.prompt
         return dome_input.text or ""
@@ -336,16 +342,16 @@ class PromptHarmfulnessSafeguard(DetectionMethod):
             payload["reasoning_effort"] = self.reasoning_effort
         return payload
 
-    @staticmethod
-    def _extract_prompt_text(dome_input: DomePayload) -> str:
-        """Extract only the prompt/text — same logic as the fast mode."""
-        if dome_input.prompt is not None:
-            return dome_input.prompt
-        return dome_input.text or ""
-
     async def detect(self, dome_input: DomePayload) -> DetectionResult:
         dome_input = DomePayload.coerce(dome_input)
-        query_string = self._truncate_if_needed(self._extract_prompt_text(dome_input))
+        if dome_input.response is not None:
+            logger.warning(
+                "prompt-harmfulness-safeguard received a DomePayload with "
+                "a response field. This detector classifies prompts only; "
+                "the response will be ignored."
+            )
+        prompt_text = dome_input.prompt if dome_input.prompt is not None else (dome_input.text or "")
+        query_string = self._truncate_if_needed(prompt_text)
         logger.info("Detecting prompt harmfulness using Safeguard...")
         try:
             async with httpx.AsyncClient(timeout=self.timeout_seconds) as client:
