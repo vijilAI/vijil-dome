@@ -105,7 +105,7 @@ class PromptHarmfulnessFast(HFBaseModel):
 
     def __init__(
         self,
-        model_name: str = "ciphertext/vijil-prompt-harmfulness-detector-v1",
+        model_name: str = "vijil/prompt-harmfulness-detector",
         tokenizer_name: str = "answerdotai/ModernBERT-base",
         score_threshold: float = 0.95,
         max_length: int = 512,

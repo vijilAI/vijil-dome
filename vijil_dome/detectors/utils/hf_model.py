@@ -15,13 +15,44 @@
 # vijil and vijil-dome are trademarks owned by Vijil Inc.
 
 import logging
+import os
 from abc import ABC, abstractmethod
+from pathlib import Path
 from typing import Optional
 from transformers import AutoTokenizer, AutoModelForSequenceClassification
 from vijil_dome.detectors import DetectionMethod, DetectionResult
 from vijil_dome.types import DomePayload
 
 logger = logging.getLogger("vijil.dome")
+
+# Base directory where the K8s init container (or a local setup script)
+# syncs model weights from S3.  Detectors check this path first and fall
+# back to the HuggingFace Hub when the local copy is absent.
+MODEL_CACHE_DIR = os.environ.get("VIJIL_MODEL_DIR", "/models")
+
+
+def resolve_model_path(model_name: str) -> str:
+    """Return a local path if the model exists on disk, else the original
+    HF Hub identifier so ``from_pretrained`` downloads it.
+
+    The convention: if ``model_name`` looks like an HF repo ID (contains
+    a ``/`` but is not an absolute path), check whether a matching
+    directory exists under ``MODEL_CACHE_DIR``.  For example,
+    ``vijil/stereotype-eeoc-detector`` resolves to
+    ``/models/vijil/stereotype-eeoc-detector`` when that directory
+    contains a ``config.json``.
+    """
+    if os.path.isabs(model_name) or os.path.isdir(model_name):
+        return model_name  # already a concrete path
+
+    candidate = Path(MODEL_CACHE_DIR) / model_name
+    if candidate.is_dir() and (candidate / "config.json").exists():
+        logger.info(
+            "Resolved model to local path: %s (from %s)", candidate, model_name
+        )
+        return str(candidate)
+
+    return model_name  # fall back to HF Hub download
 
 
 class HFBaseModel(DetectionMethod, ABC):
@@ -36,15 +67,17 @@ class HFBaseModel(DetectionMethod, ABC):
         local_files_only: bool = False,
         trust_remote_code: bool = False,
     ):
-        logger.info(f"Initializing Hugging Face model: {model_name}...")
+        resolved = resolve_model_path(model_name)
+        logger.info(f"Initializing Hugging Face model: {resolved}...")
         self.model = AutoModelForSequenceClassification.from_pretrained(
-            model_name,
+            resolved,
             local_files_only=local_files_only,
             trust_remote_code=trust_remote_code,
         )
         model_tokenizer_name = tokenizer_name or model_name
+        resolved_tokenizer = resolve_model_path(model_tokenizer_name)
         self.tokenizer = AutoTokenizer.from_pretrained(
-            model_tokenizer_name,
+            resolved_tokenizer,
             local_files_only=local_files_only,
             trust_remote_code=trust_remote_code,
         )
