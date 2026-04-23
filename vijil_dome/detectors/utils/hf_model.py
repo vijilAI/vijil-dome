@@ -19,7 +19,13 @@ import os
 from abc import ABC, abstractmethod
 from pathlib import Path
 from typing import Optional
-from transformers import AutoTokenizer, AutoModelForSequenceClassification
+
+try:
+    from transformers import AutoTokenizer, AutoModelForSequenceClassification
+    _HAS_TRANSFORMERS = True
+except ImportError:
+    _HAS_TRANSFORMERS = False
+
 from vijil_dome.detectors import DetectionMethod, DetectionResult
 from vijil_dome.types import DomePayload
 
@@ -67,6 +73,11 @@ class HFBaseModel(DetectionMethod, ABC):
         local_files_only: bool = False,
         trust_remote_code: bool = False,
     ):
+        if not _HAS_TRANSFORMERS:
+            raise ImportError(
+                f"{self.__class__.__name__} requires 'torch' and 'transformers'. "
+                "Install with: pip install vijil-dome[local]"
+            )
         resolved = resolve_model_path(model_name)
         logger.info(f"Initializing Hugging Face model: {resolved}...")
         self.model = AutoModelForSequenceClassification.from_pretrained(

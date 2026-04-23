@@ -69,13 +69,19 @@ import os
 from typing import Dict, List, Optional, Tuple, Union
 
 import httpx
-import torch
-from transformers import pipeline
+
+try:
+    import torch
+    from transformers import pipeline
+    _HAS_TORCH = True
+except ImportError:
+    _HAS_TORCH = False
 
 from vijil_dome.detectors import (
     STEREOTYPE_EEOC_FAST,
     STEREOTYPE_EEOC_SAFEGUARD,
     STEREOTYPE_EEOC_HYBRID,
+    STEREOTYPE_EEOC_REMOTE,
     register_method,
     DetectionCategory,
     DetectionMethod,
@@ -128,6 +134,9 @@ DEFAULT_SAFEGUARD_API_KEY_NAME = "GROQ_API_KEY"
 DEFAULT_SAFEGUARD_BASE_URL = "https://api.groq.com/openai/v1"
 DEFAULT_SAFEGUARD_MODEL = "openai/gpt-oss-safeguard-20b"
 
+# Default model name on Vijil's inference endpoint (matches HuggingFace).
+DEFAULT_VIJIL_INFERENCE_STEREOTYPE_MODEL = "vijil/stereotype-eeoc-detector"
+
 
 class StereotypeEEOCBase(HFBaseModel):
     """Base class for EEOC stereotype detection using ModernBERT."""
@@ -147,6 +156,11 @@ class StereotypeEEOCBase(HFBaseModel):
         score_threshold: float = 0.5,
         max_length: int = 512,
     ):
+        if not _HAS_TORCH:
+            raise ImportError(
+                f"{STEREOTYPE_EEOC_FAST} requires 'torch' and 'transformers'. "
+                "Install with: pip install vijil-dome[local]"
+            )
         try:
             super().__init__(
                 model_name=model_name,
@@ -573,6 +587,83 @@ class StereotypeEEOCSafeguard(DetectionMethod):
 
 
 # ----------------------------------------------------------------------
+# Remote mode (Vijil inference endpoint, no local model)
+# ----------------------------------------------------------------------
+
+
+@register_method(DetectionCategory.Moderation, STEREOTYPE_EEOC_REMOTE)
+class StereotypeEEOCRemote(DetectionMethod):
+    """EEOC stereotype detection via Vijil's remote inference service.
+
+    Calls Vijil's hosted ModernBERT endpoint — no local model, no torch.
+    Suitable for lightweight deployments where the inference server is
+    co-located or latency is acceptable.
+
+    This detector only works with Vijil's inference endpoint — do not
+    point it at arbitrary OpenAI-compatible services.
+    """
+
+    def __init__(
+        self,
+        vijil_inference_url: str,
+        vijil_inference_model: Optional[str] = None,
+        vijil_inference_api_key: Optional[str] = None,
+        score_threshold: float = 0.5,
+        timeout_seconds: float = 10.0,
+    ):
+        from vijil_dome.detectors.utils.vijil_inference import VijilInferenceClient
+
+        self.score_threshold = score_threshold
+        self.response_string = f"Method:{STEREOTYPE_EEOC_REMOTE}"
+        self.run_in_executor = False
+        self._vijil_client = VijilInferenceClient(
+            base_url=vijil_inference_url,
+            model=vijil_inference_model or DEFAULT_VIJIL_INFERENCE_STEREOTYPE_MODEL,
+            api_key=vijil_inference_api_key,
+            timeout_seconds=timeout_seconds,
+        )
+        logger.info(
+            "Initialized EEOC stereotype detector (remote mode, "
+            f"model={self._vijil_client.model}, url={self._vijil_client.base_url})"
+        )
+
+    async def detect(self, dome_input: DomePayload) -> DetectionResult:
+        dome_input = DomePayload.coerce(dome_input)
+        query_string = dome_input.query_string
+        logger.info("Detecting EEOC stereotype using Vijil remote inference...")
+        try:
+            async with httpx.AsyncClient(
+                timeout=self._vijil_client.timeout_seconds
+            ) as client:
+                score = await self._vijil_client.classify(client, query_string)
+            flagged = score >= self.score_threshold
+            return flagged, {
+                "type": type(self),
+                "detector": STEREOTYPE_EEOC_REMOTE,
+                "score": score,
+                "label": "stereotyped" if flagged else "neutral",
+                "response_string": self.response_string if flagged else query_string,
+            }
+        except Exception as e:
+            logger.error(f"Vijil remote inference failed: {e}")
+            return False, {
+                "type": type(self),
+                "detector": STEREOTYPE_EEOC_REMOTE,
+                "score": 0.0,
+                "label": "error",
+                "error": str(e),
+                "response_string": query_string,
+            }
+
+    async def detect_batch(
+        self, inputs: List[Union[str, DomePayload]]
+    ) -> BatchDetectionResult:
+        return await self._gather_with_concurrency(
+            [self.detect(DomePayload.coerce(item)) for item in inputs]
+        )
+
+
+# ----------------------------------------------------------------------
 # Hybrid mode (fast + Safeguard escalation)
 # ----------------------------------------------------------------------
 
@@ -580,13 +671,19 @@ class StereotypeEEOCSafeguard(DetectionMethod):
 @register_method(DetectionCategory.Moderation, STEREOTYPE_EEOC_HYBRID)
 class StereotypeEEOCHybrid(StereotypeEEOCBase):
     """
-    Hybrid EEOC stereotype detection: ModernBERT first, Safeguard on
-    low-confidence. ~5ms average, near-100% accuracy, API cost only on
-    uncertain examples.
+    Hybrid EEOC stereotype detection: fast stage first (local ModernBERT
+    or Vijil remote inference), Safeguard on low-confidence.
+
+    When ``vijil_inference_url`` is provided the fast stage calls Vijil's
+    hosted inference endpoint instead of loading ModernBERT locally,
+    eliminating the torch/transformers dependency for the fast stage.
     """
 
     def __init__(
         self,
+        vijil_inference_url: Optional[str] = None,
+        vijil_inference_model: Optional[str] = None,
+        vijil_inference_api_key: Optional[str] = None,
         confidence_threshold: float = 0.85,
         api_key: Optional[str] = None,
         api_key_name: str = DEFAULT_SAFEGUARD_API_KEY_NAME,
@@ -599,7 +696,20 @@ class StereotypeEEOCHybrid(StereotypeEEOCBase):
         max_input_chars: Optional[int] = DEFAULT_SAFEGUARD_MAX_INPUT_CHARS,
         **kwargs,
     ):
-        super().__init__(**kwargs)
+        self._use_vijil_inference = vijil_inference_url is not None
+
+        if self._use_vijil_inference:
+            from vijil_dome.detectors.utils.vijil_inference import VijilInferenceClient
+            assert vijil_inference_url is not None
+            self.score_threshold = kwargs.get("score_threshold", 0.5)
+            self._vijil_client = VijilInferenceClient(
+                base_url=vijil_inference_url,
+                model=vijil_inference_model or DEFAULT_VIJIL_INFERENCE_STEREOTYPE_MODEL,
+                api_key=vijil_inference_api_key,
+            )
+        else:
+            super().__init__(**kwargs)
+
         self.confidence_threshold = confidence_threshold
         self.api_key_name = api_key_name
         self.api_key = api_key or os.environ.get(api_key_name, "")
@@ -618,10 +728,16 @@ class StereotypeEEOCHybrid(StereotypeEEOCBase):
             logger.warning(
                 f"{api_key_name} not set — {STEREOTYPE_EEOC_HYBRID} will fall back to fast-only"
             )
+        fast_mode = (
+            f"vijil-inference ({self._vijil_client.base_url})"
+            if self._use_vijil_inference
+            else "local"
+        )
         logger.info(
             "Initialized EEOC stereotype detector "
-            f"(hybrid mode, confidence_threshold={confidence_threshold}, "
-            f"model={model}, base_url={self.base_url})"
+            f"(hybrid mode, fast={fast_mode}, "
+            f"confidence_threshold={confidence_threshold}, "
+            f"safeguard_model={model}, safeguard_url={self.base_url})"
         )
 
     # Fast-stage payload builder — shared between detect and detect_batch.
@@ -724,16 +840,71 @@ class StereotypeEEOCHybrid(StereotypeEEOCBase):
             payload["error"] = str(e)
             return fast_score >= self.score_threshold, payload
 
+    # ------------------------------------------------------------------
+    # Vijil remote inference helpers (hybrid fast stage)
+    # ------------------------------------------------------------------
+
+    async def _classify_vijil(
+        self, client: httpx.AsyncClient, dome_input: DomePayload
+    ) -> Tuple[float, dict]:
+        """Classify a single input via Vijil's remote inference endpoint."""
+        score = await self._vijil_client.classify(client, dome_input.query_string)
+        return score, {}
+
+    async def _classify_batch_vijil(
+        self, dome_inputs: List[DomePayload]
+    ) -> List[Tuple[float, dict]]:
+        """Classify a batch via Vijil's remote inference endpoint."""
+        async with httpx.AsyncClient(
+            timeout=self._vijil_client.timeout_seconds
+        ) as client:
+            semaphore = asyncio.Semaphore(self.max_batch_concurrency)
+
+            async def _one(di: DomePayload) -> Tuple[float, dict]:
+                async with semaphore:
+                    try:
+                        score = await self._vijil_client.classify(
+                            client, di.query_string
+                        )
+                        return score, {}
+                    except Exception as e:
+                        logger.error(f"Vijil inference batch item failed: {e}")
+                        return 0.0, {"error": str(e)}
+
+            return list(await asyncio.gather(*(_one(di) for di in dome_inputs)))
+
+    # ------------------------------------------------------------------
+    # Public detection interface
+    # ------------------------------------------------------------------
+
     async def detect(self, dome_input: DomePayload) -> DetectionResult:
         dome_input = DomePayload.coerce(dome_input)
         logger.info("Detecting EEOC stereotype using hybrid mode...")
 
-        # Stage 1: Fast ModernBERT classification in a thread executor
-        # (the HF pipeline call is blocking).
-        loop = asyncio.get_running_loop()
-        score, prediction = await loop.run_in_executor(
-            None, self._classify, dome_input
-        )
+        # Stage 1: fast classification (remote or local)
+        if self._use_vijil_inference:
+            try:
+                async with httpx.AsyncClient(
+                    timeout=self._vijil_client.timeout_seconds
+                ) as client:
+                    score, prediction = await self._classify_vijil(client, dome_input)
+            except Exception as e:
+                logger.error(f"Vijil inference failed in hybrid fast stage: {e}")
+                return False, {
+                    "type": type(self),
+                    "detector": STEREOTYPE_EEOC_HYBRID,
+                    "stage": "vijil-inference-error",
+                    "score": 0.0,
+                    "label": "error",
+                    "error": str(e),
+                    "response_string": dome_input.query_string,
+                }
+        else:
+            loop = asyncio.get_running_loop()
+            score, prediction = await loop.run_in_executor(
+                None, self._classify, dome_input
+            )
+
         confidence = max(score, 1.0 - score)
         logger.debug(
             "stereotype-eeoc-hybrid fast-stage prediction=%s score=%.3f",
@@ -741,12 +912,10 @@ class StereotypeEEOCHybrid(StereotypeEEOCBase):
             score,
         )
 
-        # Confident enough → return the fast result immediately.
         if confidence >= self.confidence_threshold:
             flagged = score >= self.score_threshold
             return flagged, self._fast_payload(dome_input, score, prediction, stage="fast")
 
-        # Low confidence → escalate to Safeguard if we have a key.
         if not self.api_key:
             flagged = score >= self.score_threshold
             return flagged, self._fast_payload(
@@ -765,19 +934,19 @@ class StereotypeEEOCHybrid(StereotypeEEOCBase):
     ) -> BatchDetectionResult:
         """Batched hybrid detection.
 
-        Runs the fast ModernBERT stage on the whole batch in one pipeline
-        call (big speedup over the naive per-item loop), then escalates
-        any low-confidence items to Safeguard concurrently via
-        ``asyncio.gather``. Items with enough confidence never touch the
-        API, preserving the hybrid cost model.
+        Runs the fast stage on the whole batch (remote or local), then
+        escalates any low-confidence items to Safeguard concurrently.
         """
         dome_inputs = [DomePayload.coerce(x) for x in inputs]
 
-        # Stage 1: batched fast classification in a thread executor.
-        loop = asyncio.get_running_loop()
-        scored = await loop.run_in_executor(
-            None, self._classify_batch, dome_inputs
-        )
+        # Stage 1: batched fast classification (remote or local).
+        if self._use_vijil_inference:
+            scored = await self._classify_batch_vijil(dome_inputs)
+        else:
+            loop = asyncio.get_running_loop()
+            scored = await loop.run_in_executor(
+                None, self._classify_batch, dome_inputs
+            )
 
         # Partition into "confident enough" vs "escalate".
         results: List[Optional[DetectionResult]] = [None] * len(dome_inputs)
@@ -824,5 +993,4 @@ class StereotypeEEOCHybrid(StereotypeEEOCBase):
                 for i, r in zip(escalate_indices, escalated):
                     results[i] = r
 
-        # All slots are filled at this point — cast away the Optional.
         return [r for r in results if r is not None]
