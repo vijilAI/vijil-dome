@@ -150,7 +150,7 @@ async def test_moderation_detection_deberta():
 
 
 @pytest.mark.asyncio
-@_skip_no_stereotype_model
+@_skip_no_mbert_model
 async def test_moderation_detection_mbert():
     # Moderation via MBert toxic content model
     mbert_detect_with_time = await DetectionFactory.get_detect_with_time(
@@ -163,7 +163,7 @@ async def test_moderation_detection_mbert():
 
 
 @pytest.mark.asyncio
-@_skip_no_stereotype_model
+@_skip_no_mbert_model
 async def test_moderation_detection_mbert_custom_threshold():
     # Verify custom score_threshold works via factory
     detector = DetectionFactory.get_detector(
@@ -176,7 +176,7 @@ async def test_moderation_detection_mbert_custom_threshold():
 
 
 @pytest.mark.asyncio
-@_skip_no_stereotype_model
+@_skip_no_mbert_model
 async def test_moderation_detection_mbert_score_in_result():
     # Verify score field is present and is a float in [0, 1]
     detector = DetectionFactory.get_detector(
@@ -891,7 +891,7 @@ async def test_moderation_mbert_safeguard_detect_batch_returns_all_results():
 
 
 @pytest.mark.asyncio
-@_skip_no_stereotype_model
+@_skip_no_mbert_model
 async def test_moderation_mbert_hybrid_falls_back_without_groq_key():
     """When GROQ_API_KEY is missing, hybrid must degrade to fast result."""
     with patch.dict(os.environ, {}, clear=False):
@@ -905,7 +905,7 @@ async def test_moderation_mbert_hybrid_falls_back_without_groq_key():
 
 
 @pytest.mark.asyncio
-@_skip_no_stereotype_model
+@_skip_no_mbert_model
 async def test_moderation_mbert_hybrid_detect_batch_batched_fast_stage():
     """Hybrid detect_batch must use the batched fast stage.
     When GROQ_API_KEY is absent every item falls back to the fast result.
@@ -929,7 +929,7 @@ async def test_moderation_mbert_hybrid_detect_batch_batched_fast_stage():
 
 
 @pytest.mark.asyncio
-@_skip_no_stereotype_model
+@_skip_no_mbert_model
 async def test_moderation_mbert_hybrid_escalation_truncates_oversize_input():
     """Hybrid escalation must apply max_input_chars before posting to Groq."""
     with patch.dict(os.environ, {"GROQ_API_KEY": "dummy-key-for-test"}, clear=False):
@@ -966,7 +966,7 @@ async def test_moderation_mbert_hybrid_escalation_truncates_oversize_input():
 
 
 @pytest.mark.asyncio
-@_skip_no_stereotype_model
+@_skip_no_mbert_model
 async def test_moderation_mbert_classify_methods_exist():
     """_classify() and _classify_batch() must be callable and return
     expected tuple shapes."""
