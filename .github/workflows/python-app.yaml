@@ -2,6 +2,7 @@ name: Python Tests
 
 permissions:
   contents: read
+  id-token: write  # OIDC token for AWS S3 model access
 
 on:
   push:
@@ -65,8 +66,28 @@ jobs:
           poetry add ruff mypy types-requests
           make lint
 
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::266735823956:role/github-actions-dome-ci
+          aws-region: us-west-2
+
+      - name: Sync Vijil models from S3
+        run: |
+          sudo mkdir -p /models/vijil
+          sudo chown $USER /models/vijil
+          # Sync only the small detector models (~570MB each), not LLMs
+          aws s3 sync s3://vijil-inference/models/vijil/ /models/vijil/ \
+            --exclude "*/gpt-oss-*" \
+            --exclude "*/qwen*" \
+            --exclude "*/glm*" \
+            --exclude "*/gemma*"
+          echo "Models synced:"
+          ls -la /models/vijil/
+
       - name: Run tests
         env:
+          VIJIL_MODEL_DIR: /models
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           TOGETHERAI_API_KEY: ${{ secrets.TOGETHER_API_KEY }}
           PERSPECTIVE_API_KEY: ${{ secrets.PERSPECTIVE_API_KEY }}
