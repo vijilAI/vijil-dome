@@ -38,10 +38,11 @@ language like profanity and slurs) and prompt injection detection
 dangerous information passes both of those filters but is caught here.
 
 Input format:
-    This detector classifies the user's prompt. It runs as an input
-    guard — the agent's response is not needed. When given a
-    ``DomePayload``, the detector uses ``query_string`` (which joins
-    prompt and response if both are set, or returns text as-is).
+    This detector classifies the user's prompt only. It runs as an
+    input guard — the agent's response is not needed. When given a
+    ``DomePayload`` with both ``prompt`` and ``response`` set, the
+    detector uses only the ``prompt`` field and emits a warning that
+    the response is ignored.
 """
 
 import logging
@@ -49,8 +50,13 @@ import os
 from typing import List, Optional, Union
 
 import httpx
-import torch
-from transformers import pipeline
+
+try:
+    import torch
+    from transformers import pipeline
+    _HAS_TORCH = True
+except ImportError:
+    _HAS_TORCH = False
 
 from vijil_dome.detectors import (
     PROMPT_HARMFULNESS_FAST,
@@ -111,6 +117,11 @@ class PromptHarmfulnessFast(HFBaseModel):
         max_length: int = 512,
         window_stride: int = 256,
     ):
+        if not _HAS_TORCH:
+            raise ImportError(
+                f"{PROMPT_HARMFULNESS_FAST} requires 'torch' and 'transformers'. "
+                "Install with: pip install vijil-dome[local]"
+            )
         try:
             super().__init__(
                 model_name=model_name,
