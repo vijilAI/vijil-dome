@@ -79,17 +79,24 @@ class HFBaseModel(DetectionMethod, ABC):
                 "Install with: pip install vijil-dome[local]"
             )
         resolved = resolve_model_path(model_name)
-        logger.info(f"Initializing Hugging Face model: {resolved}...")
+        # When loading from a local S3-synced path, force local_files_only
+        # so the model never falls back to HuggingFace Hub. This keeps
+        # production pods offline — they never reach external hosts.
+        is_local = os.path.isdir(resolved)
+        effective_local_only = local_files_only or is_local
+        logger.info(
+            "Initializing Hugging Face model: %s (local=%s)", resolved, is_local
+        )
         self.model = AutoModelForSequenceClassification.from_pretrained(
             resolved,
-            local_files_only=local_files_only,
+            local_files_only=effective_local_only,
             trust_remote_code=trust_remote_code,
         )
         model_tokenizer_name = tokenizer_name or model_name
         resolved_tokenizer = resolve_model_path(model_tokenizer_name)
         self.tokenizer = AutoTokenizer.from_pretrained(
             resolved_tokenizer,
-            local_files_only=local_files_only,
+            local_files_only=effective_local_only,
             trust_remote_code=trust_remote_code,
         )
 
