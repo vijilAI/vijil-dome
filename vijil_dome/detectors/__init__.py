@@ -69,6 +69,9 @@ STEREOTYPE_EEOC_SAFEGUARD = "stereotype-eeoc-safeguard"
 STEREOTYPE_EEOC_HYBRID = "stereotype-eeoc-hybrid"
 STEREOTYPE_EEOC_REMOTE = "stereotype-eeoc-remote"
 
+PROMPT_HARMFULNESS_FAST = "prompt-harmfulness-fast"
+PROMPT_HARMFULNESS_SAFEGUARD = "prompt-harmfulness-safeguard"
+
 # Define types for detection results and data
 DetectorType = Dict["type", str]
 Hit = bool

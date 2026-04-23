@@ -33,6 +33,7 @@ __all__ = [
     "pi_hf_mbert",
     "toxicity_mbert",
     "stereotype_eeoc",
+    "prompt_harmfulness",
 ]
 
 # Modules that require torch for all functionality.

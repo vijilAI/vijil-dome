@@ -15,7 +15,9 @@
 # vijil and vijil-dome are trademarks owned by Vijil Inc.
 
 import logging
+import os
 from abc import ABC, abstractmethod
+from pathlib import Path
 from typing import Optional
 
 try:
@@ -28,6 +30,35 @@ from vijil_dome.detectors import DetectionMethod, DetectionResult
 from vijil_dome.types import DomePayload
 
 logger = logging.getLogger("vijil.dome")
+
+# Base directory where the K8s init container (or a local setup script)
+# syncs model weights from S3.  Detectors check this path first and fall
+# back to the HuggingFace Hub when the local copy is absent.
+MODEL_CACHE_DIR = os.environ.get("VIJIL_MODEL_DIR", "/models")
+
+
+def resolve_model_path(model_name: str) -> str:
+    """Return a local path if the model exists on disk, else the original
+    HF Hub identifier so ``from_pretrained`` downloads it.
+
+    The convention: if ``model_name`` looks like an HF repo ID (contains
+    a ``/`` but is not an absolute path), check whether a matching
+    directory exists under ``MODEL_CACHE_DIR``.  For example,
+    ``vijil/stereotype-eeoc-detector`` resolves to
+    ``/models/vijil/stereotype-eeoc-detector`` when that directory
+    contains a ``config.json``.
+    """
+    if os.path.isabs(model_name) or os.path.isdir(model_name):
+        return model_name  # already a concrete path
+
+    candidate = Path(MODEL_CACHE_DIR) / model_name
+    if candidate.is_dir() and (candidate / "config.json").exists():
+        logger.info(
+            "Resolved model to local path: %s (from %s)", candidate, model_name
+        )
+        return str(candidate)
+
+    return model_name  # fall back to HF Hub download
 
 
 class HFBaseModel(DetectionMethod, ABC):
@@ -47,16 +78,25 @@ class HFBaseModel(DetectionMethod, ABC):
                 f"{self.__class__.__name__} requires 'torch' and 'transformers'. "
                 "Install with: pip install vijil-dome[local]"
             )
-        logger.info(f"Initializing Hugging Face model: {model_name}...")
+        resolved = resolve_model_path(model_name)
+        # When loading from a local S3-synced path, force local_files_only
+        # so the model never falls back to HuggingFace Hub. This keeps
+        # production pods offline — they never reach external hosts.
+        is_local = os.path.isdir(resolved)
+        effective_local_only = local_files_only or is_local
+        logger.info(
+            "Initializing Hugging Face model: %s (local=%s)", resolved, is_local
+        )
         self.model = AutoModelForSequenceClassification.from_pretrained(
-            model_name,
-            local_files_only=local_files_only,
+            resolved,
+            local_files_only=effective_local_only,
             trust_remote_code=trust_remote_code,
         )
         model_tokenizer_name = tokenizer_name or model_name
+        resolved_tokenizer = resolve_model_path(model_tokenizer_name)
         self.tokenizer = AutoTokenizer.from_pretrained(
-            model_tokenizer_name,
-            local_files_only=local_files_only,
+            resolved_tokenizer,
+            local_files_only=effective_local_only,
             trust_remote_code=trust_remote_code,
         )
 
