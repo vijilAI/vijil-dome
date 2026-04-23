@@ -57,16 +57,24 @@ from vijil_dome.detectors import (
 
 
 def _model_available(model_id: str) -> bool:
-    """Check if a model is available locally (S3-synced or HF cached)."""
+    """Check if a model is available locally (S3-synced or HF cached).
+
+    Only checks local paths — no network calls. Models are private on
+    S3; checking the HF cache on disk covers development environments
+    where the model was previously downloaded.
+    """
+    # Check S3-synced path (production: /models/vijil/<name>/)
     local = Path(MODEL_CACHE_DIR) / model_id
     if local.is_dir() and (local / "config.json").exists():
         return True
-    try:
-        from huggingface_hub import model_info
-        model_info(model_id)
-        return True
-    except Exception:
-        return False
+    # Check HF cache on disk (development — no network call)
+    hf_cache_name = model_id.replace("/", "--")
+    hf_cache = Path.home() / ".cache" / "huggingface" / "hub" / f"models--{hf_cache_name}"
+    if hf_cache.is_dir():
+        snapshots = hf_cache / "snapshots"
+        if snapshots.is_dir() and any(snapshots.iterdir()):
+            return True
+    return False
 
 
 _skip_no_stereotype_model = pytest.mark.skipif(
