@@ -19,13 +19,7 @@ from vijil_dome.trust.policy import ToolCallResult, ToolPolicy
 
 logger = logging.getLogger(__name__)
 
-# Optional dependency: vijil-dome (content guards)
-_HAS_DOME = False
-try:
-    from vijil_dome import Dome
-    _HAS_DOME = True
-except ImportError:
-    pass
+_HAS_DOME = True  # Dome is always available — trust runtime lives inside vijil-dome.
 
 
 class TrustRuntime:
@@ -86,7 +80,10 @@ class TrustRuntime:
         )
         self._policy = ToolPolicy(constraints_for_policy)
 
-        # 4. Create Dome instance (if vijil-dome is installed and guards are configured)
+        # 4. Create Dome instance for content guards.
+        # Import here to avoid circular import (vijil_dome.__init__ → trust → runtime → vijil_dome).
+        from vijil_dome import Dome
+
         self._dome: Any | None = None
         if _HAS_DOME:
             dome_cfg = self._constraints.dome_config

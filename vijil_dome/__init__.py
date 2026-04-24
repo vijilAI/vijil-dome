@@ -18,4 +18,22 @@ from .Dome import Dome, create_dome_config, BatchScanResult
 from .defaults import get_default_config
 from .types import DomePayload
 
-__all__ = ["Dome", "DomePayload", "create_dome_config", "get_default_config", "BatchScanResult"]
+# Trust runtime — lazy import to avoid pulling in cryptography when not needed
+def __getattr__(name: str):
+    if name == "trust":
+        from vijil_dome import trust as _trust
+        return _trust
+    if name == "TrustRuntime":
+        from vijil_dome.trust.runtime import TrustRuntime
+        return TrustRuntime
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
+__all__ = [
+    "Dome",
+    "DomePayload",
+    "BatchScanResult",
+    "create_dome_config",
+    "get_default_config",
+    "TrustRuntime",
+    "trust",
+]

@@ -1,4 +1,4 @@
-"""vijil manifest sign|verify"""
+"""vijil manifest sign|verify — CLI commands for tool manifest management."""
 
 import json
 import sys
@@ -7,8 +7,6 @@ from pathlib import Path
 import typer
 
 from vijil_dome.trust.manifest import ToolManifest
-# TODO: rewire for vijil-dome CLI — vijil_cli.state is SDK-specific
-# from vijil_cli import state
 
 
 def register_manifest(app: typer.Typer) -> None:
@@ -23,17 +21,31 @@ def register_manifest(app: typer.Typer) -> None:
     @manifest_app.command("sign")
     def sign(
         input_path: str = typer.Argument(help="Path to unsigned manifest JSON"),
+        console_url: str = typer.Option(
+            ..., "--console-url", envvar="VIJIL_CONSOLE_URL",
+            help="Vijil Console base URL",
+        ),
+        api_key: str = typer.Option(
+            ..., "--api-key", envvar="VIJIL_API_KEY",
+            help="Vijil Console API key",
+        ),
         output: str | None = typer.Option(
             None, "--output", "-o", help="Output path (defaults to overwriting input)"
         ),
     ) -> None:
         """Sign a tool manifest via the Vijil Console."""
-        ctx = state.get_ctx()
+        import httpx
+
         input_file = Path(input_path)
         manifest_data: dict[str, object] = json.loads(input_file.read_text())
 
-        result = ctx.client._http.post("/manifests/sign", json=manifest_data)
-        manifest_data["signature"] = result["signature"]
+        resp = httpx.post(
+            f"{console_url.rstrip('/')}/manifests/sign",
+            json=manifest_data,
+            headers={"Authorization": f"Bearer {api_key}"},
+        )
+        resp.raise_for_status()
+        manifest_data["signature"] = resp.json()["signature"]
 
         dest = Path(output) if output else input_file
         dest.write_text(json.dumps(manifest_data, indent=2))
@@ -42,15 +54,27 @@ def register_manifest(app: typer.Typer) -> None:
     @manifest_app.command("verify")
     def verify(
         path: str = typer.Argument(help="Path to signed manifest JSON"),
+        console_url: str = typer.Option(
+            ..., "--console-url", envvar="VIJIL_CONSOLE_URL",
+            help="Vijil Console base URL",
+        ),
+        api_key: str = typer.Option(
+            ..., "--api-key", envvar="VIJIL_API_KEY",
+            help="Vijil Console API key",
+        ),
     ) -> None:
         """Verify a tool manifest's signature against the Vijil Console public key."""
+        import httpx
         from cryptography.hazmat.primitives.serialization import load_pem_public_key
 
-        ctx = state.get_ctx()
         manifest = ToolManifest.load(Path(path))
 
-        result = ctx.client._http.get("/manifests/public-key")
-        pem_bytes = result["public_key"].encode()
+        resp = httpx.get(
+            f"{console_url.rstrip('/')}/manifests/public-key",
+            headers={"Authorization": f"Bearer {api_key}"},
+        )
+        resp.raise_for_status()
+        pem_bytes = resp.json()["public_key"].encode()
         public_key = load_pem_public_key(pem_bytes)
 
         if manifest.verify_signature(public_key):  # type: ignore[arg-type]
