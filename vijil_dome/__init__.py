@@ -18,14 +18,18 @@ from .Dome import Dome, create_dome_config, BatchScanResult
 from .defaults import get_default_config
 from .types import DomePayload
 
-# Trust runtime — lazy import to avoid pulling in cryptography when not needed
+# Trust runtime — lazy imports to avoid pulling in cryptography when not needed
 def __getattr__(name: str):
-    if name == "trust":
-        from vijil_dome import trust as _trust
-        return _trust
-    if name == "TrustRuntime":
-        from vijil_dome.trust.runtime import TrustRuntime
-        return TrustRuntime
+    _lazy = {
+        "trust": ("vijil_dome", "trust"),
+        "TrustRuntime": ("vijil_dome.trust.runtime", "TrustRuntime"),
+        "secure_agent": ("vijil_dome.trust.adapters.auto", "secure_agent"),
+    }
+    if name in _lazy:
+        module_path, attr = _lazy[name]
+        import importlib
+        mod = importlib.import_module(module_path)
+        return mod if attr == module_path.split(".")[-1] else getattr(mod, attr)
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 __all__ = [
@@ -35,5 +39,6 @@ __all__ = [
     "create_dome_config",
     "get_default_config",
     "TrustRuntime",
+    "secure_agent",
     "trust",
 ]

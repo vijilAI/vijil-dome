@@ -6,7 +6,7 @@ of whether they build with LangGraph, Google ADK, or Strands.
 
 Usage::
 
-    from vijil import secure_agent
+    from vijil_dome import secure_agent
 
     # LangGraph
     app = secure_agent(graph, agent_id="my-agent")
