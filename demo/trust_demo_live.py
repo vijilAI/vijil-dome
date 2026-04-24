@@ -17,7 +17,6 @@ from __future__ import annotations
 import json
 import sys
 import time
-from typing import Any
 from uuid import uuid4
 
 import httpx
@@ -153,7 +152,7 @@ def main() -> None:
     print()
 
     # Guard input
-    input_result = runtime.guard_input(query)
+    runtime.guard_input(query)
 
     # MAC check for the tool the agent will likely use
     runtime.check_tool_call("search_flights", {"origin": "SFO", "destination": "TYO"})
@@ -210,9 +209,9 @@ def main() -> None:
 
     # ── Summary ──
     section("Summary")
-    print(f"  Three real LLM calls. Every one passed through the trust runtime.")
-    print(f"  Guards checked inputs and outputs. MAC enforced tool permissions.")
-    print(f"  Payment and credential tools were blocked before execution.")
+    print("  Three real LLM calls. Every one passed through the trust runtime.")
+    print("  Guards checked inputs and outputs. MAC enforced tool permissions.")
+    print("  Payment and credential tools were blocked before execution.")
     print()
     print(f"  {BOLD}pip install vijil-sdk[trust]{RESET}")
     print(f"  {DIM}from vijil import secure_agent{RESET}")

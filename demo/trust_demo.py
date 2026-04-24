@@ -19,10 +19,6 @@ Requires:
 
 from __future__ import annotations
 
-import os
-import sys
-import time
-from typing import Any
 
 # ── Colors ──
 BOLD = "\033[1m"
@@ -170,7 +166,7 @@ def main() -> None:
     result = runtime.check_tool_call("process_payment", {"amount": 850})
     print()
     if not result.permitted:
-        blocked(f"Tool 'process_payment' denied by organization constraints")
+        blocked("Tool 'process_payment' denied by organization constraints")
         print()
         agent_says("I cannot process payments directly. This tool is restricted by your organization's security policy. Please use the approved payment portal.")
 
@@ -187,7 +183,7 @@ def main() -> None:
     result = runtime.check_tool_call("get_api_credentials", {"system": "partner_booking"})
     print()
     if not result.permitted:
-        blocked(f"Tool 'get_api_credentials' denied by organization constraints")
+        blocked("Tool 'get_api_credentials' denied by organization constraints")
         print()
         agent_says("I cannot access API credentials. This operation is restricted. Please contact your administrator.")
 
