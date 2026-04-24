@@ -126,6 +126,12 @@ _SEP_STRING_TOKEN_BUDGET = 6
 # Model special-token overhead (CLS + SEP emitted by the tokenizer).
 _SPECIAL_TOKEN_OVERHEAD = 2
 
+# Temperature scaling constant, fit on the v2 validation set via NLL
+# minimization. T > 1 softens overconfident scores so that the 0.90
+# threshold delivers ~50% PPV at 2.4% production prevalence.
+# See vijil-distillation/docs/base-rate-analysis.md for the derivation.
+_CALIBRATION_TEMPERATURE = 1.237
+
 # The safeguard endpoint is OpenAI-compatible. Groq is the default, but
 # callers can point at any OpenAI-compatible `/chat/completions` endpoint
 # (local vLLM, Together, Fireworks, OpenAI itself, ...) by overriding
@@ -153,7 +159,11 @@ class StereotypeEEOCBase(HFBaseModel):
         # compatibility issue. This mirrors how pi_hf_mbert handles the
         # same situation.
         tokenizer_name: str = "answerdotai/ModernBERT-base",
-        score_threshold: float = 0.5,
+        # Default threshold tuned for production prevalence (2-11%).
+        # At 0.90 on calibrated scores: 59% recall, 1.54% FPR, ~49% PPV
+        # at 2.4% prevalence. Customers can lower this for higher recall
+        # (more false positives) or raise it for higher precision.
+        score_threshold: float = 0.90,
         max_length: int = 512,
     ):
         if not _HAS_TORCH:
@@ -186,11 +196,34 @@ class StereotypeEEOCBase(HFBaseModel):
     # Scoring helpers
     # ------------------------------------------------------------------
 
+    @staticmethod
+    def _calibrate(raw_score: float) -> float:
+        """Apply temperature scaling to a raw bias probability.
+
+        The v2 model is mildly overconfident (scores cluster closer to 0
+        and 1 than warranted). Dividing the logit by T=1.237 pulls the
+        extremes inward, which nearly halves the false positive rate at
+        high thresholds without retraining.
+
+        This is a monotonic transform — it preserves the ranking of
+        examples (AUC is unchanged) and only adjusts the *meaning* of
+        the score so that thresholds produce the expected PPV at
+        production prevalence.
+        """
+        import math
+        eps = 1e-7
+        clamped = max(eps, min(1 - eps, raw_score))
+        logit = math.log(clamped / (1 - clamped))
+        calibrated_logit = logit / _CALIBRATION_TEMPERATURE
+        return 1.0 / (1.0 + math.exp(-calibrated_logit))
+
     def _extract_stereotype_score(self, item: dict) -> float:
-        """Extract the positive-class probability from classifier output."""
+        """Extract and calibrate the bias probability from classifier output."""
         if item["label"] in (1, "1", "LABEL_1", "biased", "stereotyped"):
-            return item["score"]
-        return 1.0 - item["score"]
+            raw = item["score"]
+        else:
+            raw = 1.0 - item["score"]
+        return self._calibrate(raw)
 
     @staticmethod
     def _split_payload(dome_input: DomePayload) -> Tuple[str, str]:
@@ -232,10 +265,6 @@ class StereotypeEEOCBase(HFBaseModel):
         tokenizer round-tripping (preserves exact formatting) and a
         single-element list is returned.
         """
-        # Fast path — the full string fits, no chunking needed.
-        if not self._exceeds_budget(prompt_text, response_text):
-            return [f"{prompt_text} [SEP] {response_text}"]
-
         usable = self.max_length - _SPECIAL_TOKEN_OVERHEAD - _SEP_STRING_TOKEN_BUDGET
         if usable <= 0:
             raise ValueError(
@@ -243,12 +272,17 @@ class StereotypeEEOCBase(HFBaseModel):
                 f"(need > {_SPECIAL_TOKEN_OVERHEAD + _SEP_STRING_TOKEN_BUDGET})"
             )
 
+        # Tokenize once and reuse for both budget check and chunking.
         prompt_ids = self.tokenizer.encode(
             prompt_text, add_special_tokens=False, verbose=False
         )
         response_ids = self.tokenizer.encode(
             response_text, add_special_tokens=False, verbose=False
         )
+
+        # Fast path — the full string fits, no chunking needed.
+        if len(prompt_ids) + len(response_ids) <= usable:
+            return [f"{prompt_text} [SEP] {response_text}"]
 
         # Split budget 50/50 for the center chunk, then donate unused
         # tokens from the shorter side to the longer side.
@@ -797,16 +831,13 @@ class StereotypeEEOCHybrid(StereotypeEEOCBase):
             return text[: self.max_input_chars]
         return text
 
-    async def _escalate(
-        self,
-        client: httpx.AsyncClient,
-        dome_input: DomePayload,
-        fast_score: float,
-        prediction: dict,
-    ) -> DetectionResult:
-        """Run Safeguard on one low-confidence item, with graceful fallback."""
-        query_string = self._truncate_if_needed(dome_input.query_string)
-        payload = {
+    def _build_safeguard_request(self, query_string: str) -> dict:
+        """Build a Safeguard API request payload.
+
+        Mirrors ``StereotypeEEOCSafeguard._build_payload`` so both modes
+        always send identical request shapes.
+        """
+        request = {
             "model": self.model,
             "messages": [
                 {"role": "system", "content": SAFEGUARD_SYSTEM_PROMPT},
@@ -816,7 +847,18 @@ class StereotypeEEOCHybrid(StereotypeEEOCBase):
             "max_tokens": self.max_tokens,
         }
         if self.reasoning_effort is not None:
-            payload["reasoning_effort"] = self.reasoning_effort
+            request["reasoning_effort"] = self.reasoning_effort
+        return request
+
+    async def _escalate(
+        self,
+        client: httpx.AsyncClient,
+        dome_input: DomePayload,
+        fast_score: float,
+        prediction: dict,
+    ) -> DetectionResult:
+        """Run Safeguard on one low-confidence item, with graceful fallback."""
+        query_string = self._truncate_if_needed(dome_input.query_string)
         try:
             resp = await client.post(
                 self.chat_completions_url,
@@ -824,7 +866,7 @@ class StereotypeEEOCHybrid(StereotypeEEOCBase):
                     "Authorization": f"Bearer {self.api_key}",
                     "Content-Type": "application/json",
                 },
-                json=payload,
+                json=self._build_safeguard_request(query_string),
             )
             resp.raise_for_status()
             content = (
@@ -993,4 +1035,7 @@ class StereotypeEEOCHybrid(StereotypeEEOCBase):
                 for i, r in zip(escalate_indices, escalated):
                     results[i] = r
 
-        return [r for r in results if r is not None]
+        assert all(r is not None for r in results), (
+            "detect_batch produced None slots — input/output length mismatch"
+        )
+        return results  # type: ignore[return-value]
