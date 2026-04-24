@@ -1,0 +1,83 @@
+# SPIRE Production Configuration
+# Trust domain: spiffe://vijil.ai
+#
+# Prerequisites:
+#   - PostgreSQL database with a `spire` schema (shared with Console/Darwin/Swarm)
+#   - AWS KMS key for CA signing (or disk-based for non-AWS deployments)
+#   - EBS CSI driver installed (for PVC if not using external PG)
+#
+# Usage:
+#   helm upgrade spire spiffe/spire \
+#     -f deploy/spire-values-production.yaml \
+#     --namespace spire-server \
+#     --set spire-server.dataStore.sql.password=$SPIRE_DB_PASSWORD
+
+global:
+  spire:
+    trustDomain: vijil.ai
+    clusterName: vijil-production  # Override per cluster
+    namespaces:
+      create: false
+      server:
+        name: spire-server
+        create: false
+      system:
+        name: spire-system
+        create: true
+    recommendations:
+      enabled: true  # Production hardening: security contexts, PSS labels, priority classes
+
+spire-server:
+  replicaCount: 1  # SPIRE Server is single-writer; HA via nested SPIRE for multi-cluster
+
+  # Persistent storage via PostgreSQL (shared database, spire schema)
+  dataStore:
+    sql:
+      databaseType: postgres
+      # Connection string — provide password via --set or secrets
+      # Uses the same managed PG as Console, Darwin, Swarm
+      connectionString: "dbname=vijil_enterprise_spire host=DB_HOST port=25060 user=doadmin password=PASSWORD sslmode=require"
+
+  # CA signing key — AWS KMS for production
+  # The private key never exists on the SPIRE Server's filesystem
+  # Uncomment for AWS deployments:
+  # upstreamAuthority:
+  #   awsKMS:
+  #     region: us-west-2
+  #     keyAlias: alias/vijil-spire-ca
+  #     # IAM role for SPIRE Server (via IRSA or Pod Identity)
+  #     # Must have kms:CreateKey, kms:Sign, kms:GetPublicKey permissions
+
+  # For non-AWS or PoC: disk-based CA (keys in PVC)
+  persistence:
+    type: pvc
+    storageClass: gp3  # EBS gp3 for AWS; adjust for other clouds
+    size: 1Gi
+
+  # SVID TTL — shorter for high-security environments
+  caKeyType: ec-p256
+  caTTL: 24h
+  defaultX509SvidTTL: 1h    # Production default
+  defaultJwtSvidTTL: 5m
+
+  nodeAttestor:
+    k8sPsat:
+      enabled: true
+
+  controllerManager:
+    enabled: true
+
+spire-agent:
+  # Admin socket for Delegated Identity API
+  adminSocketPath: /tmp/spire-agent/private/admin.sock
+
+  # Authorized delegates — services that can fetch SVIDs on behalf of others
+  authorizedDelegates:
+    - "spiffe://vijil.ai/ns/spire-server/sa/identity-delegate"
+
+  workloadAttestors:
+    - k8s
+
+  nodeAttestor:
+    k8sPsat:
+      enabled: true

@@ -1,0 +1,32 @@
+# Test pod that fetches a SPIFFE SVID from the SPIRE Agent
+# Verifies end-to-end: SPIRE Server → Agent → Workload attestation → SVID
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: test-agent
+  namespace: default
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: test-agent
+  namespace: default
+  labels:
+    app: test-agent
+spec:
+  serviceAccountName: test-agent
+  containers:
+    - name: agent
+      image: python:3.12-slim
+      command:
+        - sleep
+        - "3600"
+      volumeMounts:
+        - name: spire-agent-socket
+          mountPath: /run/spire/sockets
+          readOnly: true
+  volumes:
+    - name: spire-agent-socket
+      hostPath:
+        path: /run/spire/sockets
+        type: DirectoryOrCreate

@@ -1,0 +1,43 @@
+{
+  "listen_addr": ":8443",
+  "spiffe_socket": "unix:///run/spire/sockets/agent.sock",
+  "vault_addr": "https://vault.vijil.ai:8200",
+  "vault_auth_mount": "jwt",
+  "vault_audience": "vault.vijil.ai",
+  "vault_role": "llm-proxy",
+  "otel_endpoint": "localhost:4317",
+  "routes": [
+    {
+      "agent_id_pattern": "spiffe://vijil.ai/agent/research-*",
+      "provider": "anthropic",
+      "upstream": "https://api.anthropic.com/v1/messages",
+      "vault_path": "secret/data/llm/anthropic",
+      "auth_header": "x-api-key",
+      "auth_prefix": ""
+    },
+    {
+      "agent_id_pattern": "spiffe://vijil.ai/agent/research-*",
+      "provider": "openai",
+      "upstream": "https://api.openai.com/v1/chat/completions",
+      "vault_path": "secret/data/llm/openai",
+      "auth_header": "Authorization",
+      "auth_prefix": "Bearer "
+    },
+    {
+      "agent_id_pattern": "spiffe://vijil.ai/agent/summarizer-*",
+      "provider": "openai",
+      "upstream": "https://api.openai.com/v1/chat/completions",
+      "vault_path": "secret/data/llm/openai",
+      "auth_header": "Authorization",
+      "auth_prefix": "Bearer "
+    },
+    {
+      "agent_id_pattern": "spiffe://vijil.ai/agent/*",
+      "provider": "anthropic",
+      "upstream": "https://api.anthropic.com/v1/messages",
+      "vault_path": "secret/data/llm/anthropic",
+      "auth_header": "x-api-key",
+      "auth_prefix": ""
+    }
+  ]
+}

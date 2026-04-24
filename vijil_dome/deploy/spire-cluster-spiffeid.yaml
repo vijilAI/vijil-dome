@@ -1,0 +1,82 @@
+# Automated SPIRE Workload Registration via ClusterSPIFFEID CRDs
+#
+# Instead of manual `spire-server entry create`, these CRDs tell the
+# SPIRE Controller Manager to automatically register workloads that
+# match the selectors. Any pod with the right label gets a SPIFFE ID.
+#
+# Prerequisites:
+#   - SPIRE Controller Manager enabled (controllerManager.enabled: true)
+#   - ClusterSPIFFEID CRD installed (spire-crds Helm chart)
+
+# ============================================================================
+# Agents — any pod labeled vijil.ai/trust-runtime: enabled
+# ============================================================================
+apiVersion: spire.spiffe.io/v1alpha1
+kind: ClusterSPIFFEID
+metadata:
+  name: vijil-agents
+spec:
+  className: "spire-server-spire"
+  spiffeIDTemplate: "spiffe://vijil.ai/ns/{{ .PodMeta.Namespace }}/agent/{{ .PodSpec.ServiceAccountName }}"
+  namespaceSelector:
+    matchExpressions:
+      - key: "kubernetes.io/metadata.name"
+        operator: NotIn
+        values: ["kube-system", "spire-server", "spire-system"]
+  podSelector:
+    matchLabels:
+      vijil.ai/trust-runtime: "enabled"
+  dnsNameTemplates:
+    - "{{ .PodSpec.ServiceAccountName }}.{{ .PodMeta.Namespace }}.svc"
+
+---
+# ============================================================================
+# Tools — any pod labeled vijil.ai/tool-identity: enabled
+# ============================================================================
+apiVersion: spire.spiffe.io/v1alpha1
+kind: ClusterSPIFFEID
+metadata:
+  name: vijil-tools
+spec:
+  className: "spire-server-spire"
+  spiffeIDTemplate: "spiffe://vijil.ai/ns/{{ .PodMeta.Namespace }}/tool/{{ .PodSpec.ServiceAccountName }}"
+  namespaceSelector:
+    matchExpressions:
+      - key: "kubernetes.io/metadata.name"
+        operator: NotIn
+        values: ["kube-system", "spire-server", "spire-system"]
+  podSelector:
+    matchLabels:
+      vijil.ai/tool-identity: "enabled"
+  dnsNameTemplates:
+    - "{{ .PodSpec.ServiceAccountName }}.{{ .PodMeta.Namespace }}.svc"
+
+---
+# ============================================================================
+# LLM Proxy
+# ============================================================================
+apiVersion: spire.spiffe.io/v1alpha1
+kind: ClusterSPIFFEID
+metadata:
+  name: vijil-llm-proxy
+spec:
+  className: "spire-server-spire"
+  spiffeIDTemplate: "spiffe://vijil.ai/ns/{{ .PodMeta.Namespace }}/sa/{{ .PodSpec.ServiceAccountName }}"
+  podSelector:
+    matchLabels:
+      app: llm-proxy
+
+---
+# ============================================================================
+# Identity Delegate Service
+# ============================================================================
+apiVersion: spire.spiffe.io/v1alpha1
+kind: ClusterSPIFFEID
+metadata:
+  name: vijil-identity-delegate
+spec:
+  className: "spire-server-spire"
+  spiffeIDTemplate: "spiffe://vijil.ai/ns/{{ .PodMeta.Namespace }}/sa/{{ .PodSpec.ServiceAccountName }}"
+  podSelector:
+    matchLabels:
+      app: identity-delegate

@@ -1,0 +1,29 @@
+# SPIRE PoC on vijil-spire-poc EKS cluster
+# Trust domain: spiffe://vijil.ai
+# PoC config: emptyDir storage, admin socket enabled for delegation
+
+global:
+  spire:
+    trustDomain: vijil.ai
+    clusterName: vijil-spire-poc
+    namespaces:
+      create: false
+      server:
+        name: spire-server
+        create: false
+      system:
+        name: spire-system
+        create: true
+    recommendations:
+      enabled: false
+
+spire-server:
+  persistence:
+    type: emptyDir
+
+spire-agent:
+  # Enable the admin API socket for Delegated Identity API
+  adminSocketPath: /run/spire/sockets/admin.sock
+  # Authorize the identity delegate service to use the Delegated Identity API
+  authorizedDelegates:
+    - "spiffe://vijil.ai/ns/spire-server/sa/identity-delegate"
