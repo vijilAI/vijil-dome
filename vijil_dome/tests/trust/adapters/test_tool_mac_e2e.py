@@ -66,7 +66,7 @@ class TestLangGraphToolMACEndToEnd:
         def call_book_flight(state: AgentState) -> dict[str, Any]:
             # This simulates what happens when the LLM selects a tool —
             # the node calls the tool function directly
-            wrapped_fn = state.get("_wrapped_book_flight", book_flight)
+            wrapped_fn: Any = state.get("_wrapped_book_flight", book_flight)
             result = wrapped_fn(destination="Tokyo")
             return {"messages": [{"role": "tool", "content": result}], "tool_results": [result]}
 
@@ -153,7 +153,7 @@ class TestLangGraphToolMACEndToEnd:
         call_log: list[str] = []
 
         def call_charge_card(state: AgentState) -> dict[str, Any]:
-            wrapped_fn = state.get("_wrapped_charge_card", charge_card)
+            wrapped_fn: Any = state.get("_wrapped_charge_card", charge_card)
             result = wrapped_fn(amount=500.0)
             call_log.append(result)
             return {"messages": [{"role": "tool", "content": result}], "tool_results": [result]}

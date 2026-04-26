@@ -194,11 +194,13 @@ def main() -> None:
     # ── Scene 5: Show permitted vs denied ──
     section("Scene 5: Policy Summary")
     print(f"  {BOLD}Permitted tools{RESET} (in agent's policy):")
-    for tp in constraints["tool_permissions"]:
+    tool_perms: list[dict[str, str]] = constraints["tool_permissions"]  # type: ignore[assignment]
+    for tp in tool_perms:
         print(f"    {GREEN}✓{RESET} {tp['name']}")
     print()
     print(f"  {BOLD}Denied tools{RESET} (organization constraint):")
-    for t in constraints["organization"]["denied_tools"]:
+    org: dict[str, list[str]] = constraints["organization"]  # type: ignore[assignment]
+    for t in org["denied_tools"]:
         print(f"    {RED}✗{RESET} {t}")
     print()
     print(f"  {DIM}Policy comes from Vijil Console. The developer writes no security code.{RESET}")

@@ -6,7 +6,10 @@ import json
 from datetime import UTC, datetime
 from pathlib import Path
 
-from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+from cryptography.hazmat.primitives.asymmetric.ed25519 import (
+    Ed25519PrivateKey,
+    Ed25519PublicKey,
+)
 
 from vijil_dome.trust.manifest import ToolEntry, ToolManifest
 
@@ -27,7 +30,7 @@ def _make_manifest(tools: list[ToolEntry] | None = None) -> ToolManifest:
     )
 
 
-def _keypair() -> tuple[Ed25519PrivateKey, object]:
+def _keypair() -> tuple[Ed25519PrivateKey, Ed25519PublicKey]:
     private_key = Ed25519PrivateKey.generate()
     public_key = private_key.public_key()
     return private_key, public_key
