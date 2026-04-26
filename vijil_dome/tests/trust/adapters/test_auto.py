@@ -78,6 +78,6 @@ class TestSecureAgentDispatch:
         with pytest.raises(TypeError, match="Unsupported agent type"):
             secure_agent("not an agent", agent_id="test", constraints=CONSTRAINTS)
 
-    def test_importable_from_vijil(self):
-        from vijil import secure_agent as sa
+    def test_importable_from_vijil_dome(self):
+        from vijil_dome import secure_agent as sa
         assert callable(sa)

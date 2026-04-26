@@ -165,7 +165,7 @@ def test_secure_graph_factory_compiles_uncompiled() -> None:
     compiled.invoke.return_value = {"messages": ["ok"]}
     uncompiled.compile.return_value = compiled
 
-    with patch("vijil.adapters.langgraph.TrustRuntime") as mock_rt:
+    with patch("vijil_dome.trust.adapters.langgraph.TrustRuntime") as mock_rt:
         rt_instance = MagicMock()
         rt_instance.attest.return_value = MagicMock(all_verified=True)
         rt_instance.mode = "warn"
@@ -198,7 +198,7 @@ def test_secure_graph_factory_uses_compiled_directly() -> None:
     compiled.invoke = MagicMock(return_value={"messages": ["ok"]})
     compiled.stream = MagicMock()
 
-    with patch("vijil.adapters.langgraph.TrustRuntime") as mock_rt:
+    with patch("vijil_dome.trust.adapters.langgraph.TrustRuntime") as mock_rt:
         rt_instance = MagicMock()
         rt_instance.attest.return_value = MagicMock(all_verified=True)
         rt_instance.mode = "warn"

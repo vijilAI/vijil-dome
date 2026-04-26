@@ -87,7 +87,7 @@ class AgentIdentity:
         if not _HAS_SPIFFE:
             logger.warning(
                 "spiffe package is not installed; SPIFFE attestation unavailable. "
-                "Install vijil-sdk[spiffe] to enable mTLS."
+                "Install with: pip install spiffe"
             )
             return
 
@@ -135,7 +135,10 @@ class AgentIdentity:
             response = httpx.post(
                 f"{self._delegate_url.rstrip('/')}/v1/identity/jwt-svid",
                 json={
-                    "aws_identity_token": "auto",  # Service validates via STS
+                    # TODO: Replace with real AWS STS presigned GetCallerIdentity
+                    # request once the Identity Delegate implements full validation.
+                    # Currently the delegate accepts "auto" and uses its own creds.
+                    "aws_identity_token": "auto",
                     "agent_name": self._agent_name,
                     "audience": ["vijil"],
                 },
