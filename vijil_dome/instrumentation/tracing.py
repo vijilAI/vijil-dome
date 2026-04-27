@@ -17,11 +17,12 @@
 from functools import wraps
 from inspect import iscoroutinefunction
 from pydantic import BaseModel
-from opentelemetry.sdk.trace import Tracer, Span
+from opentelemetry.sdk.trace import Tracer
+from opentelemetry.trace.span import Span
 
 
-def _safe_set_attribute(span: Span, key: str, value) -> None:
-    """Set a span attribute only if the value is a valid OTEL type (not None).
+def _safe_set_attribute(span: Span, key: str, value: object) -> None:
+    """Set a span attribute only when the value is not None.
 
     The OTLP protobuf encoder rejects None values, crashing the entire
     span batch export. This guard prevents one bad attribute from

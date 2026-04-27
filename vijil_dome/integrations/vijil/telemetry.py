@@ -27,7 +27,20 @@ if TYPE_CHECKING:
     from opentelemetry.trace.span import Span
 
 from vijil_dome.guardrails import GuardrailResult, GuardResult
-from vijil_dome.instrumentation.tracing import _safe_set_attribute
+
+
+def _safe_set_attribute(span: "Span", key: str, value: object) -> None:
+    """Set a span attribute only when the value is not None.
+
+    Inlined here (rather than imported from instrumentation.tracing) to
+    avoid pulling in the OpenTelemetry SDK at import time. This module
+    must remain importable without the opentelemetry extra installed.
+    """
+    if value is None:
+        return
+    setter = getattr(span, "set_attribute", None)
+    if setter is not None:
+        setter(key, value)
 
 
 def _set_darwin_span_attributes(
