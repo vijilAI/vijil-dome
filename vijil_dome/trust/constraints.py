@@ -5,10 +5,10 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Literal
 
-from vijil_dome.trust.models import TrustModel
+from pydantic import BaseModel
 
 
-class ToolPermission(TrustModel):
+class ToolPermission(BaseModel):
     """Permission entry for a single tool an agent is allowed to call."""
 
     name: str
@@ -17,7 +17,7 @@ class ToolPermission(TrustModel):
     allowed_actions: list[str] | None = None  # None means all actions permitted
 
 
-class DomeGuardConfig(TrustModel):
+class DomeGuardConfig(BaseModel):
     """Dome guardrail configuration for an agent."""
 
     input_guards: list[str]
@@ -25,7 +25,7 @@ class DomeGuardConfig(TrustModel):
     guards: dict[str, dict[str, object]]  # guard name → detector config
 
 
-class OrganizationConstraints(TrustModel):
+class OrganizationConstraints(BaseModel):
     """Organization-level policy constraints applied to all agents."""
 
     required_input_guards: list[str]
@@ -34,7 +34,7 @@ class OrganizationConstraints(TrustModel):
     max_model_tier: str | None = None
 
 
-class AgentConstraints(TrustModel):
+class AgentConstraints(BaseModel):
     """Full constraint set for a single agent instance."""
 
     agent_id: str

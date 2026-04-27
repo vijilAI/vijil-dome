@@ -162,6 +162,57 @@ class AgentIdentity:
                 exc,
             )
 
+    async def _try_delegate_attestation_async(self) -> None:
+        """Async variant of delegate attestation using httpx.AsyncClient."""
+        if not self._delegate_url or not self._agent_name:
+            return
+
+        try:
+            import httpx
+
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                response = await client.post(
+                    f"{self._delegate_url.rstrip('/')}/v1/identity/jwt-svid",
+                    json={
+                        # TODO: Replace with real AWS STS presigned GetCallerIdentity
+                        "aws_identity_token": "auto",
+                        "agent_name": self._agent_name,
+                        "audience": ["vijil"],
+                    },
+                )
+                response.raise_for_status()
+                data = response.json()
+
+            self._jwt_svid = data["jwt_svid"]
+            self._spiffe_id = data["spiffe_id"]
+            self._attested = True
+            logger.info(
+                "async JWT-SVID attestation via delegate successful: %s",
+                self._spiffe_id,
+            )
+        except ImportError:
+            logger.warning("httpx not installed; delegate attestation unavailable.")
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "Async delegate attestation failed: %s. Agent will run unattested.",
+                exc,
+            )
+
+    async def attest_async(self) -> None:
+        """Async attestation — tries SPIFFE (in thread), then async delegate."""
+        if self._attested:
+            return
+
+        # SPIFFE attestation is a sync gRPC call — run in a thread
+        if _HAS_SPIFFE and os.path.exists(self._spire_socket):
+            import asyncio
+            await asyncio.to_thread(self._try_spiffe_attestation)
+            if self._attested:
+                return
+
+        # Delegate attestation — native async
+        await self._try_delegate_attestation_async()
+
     # ------------------------------------------------------------------
     # Properties
     # ------------------------------------------------------------------
@@ -206,15 +257,6 @@ class AgentIdentity:
             )
 
         try:
-            import tempfile
-
-            ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
-
-            # The spiffe library's X509Svid exposes:
-            #   .leaf — the leaf certificate (cryptography x509.Certificate)
-            #   .cert_chain — list of certificates
-            #   .private_key — the private key
-            # We need to serialize them to PEM for ssl.SSLContext
             from cryptography.hazmat.primitives.serialization import (
                 Encoding,
                 NoEncryption,
@@ -227,20 +269,45 @@ class AgentIdentity:
             cert_pem = leaf.public_bytes(Encoding.PEM)
             key_pem = private_key.private_bytes(Encoding.PEM, PrivateFormat.PKCS8, NoEncryption())
 
-            # Write to temp files (ssl.SSLContext requires file paths for cert+key)
-            with tempfile.NamedTemporaryFile(suffix=".pem", delete=False) as cert_f:
-                cert_f.write(cert_pem)
-                cert_path = cert_f.name
-            with tempfile.NamedTemporaryFile(suffix=".key", delete=False) as key_f:
-                key_f.write(key_pem)
-                key_path = key_f.name
+            # Load cert + key in memory via pyOpenSSL (no temp files).
+            # Falls back to temp files if pyOpenSSL is not installed.
+            ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+            try:
+                from OpenSSL.crypto import (  # type: ignore[import-untyped]
+                    load_certificate,
+                    load_privatekey,
+                    FILETYPE_PEM,
+                )
+                from OpenSSL.SSL import Context, TLSv1_2_METHOD  # type: ignore[import-untyped]
 
-            ctx.load_cert_chain(cert_path, key_path)
+                ossl_ctx = Context(TLSv1_2_METHOD)
+                ossl_ctx.use_certificate(load_certificate(FILETYPE_PEM, cert_pem))
+                ossl_ctx.use_privatekey(load_privatekey(FILETYPE_PEM, key_pem))
 
-            # Clean up temp files
-            import os
-            os.unlink(cert_path)
-            os.unlink(key_path)
+                # Extract the stdlib SSLContext from pyOpenSSL
+                ctx = ossl_ctx._context  # type: ignore[attr-defined]
+                if not isinstance(ctx, ssl.SSLContext):
+                    # pyOpenSSL internals changed — fall back to temp files
+                    raise ImportError("Cannot extract stdlib SSLContext from pyOpenSSL")
+            except ImportError:
+                # pyOpenSSL not available — use temp files with cleanup
+                import tempfile
+                import os
+
+                cert_path = key_path = None
+                try:
+                    with tempfile.NamedTemporaryFile(suffix=".pem", delete=False) as cert_f:
+                        cert_f.write(cert_pem)
+                        cert_path = cert_f.name
+                    with tempfile.NamedTemporaryFile(suffix=".key", delete=False) as key_f:
+                        key_f.write(key_pem)
+                        key_path = key_f.name
+                    ctx.load_cert_chain(cert_path, key_path)
+                finally:
+                    if cert_path and os.path.exists(cert_path):
+                        os.unlink(cert_path)
+                    if key_path and os.path.exists(key_path):
+                        os.unlink(key_path)
 
             # Load trust bundle for verifying peer certificates
             if hasattr(self, "_trust_bundle") and self._trust_bundle is not None:

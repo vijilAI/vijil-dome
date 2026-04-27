@@ -224,7 +224,7 @@ class TrustRuntime:
 
     def check_tool_call(self, tool_name: str, args: dict[str, Any]) -> ToolCallResult:
         """Check whether a tool call is permitted by policy."""
-        result = self._policy.check(tool_name)
+        result = self._policy.check(tool_name, args=args)
         self._audit.emit_tool_mac(
             tool_name,
             permitted=result.permitted,
@@ -394,6 +394,44 @@ class TrustRuntime:
                 verified=False,
                 error=f"Verification failed: {exc}",
             )
+
+    async def _verify_tool_identity_async(
+        self, tool: Any
+    ) -> ToolAttestationStatus:
+        """Async variant — runs the blocking TLS connection in a thread."""
+        import asyncio
+        return await asyncio.to_thread(self._verify_tool_identity, tool)
+
+    async def attest_async(self) -> AttestationResult:
+        """Async attestation — runs identity attestation and tool verification."""
+        # Ensure identity is attested (async)
+        await self._identity.attest_async()
+
+        agent_spiffe = self._identity.spiffe_id or self._agent_id
+
+        if self._manifest is None:
+            self._audit.emit_attestation(all_verified=True, tool_count=0)
+            return AttestationResult(
+                agent_identity=agent_spiffe,
+                tools=[],
+                all_verified=True,
+                timestamp=datetime.now(tz=UTC),
+            )
+
+        import asyncio
+        statuses = await asyncio.gather(
+            *(self._verify_tool_identity_async(tool) for tool in self._manifest.tools)
+        )
+        all_verified = all(s.verified for s in statuses)
+        self._audit.emit_attestation(
+            all_verified=all_verified, tool_count=len(statuses)
+        )
+        return AttestationResult(
+            agent_identity=agent_spiffe,
+            tools=list(statuses),
+            all_verified=all_verified,
+            timestamp=datetime.now(tz=UTC),
+        )
 
     @staticmethod
     def _parse_endpoint(endpoint: str) -> tuple[str | None, int]:

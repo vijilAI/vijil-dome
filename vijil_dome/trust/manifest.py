@@ -12,10 +12,10 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import (
     Ed25519PublicKey,
 )
 
-from vijil_dome.trust.models import TrustModel
+from pydantic import BaseModel
 
 
-class ToolEntry(TrustModel):
+class ToolEntry(BaseModel):
     """A single tool authorized for use by an agent."""
 
     name: str
@@ -24,7 +24,7 @@ class ToolEntry(TrustModel):
     version: str | None = None  # Informational only; used in audit logs
 
 
-class ToolManifest(TrustModel):
+class ToolManifest(BaseModel):
     """Signed manifest declaring which tools an agent is authorized to call."""
 
     manifest_version: int = 1

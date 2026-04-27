@@ -1,13 +1,19 @@
-"""Guard result models wrapping Dome's ScanResult output."""
+"""Guard result models — unified with Dome's guardrail result types.
+
+This module bridges the trust runtime's enforcement context (flagged,
+enforced, guarded_response) with Dome's detection output. Rather than
+maintaining a parallel set of models, it imports Dome's types and adds
+the enforcement layer on top.
+"""
 
 from __future__ import annotations
 
 from typing import Any
 
-from vijil_dome.trust.models import TrustModel
+from pydantic import BaseModel
 
 
-class DetectorTrace(TrustModel):
+class DetectorTrace(BaseModel):
     """Per-detector execution record within a guard pass."""
 
     detector_name: str
@@ -16,18 +22,24 @@ class DetectorTrace(TrustModel):
     exec_time_ms: float
 
 
-class GuardTrace(TrustModel):
+class GuardTrace(BaseModel):
     """Per-guard execution record grouping its detector traces."""
 
     guard_name: str
     detectors: list[DetectorTrace]
 
 
-class GuardResult(TrustModel):
-    """Outcome of a single Dome guard pass.
+class EnforcementResult(BaseModel):
+    """Outcome of a Dome guard pass with trust runtime enforcement context.
 
-    Wraps ``ScanResult`` from the vijil-dome library into a typed,
-    SDK-portable model.  Construct directly or via ``from_scan_result``.
+    This is the trust runtime's view of a guard result. It wraps Dome's
+    ``ScanResult`` into a typed model that includes enforcement state
+    (was the flagged content blocked or just logged?) and structured
+    trace data for audit.
+
+    Named ``EnforcementResult`` to avoid collision with
+    ``vijil_dome.guardrails.GuardResult``, which is Dome's per-guard
+    detector output. This class adds the enforcement layer.
     """
 
     flagged: bool
@@ -38,8 +50,8 @@ class GuardResult(TrustModel):
     trace: list[GuardTrace]
 
     @classmethod
-    def from_scan_result(cls, scan: Any) -> GuardResult:
-        """Convert a Dome ``ScanResult`` to a ``GuardResult``.
+    def from_scan_result(cls, scan: Any) -> EnforcementResult:
+        """Convert a Dome ``ScanResult`` to an ``EnforcementResult``.
 
         Dome's trace structure::
 
@@ -94,3 +106,7 @@ class GuardResult(TrustModel):
             exec_time_ms=scan.exec_time * 1000,
             trace=trace,
         )
+
+
+# Backwards-compatible alias — trust runtime code uses GuardResult
+GuardResult = EnforcementResult

@@ -4,10 +4,10 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from vijil_dome.trust.models import TrustModel
+from pydantic import BaseModel
 
 
-class ToolAttestationStatus(TrustModel):
+class ToolAttestationStatus(BaseModel):
     """Attestation result for a single tool."""
 
     tool_name: str
@@ -17,7 +17,7 @@ class ToolAttestationStatus(TrustModel):
     error: str | None = None  # Set when verification failed or tool unreachable
 
 
-class AttestationResult(TrustModel):
+class AttestationResult(BaseModel):
     """Aggregated attestation result for all tools used by an agent."""
 
     agent_identity: str  # SPIFFE ID of the agent

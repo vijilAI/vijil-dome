@@ -7,12 +7,12 @@ from collections.abc import Callable
 from datetime import UTC, datetime
 from typing import Any
 
-from vijil_dome.trust.models import TrustModel
+from pydantic import BaseModel
 
 logger = logging.getLogger(__name__)
 
 
-class AuditEvent(TrustModel):
+class AuditEvent(BaseModel):
     """A single auditable trust event emitted by the runtime."""
 
     event_type: str
