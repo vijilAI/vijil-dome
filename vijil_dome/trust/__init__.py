@@ -8,7 +8,7 @@ from vijil_dome.trust.constraints import (
     OrganizationConstraints,
     ToolPermission,
 )
-from vijil_dome.trust.guard import DetectorTrace, EnforcementResult, GuardResult, GuardTrace
+from vijil_dome.trust.guard import DetectorTrace, EnforcementResult, GuardTrace
 from vijil_dome.trust.identity import AgentIdentity
 from vijil_dome.trust.manifest import ToolEntry, ToolManifest
 from vijil_dome.trust.policy import ToolCallResult, ToolPolicy
@@ -23,7 +23,6 @@ __all__ = [
     "DetectorTrace",
     "DomeGuardConfig",
     "EnforcementResult",
-    "GuardResult",
     "GuardTrace",
     "OrganizationConstraints",
     "ToolAttestationStatus",

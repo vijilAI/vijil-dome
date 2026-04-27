@@ -1,4 +1,4 @@
-"""Tests for GuardResult and related models."""
+"""Tests for EnforcementResult and related models."""
 
 from __future__ import annotations
 
@@ -6,7 +6,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from vijil_dome.trust.guard import DetectorTrace, GuardResult, GuardTrace
+from vijil_dome.trust.guard import DetectorTrace, EnforcementResult, GuardTrace
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -55,7 +55,7 @@ def _make_scan_result(
 
 
 def test_unflagged_result() -> None:
-    result = GuardResult(
+    result = EnforcementResult(
         flagged=False,
         enforced=False,
         score=0.05,
@@ -81,7 +81,7 @@ def test_flagged_enforced_result() -> None:
     det = _detector(name="prompt_injection", hit=True, score=0.92)
     guard = _guard(name="input_guard", detectors=[det])
 
-    result = GuardResult(
+    result = EnforcementResult(
         flagged=True,
         enforced=True,
         score=0.92,
@@ -121,7 +121,7 @@ def test_from_scan_result_unflagged() -> None:
         trace={},
     )
 
-    result = GuardResult.from_scan_result(scan)
+    result = EnforcementResult.from_scan_result(scan)
 
     assert result.flagged is False
     assert result.enforced is False
@@ -155,7 +155,7 @@ def test_from_scan_result_flagged_with_trace() -> None:
         },
     )
 
-    result = GuardResult.from_scan_result(scan)
+    result = EnforcementResult.from_scan_result(scan)
 
     assert result.flagged is True
     assert result.enforced is True
@@ -189,7 +189,7 @@ def test_from_scan_result_empty_trace() -> None:
         trace={},
     )
 
-    result = GuardResult.from_scan_result(scan)
+    result = EnforcementResult.from_scan_result(scan)
 
     assert result.trace == []
     assert result.exec_time_ms == pytest.approx(10.0)

@@ -6,14 +6,14 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from vijil_dome.trust.guard import GuardResult
+from vijil_dome.trust.guard import EnforcementResult
 
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
 
-def _unflagged_guard() -> GuardResult:
-    return GuardResult(
+def _unflagged_guard() -> EnforcementResult:
+    return EnforcementResult(
         flagged=False,
         enforced=False,
         score=0.0,
@@ -23,8 +23,8 @@ def _unflagged_guard() -> GuardResult:
     )
 
 
-def _flagged_guard(*, enforced: bool = True) -> GuardResult:
-    return GuardResult(
+def _flagged_guard(*, enforced: bool = True) -> EnforcementResult:
+    return EnforcementResult(
         flagged=True,
         enforced=enforced,
         score=0.95,

@@ -12,7 +12,7 @@ from typing import Any
 from vijil_dome.trust.attestation import AttestationResult, ToolAttestationStatus
 from vijil_dome.trust.audit import AuditEmitter
 from vijil_dome.trust.constraints import AgentConstraints
-from vijil_dome.trust.guard import GuardResult
+from vijil_dome.trust.guard import EnforcementResult
 from vijil_dome.trust.identity import AgentIdentity
 from vijil_dome.trust.manifest import ToolManifest
 from vijil_dome.trust.policy import ToolCallResult, ToolPolicy
@@ -172,10 +172,10 @@ class TrustRuntime:
     # Guard passes
     # ------------------------------------------------------------------
 
-    def guard_input(self, message: str) -> GuardResult:
+    def guard_input(self, message: str) -> EnforcementResult:
         """Run input through Dome guards, if available."""
         if self._dome is None:
-            return GuardResult(
+            return EnforcementResult(
                 flagged=False,
                 enforced=False,
                 score=0.0,
@@ -184,7 +184,7 @@ class TrustRuntime:
                 trace=[],
             )
         scan = self._dome.guard_input(message, agent_id=self._agent_id)
-        result = GuardResult.from_scan_result(scan)
+        result = EnforcementResult.from_scan_result(scan)
         self._audit.emit_guard(
             "input",
             flagged=result.flagged,
@@ -193,10 +193,10 @@ class TrustRuntime:
         )
         return result
 
-    def guard_output(self, response: str) -> GuardResult:
+    def guard_output(self, response: str) -> EnforcementResult:
         """Run output through Dome guards, if available."""
         if self._dome is None:
-            return GuardResult(
+            return EnforcementResult(
                 flagged=False,
                 enforced=False,
                 score=0.0,
@@ -205,7 +205,7 @@ class TrustRuntime:
                 trace=[],
             )
         scan = self._dome.guard_output(response, agent_id=self._agent_id)
-        result = GuardResult.from_scan_result(scan)
+        result = EnforcementResult.from_scan_result(scan)
         self._audit.emit_guard(
             "output",
             flagged=result.flagged,
@@ -214,7 +214,7 @@ class TrustRuntime:
         )
         return result
 
-    def guard_tool_response(self, tool_name: str, response: str) -> GuardResult:
+    def guard_tool_response(self, tool_name: str, response: str) -> EnforcementResult:
         """Guard a tool's response through output guards."""
         return self.guard_output(response)
 
@@ -273,30 +273,30 @@ class TrustRuntime:
     # Private helpers
     # ------------------------------------------------------------------
 
-    async def aguard_input(self, message: str) -> GuardResult:
+    async def aguard_input(self, message: str) -> EnforcementResult:
         """Async input guard — calls Dome's async API directly."""
         if self._dome is None:
-            return GuardResult(
+            return EnforcementResult(
                 flagged=False, enforced=False, score=0.0,
                 guarded_response=None, exec_time_ms=0.0, trace=[],
             )
         scan = await self._dome.async_guard_input(message, agent_id=self._agent_id)
-        result = GuardResult.from_scan_result(scan)
+        result = EnforcementResult.from_scan_result(scan)
         self._audit.emit_guard(
             "input", flagged=result.flagged, score=result.score,
             exec_time_ms=result.exec_time_ms,
         )
         return result
 
-    async def aguard_output(self, response: str) -> GuardResult:
+    async def aguard_output(self, response: str) -> EnforcementResult:
         """Async output guard — calls Dome's async API directly."""
         if self._dome is None:
-            return GuardResult(
+            return EnforcementResult(
                 flagged=False, enforced=False, score=0.0,
                 guarded_response=None, exec_time_ms=0.0, trace=[],
             )
         scan = await self._dome.async_guard_output(response, agent_id=self._agent_id)
-        result = GuardResult.from_scan_result(scan)
+        result = EnforcementResult.from_scan_result(scan)
         self._audit.emit_guard(
             "output", flagged=result.flagged, score=result.score,
             exec_time_ms=result.exec_time_ms,

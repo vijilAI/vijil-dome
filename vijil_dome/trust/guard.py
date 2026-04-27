@@ -38,7 +38,7 @@ class EnforcementResult(BaseModel):
     trace data for audit.
 
     Named ``EnforcementResult`` to avoid collision with
-    ``vijil_dome.guardrails.GuardResult``, which is Dome's per-guard
+    ``vijil_dome.guardrails.EnforcementResult``, which is Dome's per-guard
     detector output. This class adds the enforcement layer.
     """
 
@@ -108,5 +108,4 @@ class EnforcementResult(BaseModel):
         )
 
 
-# Backwards-compatible alias — trust runtime code uses GuardResult
-GuardResult = EnforcementResult
+EnforcementResult = EnforcementResult

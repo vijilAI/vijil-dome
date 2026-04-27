@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock
 
-from vijil_dome.trust.guard import GuardResult
+from vijil_dome.trust.guard import EnforcementResult
 from vijil_dome.trust.runtime import TrustRuntime
 
 # ---------------------------------------------------------------------------
@@ -113,7 +113,7 @@ def test_guard_input_delegates_to_dome() -> None:
 
     result = runtime.guard_input("hello")
 
-    assert isinstance(result, GuardResult)
+    assert isinstance(result, EnforcementResult)
     assert result.flagged is False
     mock_dome.guard_input.assert_called_once_with("hello", agent_id="agent-123")
 
