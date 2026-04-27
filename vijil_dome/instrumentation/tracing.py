@@ -16,30 +16,50 @@
 
 from functools import wraps
 from inspect import iscoroutinefunction
+from typing import Union
+
 from pydantic import BaseModel
-from opentelemetry.sdk.trace import Tracer, Span
+from opentelemetry.sdk.trace import Tracer
+from opentelemetry.trace.span import Span
+
+# OTEL AttributeValue — the union of types span.set_attribute accepts.
+_AttributeValue = Union[str, bool, int, float, list]
+
+
+def _safe_set_attribute(span: Span, key: str, value: _AttributeValue | None) -> None:
+    """Set a span attribute only when the value is not None.
+
+    The OTLP protobuf encoder rejects None values, crashing the entire
+    span batch export. This guard prevents one bad attribute from
+    dropping all traces in a BatchSpanProcessor flush cycle.
+    """
+    if value is None:
+        return
+    span.set_attribute(key, value)
 
 
 def _set_func_span_attributes(span: Span, *args, **kwargs):
-    span.set_attribute("function.args", str(args))
-    span.set_attribute("function.kwargs", str(kwargs))
+    _safe_set_attribute(span, "function.args", str(args))
+    _safe_set_attribute(span, "function.kwargs", str(kwargs))
 
     agent_id = kwargs.get("agent_id")
     if agent_id:
-        span.set_attribute("agent.id", agent_id)
+        _safe_set_attribute(span, "agent.id", str(agent_id))
     team_id = kwargs.get("team_id")
     if team_id:
-        span.set_attribute("team.id", team_id)
+        _safe_set_attribute(span, "team.id", str(team_id))
     user_id = kwargs.get("user_id")
     if user_id:
-        span.set_attribute("user.id", user_id)
+        _safe_set_attribute(span, "user.id", str(user_id))
 
 
 def _set_func_span_result_attributes(span: Span, result):
+    if result is None:
+        return
     if isinstance(result, BaseModel):
-        span.set_attribute("function.result", str(result.model_dump()))
+        _safe_set_attribute(span, "function.result", str(result.model_dump()))
     else:
-        span.set_attribute("function.result", str(result))
+        _safe_set_attribute(span, "function.result", str(result))
 
 
 # Wrap any function with a Tracer to record Spans. Works with both sync and async functions
