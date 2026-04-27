@@ -3,6 +3,7 @@ import asyncio
 from vijil_dome import Dome, create_dome_config
 from vijil_dome.guardrails import Guard, Guardrail
 from vijil_dome.detectors import DetectionMethod, DetectionResult
+from vijil_dome.types import DomePayload
 
 
 class MockSlowDetector(DetectionMethod):
@@ -14,7 +15,8 @@ class MockSlowDetector(DetectionMethod):
         self.was_executed = False
         self.was_cancelled = False
 
-    async def detect(self, query_string: str) -> DetectionResult:
+    async def detect(self, dome_input: DomePayload) -> DetectionResult:
+        query_string = dome_input.query_string
         try:
             self.was_executed = True
             await asyncio.sleep(self.delay)
@@ -32,7 +34,7 @@ class MockTriggeringDetector(DetectionMethod):
         self._name = name
         self.was_executed = False
 
-    async def detect(self, query_string: str) -> DetectionResult:
+    async def detect(self, dome_input: DomePayload) -> DetectionResult:
         self.was_executed = True
         if self.delay > 0:
             await asyncio.sleep(self.delay)

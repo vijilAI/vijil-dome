@@ -14,6 +14,7 @@ from vijil_dome.integrations.strands.hooks import (
     _extract_last_user_text,
     _extract_response_text,
 )
+from vijil_dome.types import DomePayload
 
 
 # ---------------------------------------------------------------------------
@@ -92,9 +93,11 @@ class TestInputGuarding:
     async def test_flagged_input_replaces_message(self, dome_mock):
         scan_result = MagicMock()
         scan_result.is_safe.return_value = False
+        scan_result.flagged = True
+        scan_result.enforced = True
         dome_mock.async_guard_input.return_value = scan_result
 
-        provider = DomeHookProvider(dome_mock, agent_id="a1")
+        provider = DomeHookProvider(dome_mock, agent_id="a1", team_id="t1", user_id="u1")
 
         messages = [_make_message("user", "malicious prompt")]
         event = _make_before_event(messages)
@@ -104,13 +107,15 @@ class TestInputGuarding:
         # The user message text should be replaced with blocked message
         assert event.agent.messages[0]["content"] == [{"text": DEFAULT_INPUT_BLOCKED_MESSAGE}]
         dome_mock.async_guard_input.assert_called_once_with(
-            "malicious prompt", agent_id="a1"
+            "malicious prompt", agent_id="a1", team_id="t1", user_id="u1"
         )
 
     @pytest.mark.asyncio
     async def test_clean_input_passes_through(self, dome_mock):
         scan_result = MagicMock()
         scan_result.is_safe.return_value = True
+        scan_result.flagged = False
+        scan_result.enforced = False
         dome_mock.async_guard_input.return_value = scan_result
 
         provider = DomeHookProvider(dome_mock)
@@ -122,6 +127,12 @@ class TestInputGuarding:
 
         # Message unchanged
         assert event.agent.messages[0]["content"] == [{"text": "normal question"}]
+        dome_mock.async_guard_input.assert_called_once_with(
+            "normal question",
+            agent_id=None,
+            team_id=None,
+            user_id=None,
+        )
 
     @pytest.mark.asyncio
     async def test_no_user_messages_skips_scan(self, dome_mock):
@@ -138,6 +149,8 @@ class TestInputGuarding:
     async def test_custom_blocked_message(self, dome_mock):
         scan_result = MagicMock()
         scan_result.is_safe.return_value = False
+        scan_result.flagged = True
+        scan_result.enforced = True
         dome_mock.async_guard_input.return_value = scan_result
 
         custom_msg = "Custom block"
@@ -204,9 +217,11 @@ class TestOutputGuarding:
     async def test_flagged_output_replaces_response(self, dome_mock):
         scan_result = MagicMock()
         scan_result.is_safe.return_value = False
+        scan_result.flagged = True
+        scan_result.enforced = True
         dome_mock.async_guard_output.return_value = scan_result
 
-        provider = DomeHookProvider(dome_mock, agent_id="a1")
+        provider = DomeHookProvider(dome_mock, agent_id="a1", team_id="t1", user_id="u1")
 
         event = _make_after_event("unsafe response")
 
@@ -217,13 +232,16 @@ class TestOutputGuarding:
             {"text": DEFAULT_OUTPUT_BLOCKED_MESSAGE}
         ]
         dome_mock.async_guard_output.assert_called_once_with(
-            "unsafe response", agent_id="a1"
+            DomePayload(response="unsafe response"),
+            agent_id="a1", team_id="t1", user_id="u1",
         )
 
     @pytest.mark.asyncio
     async def test_clean_output_passes_through(self, dome_mock):
         scan_result = MagicMock()
         scan_result.is_safe.return_value = True
+        scan_result.flagged = False
+        scan_result.enforced = False
         dome_mock.async_guard_output.return_value = scan_result
 
         provider = DomeHookProvider(dome_mock)
@@ -234,6 +252,12 @@ class TestOutputGuarding:
 
         # Message unchanged
         assert event.stop_response.message["content"] == [{"text": "safe response"}]
+        dome_mock.async_guard_output.assert_called_once_with(
+            DomePayload(response="safe response"),
+            agent_id=None,
+            team_id=None,
+            user_id=None,
+        )
 
     @pytest.mark.asyncio
     async def test_no_stop_response_skips_scan(self, dome_mock):
@@ -249,6 +273,8 @@ class TestOutputGuarding:
     async def test_custom_output_blocked_message(self, dome_mock):
         scan_result = MagicMock()
         scan_result.is_safe.return_value = False
+        scan_result.flagged = True
+        scan_result.enforced = True
         dome_mock.async_guard_output.return_value = scan_result
 
         custom_msg = "Custom output block"
@@ -289,3 +315,59 @@ class TestHookRegistration:
         dome = MagicMock()
         provider = DomeHookProvider(dome)
         assert isinstance(provider, HookProvider)
+
+
+# ---------------------------------------------------------------------------
+# Structured output guarding (DomePayload with prompt + response)
+# ---------------------------------------------------------------------------
+
+class TestOutputGuardingStructured:
+    @pytest.fixture
+    def dome_mock(self):
+        dome = MagicMock()
+        dome.async_guard_input = AsyncMock()
+        dome.async_guard_output = AsyncMock()
+        return dome
+
+    @pytest.mark.asyncio
+    async def test_output_guard_sends_dome_payload_with_user_context(self, dome_mock):
+        """When user messages exist, _guard_output passes DomePayload with prompt and response."""
+        scan_result = MagicMock()
+        scan_result.is_safe.return_value = True
+        scan_result.flagged = False
+        scan_result.enforced = False
+        dome_mock.async_guard_output.return_value = scan_result
+
+        provider = DomeHookProvider(dome_mock)
+        # Build event with user message history + model response
+        messages = [_make_message("user", "What is 2+2?")]
+        event = _make_after_event("4")
+        event.agent = _make_agent(messages)
+
+        await provider._guard_output(event)
+
+        call_args = dome_mock.async_guard_output.call_args
+        payload = call_args[0][0]
+        assert isinstance(payload, DomePayload)
+        assert payload.prompt == "What is 2+2?"
+        assert payload.response == "4"
+
+    @pytest.mark.asyncio
+    async def test_output_guard_sends_response_only_when_no_user_messages(self, dome_mock):
+        """When no user messages exist, DomePayload has response only."""
+        scan_result = MagicMock()
+        scan_result.is_safe.return_value = True
+        scan_result.flagged = False
+        scan_result.enforced = False
+        dome_mock.async_guard_output.return_value = scan_result
+
+        provider = DomeHookProvider(dome_mock)
+        event = _make_after_event("some output")
+
+        await provider._guard_output(event)
+
+        call_args = dome_mock.async_guard_output.call_args
+        payload = call_args[0][0]
+        assert isinstance(payload, DomePayload)
+        assert payload.prompt is None
+        assert payload.response == "some output"

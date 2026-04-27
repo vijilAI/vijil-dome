@@ -5,6 +5,7 @@ from fastmcp.tools.tool import ToolResult
 from fastmcp.server.proxy import FastMCPProxy
 from fastmcp.server.middleware import Middleware, MiddlewareContext
 from vijil_dome import Dome
+from vijil_dome.types import DomePayload
 
 Transport = Literal["stdio", "http", "sse", "streamable-http"]
 
@@ -128,8 +129,9 @@ class DomedMCPServer:
         class OutputGuardrailMiddleware(Middleware):
             async def on_call_tool(self, context: MiddlewareContext, call_next):
                 result = await call_next(context)
+                original_input = str(context.message)
                 output_scan = await dome_instance.async_guard_output(
-                    str(result.structured_content)
+                    DomePayload(prompt=original_input, response=str(result.structured_content))
                 )
                 if output_scan.flagged:
                     # Dome is triggered. Create a minimal response object that satisfies output typecast

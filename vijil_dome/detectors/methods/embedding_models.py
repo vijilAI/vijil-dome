@@ -21,6 +21,7 @@ from vijil_dome.detectors import (
     DetectionResult,
     SECURITY_EMBEDDINGS,
 )
+from vijil_dome.types import DomePayload
 import os
 
 
@@ -43,6 +44,6 @@ class JailbreakEmbeddingsDetector(BaseEmbeddingsDetector):
         )
         super().__init__(SECURITY_EMBEDDINGS, jb_file, engine, model, threshold, in_mem)
 
-    async def detect(self, query_string: str) -> DetectionResult:
-        result = await super().detect(query_string)
-        return result
+    async def detect(self, dome_input: DomePayload) -> DetectionResult:
+        dome_input = DomePayload.coerce(dome_input)
+        return await super().detect(dome_input)

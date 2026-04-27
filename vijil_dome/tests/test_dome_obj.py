@@ -136,6 +136,26 @@ async def test_async_config_agent_id():
 
 
 @pytest.mark.asyncio
+async def test_async_config_agent_config_id_alias():
+    config_with_legacy_agent_id = TEST_CONFIG.copy()
+    config_with_legacy_agent_id["agent_config_id"] = "legacy-agent-123"
+    dome = Dome(dome_config=create_dome_config(config_with_legacy_agent_id))
+    assert dome.agent_id == "legacy-agent-123"
+
+
+@pytest.mark.asyncio
+async def test_async_config_agent_team_user_ids():
+    config_with_ids = TEST_CONFIG.copy()
+    config_with_ids["agent_id"] = "agent-456"
+    config_with_ids["team_id"] = "team-abc"
+    config_with_ids["user_id"] = "user-xyz"
+    dome = Dome(dome_config=create_dome_config(config_with_ids))
+    assert dome.get_agent_id() == "agent-456"
+    assert dome.get_team_id() == "team-abc"
+    assert dome.get_user_id() == "user-xyz"
+
+
+@pytest.mark.asyncio
 async def test_toml_config():
     dir_path = os.path.dirname(os.path.realpath(__file__))
     toml_path = os.path.join(dir_path, "sample_configs", "no_id.toml")
@@ -159,6 +179,9 @@ async def test_toml_config():
     with_id_toml_path = os.path.join(dir_path, "sample_configs", "with_id.toml")
     dome = Dome(dome_config=with_id_toml_path)
     assert dome.agent_id == "sample-agent-001"
+    assert dome.get_agent_id() == "sample-agent-001"
+    assert dome.get_team_id() == "sample-team-001"
+    assert dome.get_user_id() == "sample-user-001"
 
     input_guard_set = set()
     for guard in dome.input_guardrail.guard_list:

@@ -24,11 +24,14 @@ from vijil_dome.detectors import (
     register_method,
     DetectionCategory,
     DetectionResult,
+    BatchDetectionResult,
 )
-from typing import Optional
+from typing import List, Optional, Union
 from transformers import pipeline
 from torch.nn.functional import softmax
 from vijil_dome.detectors.utils.hf_model import HFBaseModel
+from vijil_dome.detectors.utils.sliding_window import chunk_text
+from vijil_dome.types import DomePayload
 
 logger = logging.getLogger("vijil.dome")
 
@@ -45,7 +48,27 @@ class BaseDebertaPromptInjectionModel(HFBaseModel):
         model_dir: str = "deberta-prompt-injection",
         truncation: bool = True,
         max_length: int = 512,
+        window_stride: int = 256,
     ):
+        """
+        Parameters
+        ----------
+        model_identifier:
+            HuggingFace model name or path.
+        response_method:
+            Method name used in blocked response strings.
+        model_dir:
+            Local model directory name under ``methods/models/``.
+        truncation:
+            Whether to truncate inputs exceeding *max_length*.
+        max_length:
+            Maximum tokens per window (DeBERTa supports up to 512).
+        window_stride:
+            Step size in tokens between sliding windows for inputs that
+            exceed *max_length*. Must be positive and ideally less than
+            *max_length* to ensure overlapping coverage. Default 256
+            (half of *max_length*) balances thoroughness and speed.
+        """
         try:
             model_path = os.path.join(
                 os.path.dirname(__file__),
@@ -57,6 +80,8 @@ class BaseDebertaPromptInjectionModel(HFBaseModel):
             else:
                 super().__init__(model_identifier)
 
+            self.max_length = max_length
+            self.window_stride = window_stride
             self.classifier = pipeline(
                 "text-classification",
                 model=self.model,
@@ -73,19 +98,86 @@ class BaseDebertaPromptInjectionModel(HFBaseModel):
             raise
 
     def sync_detect(
-        self, query_string: str, agent_id: Optional[str] = None
+        self,
+        dome_input: DomePayload,
+        agent_id: Optional[str] = None,
+        team_id: Optional[str] = None,
+        user_id: Optional[str] = None,
     ) -> DetectionResult:
-        pred = self.classifier(query_string)
-        flagged = pred[0]["label"] != "SAFE"
+        dome_input = DomePayload.coerce(dome_input)
+        query_string = dome_input.query_string
+        chunks = chunk_text(
+            query_string, self.tokenizer, self.max_length, self.window_stride
+        )
+        num_windows = len(chunks)
+
+        if num_windows == 1:
+            pred = self.classifier(query_string)
+            flagged = pred[0]["label"] != "SAFE"
+            return flagged, {
+                "type": type(self),
+                "predictions": pred,
+                "response_string": self.response_string if flagged else query_string,
+                "num_windows": 1,
+            }
+
+        # Multi-window: batch all chunks through pipeline, any-positive aggregation
+        all_preds = self.classifier(chunks, batch_size=self.max_batch_concurrency)
+        flagged = False
+        for window_pred in all_preds:
+            item = window_pred[0] if isinstance(window_pred, list) else window_pred
+            if item["label"] != "SAFE":
+                flagged = True
+                break
+
         return flagged, {
             "type": type(self),
-            "predictions": pred,
+            "predictions": all_preds,
             "response_string": self.response_string if flagged else query_string,
+            "num_windows": num_windows,
         }
 
-    async def detect(self, query_string: str) -> DetectionResult:
+    async def detect(self, dome_input: DomePayload) -> DetectionResult:
+        dome_input = DomePayload.coerce(dome_input)
         logger.info(f"Detecting using {self.__class__.__name__}...")
-        return self.sync_detect(query_string)
+        return self.sync_detect(dome_input)
+
+    async def detect_batch(self, inputs: List[Union[str, DomePayload]]) -> BatchDetectionResult:
+        dome_inputs = [DomePayload.coerce(x) for x in inputs]
+        # Phase 1: chunk each input, build flat list + per-input ranges
+        flat_chunks: List[str] = []
+        ranges = []
+        for di in dome_inputs:
+            query_string = di.query_string
+            chunks = chunk_text(
+                query_string, self.tokenizer, self.max_length, self.window_stride
+            )
+            start = len(flat_chunks)
+            flat_chunks.extend(chunks)
+            ranges.append((start, len(flat_chunks)))
+
+        # Phase 2: pipeline call on all chunks (batched)
+        all_preds = self.classifier(flat_chunks, batch_size=self.max_batch_concurrency)
+
+        # Phase 3: re-aggregate per input using any-positive
+        results = []
+        for dome_item, (start, end) in zip(dome_inputs, ranges):
+            query_string = dome_item.query_string
+            chunk_preds = all_preds[start:end]
+            num_windows = end - start
+            flagged = False
+            for pred in chunk_preds:
+                item = pred[0] if isinstance(pred, list) else pred
+                if item["label"] != "SAFE":
+                    flagged = True
+                    break
+            results.append((flagged, {
+                "type": type(self),
+                "predictions": chunk_preds,
+                "response_string": self.response_string if flagged else query_string,
+                "num_windows": num_windows,
+            }))
+        return results
 
 
 @register_method(DetectionCategory.Security, PI_DEBERTA_V3_BASE)
@@ -94,12 +186,18 @@ class DebertaPromptInjectionModel(BaseDebertaPromptInjectionModel):
     https://huggingface.co/protectai/deberta-v3-base-prompt-injection-v2
     """
 
-    def __init__(self, truncation: bool = True, max_length: int = 512):
+    def __init__(
+        self,
+        truncation: bool = True,
+        max_length: int = 512,
+        window_stride: int = 256,
+    ):
         super().__init__(
             model_identifier="protectai/deberta-v3-base-prompt-injection-v2",
             response_method=PI_DEBERTA_V3_BASE,
             truncation=truncation,
             max_length=max_length,
+            window_stride=window_stride,
         )
 
 
@@ -109,12 +207,18 @@ class DebertaTuned60PromptInjectionModel(BaseDebertaPromptInjectionModel):
     https://huggingface.co/vijil/pi_deberta_finetuned_11122024
     """
 
-    def __init__(self, truncation: bool = True, max_length: int = 512):
+    def __init__(
+        self,
+        truncation: bool = True,
+        max_length: int = 512,
+        window_stride: int = 256,
+    ):
         super().__init__(
             model_identifier="vijil/pi_deberta_finetuned_11122024",
             response_method=PI_DEBERTA_FINETUNED_11122024,
             truncation=truncation,
             max_length=max_length,
+            window_stride=window_stride,
         )
 
 
@@ -125,7 +229,21 @@ class PromptGuardSecurityModel(HFBaseModel):
         score_threshold: float = 0.5,
         truncation: bool = True,
         max_length: int = 512,
+        window_stride: int = 256,
     ):
+        """
+        Parameters
+        ----------
+        score_threshold:
+            Jailbreak probability above which input is flagged.
+        truncation:
+            Whether to truncate inputs exceeding *max_length*.
+        max_length:
+            Maximum tokens per window (PromptGuard supports up to 512).
+        window_stride:
+            Step size in tokens between sliding windows for inputs that
+            exceed *max_length*. Default 256 (half of *max_length*).
+        """
         try:
             model_path = os.path.join(
                 os.path.dirname(__file__), "models", "promptguard"
@@ -134,6 +252,8 @@ class PromptGuardSecurityModel(HFBaseModel):
                 super().__init__(model_path, local_files_only=True)
             else:
                 super().__init__("meta-llama/Prompt-Guard-86M", local_files_only=False)
+            self.max_length = max_length
+            self.window_stride = window_stride
             self.classifier = pipeline(
                 "text-classification",
                 model=self.model,
@@ -164,7 +284,7 @@ class PromptGuardSecurityModel(HFBaseModel):
         """
         # Encode the text
         inputs = self.tokenizer(
-            text, return_tensors="pt", padding=True, truncation=True, max_length=512
+            text, return_tensors="pt", padding=True, truncation=True, max_length=self.max_length
         )
         inputs = inputs.to(device)
         # Get logits from the model
@@ -207,16 +327,47 @@ class PromptGuardSecurityModel(HFBaseModel):
         return (probabilities[0, 1] + probabilities[0, 2]).item()
 
     def sync_detect(
-        self, query_string: str, agent_id: Optional[str] = None
+        self,
+        dome_input: DomePayload,
+        agent_id: Optional[str] = None,
+        team_id: Optional[str] = None,
+        user_id: Optional[str] = None,
     ) -> DetectionResult:
+        dome_input = DomePayload.coerce(dome_input)
+        query_string = dome_input.query_string
         logger.debug("Detecting using Prompt Guard...")
-        jb_score = self.get_jailbreak_score(query_string)
-        flagged = jb_score >= self.score_threshold
+        chunks = chunk_text(
+            query_string, self.tokenizer, self.max_length, self.window_stride
+        )
+        num_windows = len(chunks)
+
+        if num_windows == 1:
+            jb_score = self.get_jailbreak_score(query_string)
+            flagged = jb_score >= self.score_threshold
+            return flagged, {
+                "type": type(self),
+                "score": jb_score,
+                "response_string": self.response_string if flagged else query_string,
+                "num_windows": 1,
+            }
+
+        # Multi-window: score each chunk, take max (any-positive)
+        max_score = 0.0
+        for chunk in chunks:
+            score = self.get_jailbreak_score(chunk)
+            if score > max_score:
+                max_score = score
+            if score >= self.score_threshold:
+                break  # Early exit
+
+        flagged = max_score >= self.score_threshold
         return flagged, {
             "type": type(self),
-            "score": jb_score,
+            "score": max_score,
             "response_string": self.response_string if flagged else query_string,
+            "num_windows": num_windows,
         }
 
-    async def detect(self, query_string: str) -> DetectionResult:
-        return self.sync_detect(query_string)
+    async def detect(self, dome_input: DomePayload) -> DetectionResult:
+        dome_input = DomePayload.coerce(dome_input)
+        return self.sync_detect(dome_input)

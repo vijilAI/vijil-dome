@@ -26,6 +26,7 @@ GUARDRAIL_CATEGORY_MAPPING = {
     "privacy": DetectionCategory.Privacy,
     "integrity": DetectionCategory.Integrity,
     "generic": DetectionCategory.Generic,
+    "policy": DetectionCategory.Policy,
 }
 
 EARLY_EXIT = "early-exit"
@@ -37,16 +38,20 @@ def create_detector_for_guard(
 ):
     if detector_type not in GUARDRAIL_CATEGORY_MAPPING:
         raise ValueError(f"Invalid detector type encountered: {detector_type}")
+    config = dict(detector_config_dict)
+    max_batch_concurrency = config.pop("max_batch_concurrency", None)
     try:
         detector_instance = DetectionFactory.get_detector(
             GUARDRAIL_CATEGORY_MAPPING[detector_type],
             detector_name,
-            **detector_config_dict,
+            **config,
         )
     except Exception as e:
         raise ValueError(
             f"Something broke when creating the detector {detector_name}. You might have passed an invalid parameter. Exception:{e}"
         )
+    if max_batch_concurrency is not None:
+        detector_instance.max_batch_concurrency = max_batch_concurrency
     return detector_instance
 
 
@@ -76,9 +81,20 @@ def create_guard(guard_name: str, guard_config_dict: dict) -> Guard:
             detector_config_dict = guard_config_dict[detector_name]
         else:
             detector_config_dict = {}
+        
+        # Support 'method' field in config to override the detector method name
+        # This allows multiple instances of the same detector with different configs
+        actual_method_name = detector_config_dict.get("method", detector_name)
+        
+        # Remove 'method' field from config dict before passing to detector constructor
+        # (it's used for detector identification, not a constructor parameter)
+        filtered_config = {
+            k: v for k, v in detector_config_dict.items() if k != "method"
+        }
+        
         detector_list.append(
             create_detector_for_guard(
-                detector_name, guard_config_dict["type"], detector_config_dict
+                actual_method_name, guard_config_dict["type"], filtered_config
             )
         )
     return Guard(guard_name, detector_list, guard_fail_policy, guard_parallel_policy)
@@ -155,8 +171,15 @@ def convert_toml_to_guardrail_dict(path_to_toml: str):
 
     raw_config_dict = dict()  # type: Dict[str, Any]
 
-    raw_config_dict["agent_id"] = toml_config_dict.get("guardrail", {}).get(
-        "agent_id", None
+    guardrail_config = toml_config_dict.get("guardrail", {})
+    raw_config_dict["agent_id"] = guardrail_config.get("agent_id") or guardrail_config.get(
+        "agent_config_id"
+    )
+    raw_config_dict["team_id"] = toml_config_dict.get("guardrail", {}).get(
+        "team_id", None
+    )
+    raw_config_dict["user_id"] = toml_config_dict.get("guardrail", {}).get(
+        "user_id", None
     )
 
     raw_config_dict["input-guards"] = extract_field_from_toml(
@@ -195,16 +218,18 @@ def convert_toml_to_guardrail_dict(path_to_toml: str):
 # Convert a dictionary into the corresponding guardrails
 def convert_dict_to_guardrails(
     config_dict: dict,
-) -> Tuple[Guardrail, Guardrail, Optional[str]]:
+) -> Tuple[Guardrail, Guardrail, Optional[str], Optional[str], Optional[str]]:
     input_guardrail = create_guardrail("input", config_dict)
     output_guardrail = create_guardrail("output", config_dict)
-    agent_id = config_dict.get("agent_id", None)
-    return input_guardrail, output_guardrail, agent_id
+    team_id = config_dict.get("team_id", None)
+    user_id = config_dict.get("user_id", None)
+    agent_id = config_dict.get("agent_id") or config_dict.get("agent_config_id")
+    return input_guardrail, output_guardrail, agent_id, team_id, user_id
 
 
 # convert a toml file into its corresponding guardrails
 def convert_toml_to_guardrails(
     path_to_toml: str,
-) -> Tuple[Guardrail, Guardrail, Optional[str]]:
+) -> Tuple[Guardrail, Guardrail, Optional[str], Optional[str], Optional[str]]:
     config_dict = convert_toml_to_guardrail_dict(path_to_toml)
     return convert_dict_to_guardrails(config_dict)

@@ -65,6 +65,7 @@ def _add_darwin_detection_spans(
     guardrail: Guardrail,
     tracer: Tracer,
     guardrail_name: str,
+    enforce: bool = True,
 ) -> None:
     """Wrap guardrail scan methods to emit Darwin-compatible detection spans.
 
@@ -78,6 +79,7 @@ def _add_darwin_detection_spans(
         - detection.method: name of the triggered guard/detector
         - team.id: team context (from kwargs)
         - agent.id: agent context (from kwargs)
+        - user.id: user context (from kwargs)
 
     Args:
         guardrail: The Guardrail instance to wrap.
@@ -89,9 +91,9 @@ def _add_darwin_detection_spans(
 
     @wraps(original_scan)
     def scan_with_darwin_spans(*args: Any, **kwargs: Any) -> Any:
-        # Extract team_id before passing to original scan (which doesn't accept it)
-        team_id = kwargs.pop("team_id", None)
+        team_id = kwargs.get("team_id")
         agent_id = kwargs.get("agent_id")
+        user_id = kwargs.get("user_id")
         with tracer.start_as_current_span("dome-detection") as span:
             span.set_attribute("dome.guardrail", guardrail_name)
             result = original_scan(*args, **kwargs)
@@ -101,14 +103,16 @@ def _add_darwin_detection_spans(
                     result,
                     agent_id=agent_id,
                     team_id=team_id,
+                    user_id=user_id,
                 )
+                span.set_attribute("dome.guard.enforced", enforce and result.flagged)
             return result
 
     @wraps(original_async_scan)
     async def async_scan_with_darwin_spans(*args: Any, **kwargs: Any) -> Any:
-        # Extract team_id before passing to original scan (which doesn't accept it)
-        team_id = kwargs.pop("team_id", None)
+        team_id = kwargs.get("team_id")
         agent_id = kwargs.get("agent_id")
+        user_id = kwargs.get("user_id")
         with tracer.start_as_current_span("dome-detection") as span:
             span.set_attribute("dome.guardrail", guardrail_name)
             result = await original_async_scan(*args, **kwargs)
@@ -118,7 +122,9 @@ def _add_darwin_detection_spans(
                     result,
                     agent_id=agent_id,
                     team_id=team_id,
+                    user_id=user_id,
                 )
+                span.set_attribute("dome.guard.enforced", enforce and result.flagged)
             return result
 
     guardrail.scan = scan_with_darwin_spans  # type: ignore[method-assign]
@@ -161,6 +167,6 @@ def instrument_dome(
     # span wraps the full scan chain (metrics + generic traces + original scan).
     if tracer:
         if dome.input_guardrail is not None:
-            _add_darwin_detection_spans(dome.input_guardrail, tracer, "dome-input")
+            _add_darwin_detection_spans(dome.input_guardrail, tracer, "dome-input", enforce=dome.enforce)
         if dome.output_guardrail is not None:
-            _add_darwin_detection_spans(dome.output_guardrail, tracer, "dome-output")
+            _add_darwin_detection_spans(dome.output_guardrail, tracer, "dome-output", enforce=dome.enforce)

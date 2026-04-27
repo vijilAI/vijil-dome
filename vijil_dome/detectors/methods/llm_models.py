@@ -14,7 +14,7 @@
 #
 # vijil and vijil-dome are trademarks owned by Vijil Inc.
 
-from litellm import completion as litellm_completion
+from litellm import acompletion as litellm_acompletion
 
 from vijil_dome.detectors import (
     MODERATION_LLM,
@@ -38,6 +38,7 @@ from vijil_dome.detectors.utils.prompt_templates.modifiable_prompts import (
 )
 from typing import Optional
 from string import Template
+from vijil_dome.types import DomePayload
 
 
 # A generic LLM detector - specify your sys prompt and trigger word
@@ -50,19 +51,24 @@ class GenericLLMDetector(LlmBaseDetector):
         hub_name: str = "openai",
         model_name: str = "gpt-4-turbo",
         api_key: Optional[str] = None,
+        max_input_chars: Optional[int] = None,
     ):
         super().__init__(
             method_name=GENERIC_LLM,
             hub_name=hub_name,
             model_name=model_name,
             api_key=api_key,
+            max_input_chars=max_input_chars,
         )
         self.sys_prompt_template = Template(sys_prompt_template)
         self.trigger_word_list = trigger_word_list
 
-    async def detect(self, query_string: str) -> DetectionResult:
+    async def detect(self, dome_input: DomePayload) -> DetectionResult:
+        dome_input = DomePayload.coerce(dome_input)
+        query_string = dome_input.query_string
+        query_string = self._truncate_if_needed(query_string)
         llm_prompt = self.sys_prompt_template.substitute(query_string=query_string)
-        llm_response = litellm_completion(
+        llm_response = await litellm_acompletion(
             model=self.model_name,
             messages=[{"role": "system", "content": llm_prompt}],
             api_key=self.api_key,
@@ -95,15 +101,20 @@ class LlmModerations(LlmBaseDetector):
         hub_name: str = "openai",
         model_name: str = "gpt-4-turbo",
         api_key: Optional[str] = None,
+        max_input_chars: Optional[int] = None,
     ):
         super().__init__(
             method_name=MODERATION_LLM,
             hub_name=hub_name,
             model_name=model_name,
             api_key=api_key,
+            max_input_chars=max_input_chars,
         )
 
-    async def detect(self, query_string: str) -> DetectionResult:
+    async def detect(self, dome_input: DomePayload) -> DetectionResult:
+        dome_input = DomePayload.coerce(dome_input)
+        query_string = dome_input.query_string
+        query_string = self._truncate_if_needed(query_string)
         content = format_custom_llm_classifier_prompt(
             "user",
             query_string,
@@ -111,7 +122,7 @@ class LlmModerations(LlmBaseDetector):
             toxic=True,
             pii=False,
         )
-        llm_response = litellm_completion(
+        llm_response = await litellm_acompletion(
             model=self.model_name,
             messages=[{"role": "system", "content": content}],
             api_key=self.api_key,
@@ -142,15 +153,20 @@ class LlmSecurity(LlmBaseDetector):
         hub_name: str = "openai",
         model_name: str = "gpt-4-turbo",
         api_key: Optional[str] = None,
+        max_input_chars: Optional[int] = None,
     ):
         super().__init__(
             method_name=SECURITY_LLM,
             hub_name=hub_name,
             model_name=model_name,
             api_key=api_key,
+            max_input_chars=max_input_chars,
         )
 
-    async def detect(self, query_string: str) -> DetectionResult:
+    async def detect(self, dome_input: DomePayload) -> DetectionResult:
+        dome_input = DomePayload.coerce(dome_input)
+        query_string = dome_input.query_string
+        query_string = self._truncate_if_needed(query_string)
         content = format_custom_llm_classifier_prompt(
             "user",
             query_string,
@@ -158,7 +174,7 @@ class LlmSecurity(LlmBaseDetector):
             toxic=False,
             pii=False,
         )
-        llm_response = litellm_completion(
+        llm_response = await litellm_acompletion(
             model=self.model_name,
             messages=[{"role": "system", "content": content}],
             api_key=self.api_key,
@@ -186,6 +202,7 @@ class LlmHallucination(LlmBaseDetectorWithContext):
         hub_name: str = "openai",
         model_name: str = "gpt-4-turbo",
         api_key: Optional[str] = None,
+        max_input_chars: Optional[int] = None,
         context: Optional[str] = None,
     ):
         super().__init__(
@@ -193,16 +210,20 @@ class LlmHallucination(LlmBaseDetectorWithContext):
             hub_name=hub_name,
             model_name=model_name,
             api_key=api_key,
+            max_input_chars=max_input_chars,
             context=context,
         )
 
-    async def detect(self, query_string: str) -> DetectionResult:
+    async def detect(self, dome_input: DomePayload) -> DetectionResult:
+        dome_input = DomePayload.coerce(dome_input)
+        query_string = dome_input.query_string
+        query_string = self._truncate_if_needed(query_string)
         if self.context is None:
             raise ValueError(
                 "No context provided for LLM-Based Hallucination detection!"
             )
         content = format_llm_hallucination_prompt(self.context, query_string)
-        llm_response = litellm_completion(
+        llm_response = await litellm_acompletion(
             model=self.model_name,
             messages=[{"role": "system", "content": content}],
             api_key=self.api_key,
@@ -230,6 +251,7 @@ class LlmFactcheck(LlmBaseDetectorWithContext):
         hub_name: str = "openai",
         model_name: str = "gpt-4-turbo",
         api_key: Optional[str] = None,
+        max_input_chars: Optional[int] = None,
         context: Optional[str] = None,
     ):
         super().__init__(
@@ -237,14 +259,18 @@ class LlmFactcheck(LlmBaseDetectorWithContext):
             hub_name=hub_name,
             model_name=model_name,
             api_key=api_key,
+            max_input_chars=max_input_chars,
             context=context,
         )
 
-    async def detect(self, query_string: str) -> DetectionResult:
+    async def detect(self, dome_input: DomePayload) -> DetectionResult:
+        dome_input = DomePayload.coerce(dome_input)
+        query_string = dome_input.query_string
+        query_string = self._truncate_if_needed(query_string)
         if self.context is None:
             raise ValueError("No context provided for LLM-Based fact-check")
         content = format_llm_factcheck_prompt(self.context, query_string)
-        llm_response = litellm_completion(
+        llm_response = await litellm_acompletion(
             model=self.model_name,
             messages=[{"role": "system", "content": content}],
             api_key=self.api_key,

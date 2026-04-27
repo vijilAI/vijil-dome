@@ -14,19 +14,77 @@
 #
 # vijil and vijil-dome are trademarks owned by Vijil Inc.
 
+"""
+Toxicity / moderation detection using Vijil's ModernBERT fine-tune — three modes:
+
+  fast (default): ModernBERT binary classifier (<5ms, self-hosted)
+  safeguard:      GPT-OSS-Safeguard-20B via Groq API (~200ms, high accuracy)
+  hybrid:         ModernBERT first, Safeguard on low-confidence (~5ms avg)
+"""
+
+import asyncio
 import logging
-import torch
+import os
+from typing import Dict, List, Optional, Tuple, Union
+
+import httpx
+
+try:
+    import torch
+    from transformers import pipeline
+    _HAS_TORCH = True
+except ImportError:
+    _HAS_TORCH = False
+
 from vijil_dome.detectors import (
     MODERATION_MBERT,
+    MODERATION_MBERT_SAFEGUARD,
+    MODERATION_MBERT_HYBRID,
+    MODERATION_MBERT_REMOTE,
     register_method,
     DetectionCategory,
+    DetectionMethod,
     DetectionResult,
+    BatchDetectionResult,
 )
-from transformers import pipeline
 from vijil_dome.detectors.utils.hf_model import HFBaseModel
-from typing import Optional
+from vijil_dome.detectors.utils.sliding_window import chunk_text
+from vijil_dome.types import DomePayload
 
 logger = logging.getLogger("vijil.dome")
+
+MODERATION_SAFEGUARD_SYSTEM_PROMPT = (
+    "Evaluate if this text contains toxic, harmful, or abusive content. "
+    "Toxic content includes: hate speech, threats of violence, harassment, "
+    "bullying, sexually explicit material, self-harm encouragement, "
+    "dangerous instructions, or content that demeans individuals or groups. "
+    "Reply with exactly one word: safe or unsafe"
+)
+
+DEFAULT_SAFEGUARD_TEMPERATURE = 0.0
+# gpt-oss-safeguard-20b is a reasoning model and reserves a chunk of the
+# token budget for internal reasoning before emitting any assistant content.
+# A small cap (e.g. 8) lets the reasoning alone blow the budget, hit
+# finish_reason=length, and return an empty `content` — which silently
+# classifies everything as safe. Keep this generous.
+DEFAULT_SAFEGUARD_MAX_TOKENS = 2000
+DEFAULT_SAFEGUARD_MAX_INPUT_CHARS = 400_000
+
+# The safeguard endpoint is OpenAI-compatible. Groq is the default, but
+# callers can point at any OpenAI-compatible `/chat/completions` endpoint
+# (local vLLM, Together, Fireworks, OpenAI itself, ...) by overriding
+# `base_url`, `model`, and `api_key_name` on the detector.
+DEFAULT_SAFEGUARD_API_KEY_NAME = "GROQ_API_KEY"
+DEFAULT_SAFEGUARD_BASE_URL = "https://api.groq.com/openai/v1"
+DEFAULT_SAFEGUARD_MODEL = "openai/gpt-oss-safeguard-20b"
+
+# Default model name on Vijil's inference endpoint (matches HuggingFace).
+DEFAULT_VIJIL_INFERENCE_TOXICITY_MODEL = "vijil/vijil_dome_toxic_content_detection"
+
+
+# ----------------------------------------------------------------------
+# Fast mode (original detector, unchanged interface)
+# ----------------------------------------------------------------------
 
 
 @register_method(DetectionCategory.Moderation, MODERATION_MBERT)
@@ -40,8 +98,29 @@ class MBertToxicContentModel(HFBaseModel):
         self,
         score_threshold: float = 0.5,
         truncation: bool = True,
-        max_length: int = 512,
+        max_length: int = 8192,
+        window_stride: int = 4096,
     ):
+        """
+        Parameters
+        ----------
+        score_threshold:
+            Toxicity probability above which input is flagged.
+        truncation:
+            Whether to truncate inputs exceeding *max_length*.
+        max_length:
+            Maximum tokens per window. ModernBERT natively supports up
+            to 8192 tokens, so sliding windows only activate for very
+            long inputs.
+        window_stride:
+            Step size in tokens between sliding windows for inputs that
+            exceed *max_length*. Default 4096 (half of *max_length*).
+        """
+        if not _HAS_TORCH:
+            raise ImportError(
+                f"{MODERATION_MBERT} requires 'torch' and 'transformers'. "
+                "Install with: pip install vijil-dome[local]"
+            )
         try:
             super().__init__(
                 model_name="vijil/vijil_dome_toxic_content_detection",
@@ -49,6 +128,8 @@ class MBertToxicContentModel(HFBaseModel):
             )
 
             self.score_threshold = score_threshold
+            self.max_length = max_length
+            self.window_stride = window_stride
             self.classifier = pipeline(
                 "text-classification",
                 model=self.model,
@@ -66,22 +147,710 @@ class MBertToxicContentModel(HFBaseModel):
             )
             raise
 
+    def _extract_toxic_score(self, item):
+        if item["label"] in ("toxic", "LABEL_1", 1, "1"):
+            return item["score"]
+        return 1.0 - item["score"]
+
+    # ------------------------------------------------------------------
+    # Score-only classification (used by Hybrid)
+    # ------------------------------------------------------------------
+
+    def _classify(self, dome_input: DomePayload) -> Tuple[float, dict]:
+        """Run ModernBERT classification on a single DomePayload.
+
+        Returns ``(toxic_score, best_prediction_item)`` before any
+        flagging decision, so the hybrid class can inspect confidence.
+        """
+        query_string = dome_input.query_string
+        chunks = chunk_text(
+            query_string, self.tokenizer, self.max_length, self.window_stride
+        )
+        if len(chunks) == 1:
+            pred = self.classifier(query_string)
+            item = pred[0]
+            return self._extract_toxic_score(item), item
+
+        all_preds = self.classifier(chunks, batch_size=self.max_batch_concurrency)
+        best_score = 0.0
+        best_item: dict = {}
+        for window_pred in all_preds:
+            item = window_pred[0] if isinstance(window_pred, list) else window_pred  # type: ignore[assignment]
+            score = self._extract_toxic_score(item)
+            if score > best_score:
+                best_score = score
+                best_item = item
+        return best_score, best_item
+
+    def _classify_batch(
+        self, dome_inputs: List[DomePayload]
+    ) -> List[Tuple[float, dict]]:
+        """Run ModernBERT classification on many DomePayloads in one call.
+
+        All chunks from all payloads are flattened into a single pipeline
+        call for efficient batching, then re-aggregated per payload.
+        """
+        flat_chunks: List[str] = []
+        ranges = []
+        for di in dome_inputs:
+            query_string = di.query_string
+            chunks = chunk_text(
+                query_string, self.tokenizer, self.max_length, self.window_stride
+            )
+            start = len(flat_chunks)
+            flat_chunks.extend(chunks)
+            ranges.append((start, len(flat_chunks)))
+
+        all_preds = self.classifier(flat_chunks, batch_size=self.max_batch_concurrency)
+
+        results = []
+        for start, end in ranges:
+            chunk_preds = all_preds[start:end]
+            best_score = 0.0
+            best_item: dict = {}
+            for pred in chunk_preds:
+                item = pred[0] if isinstance(pred, list) else pred
+                score = self._extract_toxic_score(item)
+                if score > best_score:
+                    best_score = score
+                    best_item = item
+            results.append((best_score, best_item))
+        return results
+
+    # ------------------------------------------------------------------
+    # Public detection interface (unchanged)
+    # ------------------------------------------------------------------
+
     def sync_detect(
-        self, query_string: str, agent_id: Optional[str] = None
+        self,
+        dome_input: DomePayload,
+        agent_id: Optional[str] = None,
+        team_id: Optional[str] = None,
+        user_id: Optional[str] = None,
     ) -> DetectionResult:
-        pred = self.classifier(query_string)
-        if pred[0]["label"] in ("toxic", "LABEL_1", 1, "1"):
-            toxic_score = pred[0]["score"]
-        else:
-            toxic_score = 1.0 - pred[0]["score"]
-        flagged = toxic_score >= self.score_threshold
+        dome_input = DomePayload.coerce(dome_input)
+        query_string = dome_input.query_string
+        chunks = chunk_text(
+            query_string, self.tokenizer, self.max_length, self.window_stride
+        )
+        num_windows = len(chunks)
+
+        if num_windows == 1:
+            pred = self.classifier(query_string)
+            toxic_score = self._extract_toxic_score(pred[0])
+            flagged = toxic_score >= self.score_threshold
+            return flagged, {
+                "type": type(self),
+                "score": toxic_score,
+                "predictions": pred,
+                "response_string": self.response_string if flagged else query_string,
+                "num_windows": 1,
+            }
+
+        # Multi-window: batch all chunks, any-positive with max score
+        all_preds = self.classifier(chunks, batch_size=self.max_batch_concurrency)
+        max_score = 0.0
+        for window_pred in all_preds:
+            item = window_pred[0] if isinstance(window_pred, list) else window_pred
+            score = self._extract_toxic_score(item)
+            if score > max_score:
+                max_score = score
+
+        flagged = max_score >= self.score_threshold
         return flagged, {
             "type": type(self),
-            "score": toxic_score,
-            "predictions": pred,
+            "score": max_score,
+            "predictions": all_preds,
             "response_string": self.response_string if flagged else query_string,
+            "num_windows": num_windows,
         }
 
-    async def detect(self, query_string: str) -> DetectionResult:
+    async def detect(self, dome_input: DomePayload) -> DetectionResult:
+        dome_input = DomePayload.coerce(dome_input)
         logger.info(f"Detecting using {self.__class__.__name__}...")
-        return self.sync_detect(query_string)
+        return self.sync_detect(dome_input)
+
+    async def detect_batch(self, inputs: List[Union[str, DomePayload]]) -> BatchDetectionResult:
+        dome_inputs = [DomePayload.coerce(x) for x in inputs]
+        # Phase 1: chunk each input, build flat list + per-input ranges
+        flat_chunks: List[str] = []
+        ranges = []
+        for di in dome_inputs:
+            query_string = di.query_string
+            chunks = chunk_text(
+                query_string, self.tokenizer, self.max_length, self.window_stride
+            )
+            start = len(flat_chunks)
+            flat_chunks.extend(chunks)
+            ranges.append((start, len(flat_chunks)))
+
+        # Phase 2: pipeline call on all chunks (batched)
+        all_preds = self.classifier(flat_chunks, batch_size=self.max_batch_concurrency)
+
+        # Phase 3: re-aggregate per input using any-positive with max score
+        results = []
+        for dome_item, (start, end) in zip(dome_inputs, ranges):
+            query_string = dome_item.query_string
+            chunk_preds = all_preds[start:end]
+            num_windows = end - start
+            max_score = 0.0
+            for pred in chunk_preds:
+                item = pred[0] if isinstance(pred, list) else pred
+                score = self._extract_toxic_score(item)
+                if score > max_score:
+                    max_score = score
+            flagged = max_score >= self.score_threshold
+            results.append((flagged, {
+                "type": type(self),
+                "score": max_score,
+                "predictions": chunk_preds,
+                "response_string": self.response_string if flagged else query_string,
+                "num_windows": num_windows,
+            }))
+        return results
+
+
+# ----------------------------------------------------------------------
+# Safeguard mode (API-only)
+# ----------------------------------------------------------------------
+
+
+@register_method(DetectionCategory.Moderation, MODERATION_MBERT_SAFEGUARD)
+class ModerationMbertSafeguard(DetectionMethod):
+    """
+    Toxicity / moderation detection backed by an OpenAI-compatible chat
+    completions endpoint. Defaults to GPT-OSS-Safeguard-20B on Groq
+    (~200ms, high accuracy), but the endpoint, model, and credential
+    name are all overridable so callers can point at any OpenAI-style
+    deployment (local vLLM, Together, Fireworks, OpenAI proper, ...).
+
+    Does not load ModernBERT \u2014 this mode is API-only.
+    """
+
+    def __init__(
+        self,
+        api_key: Optional[str] = None,
+        api_key_name: str = DEFAULT_SAFEGUARD_API_KEY_NAME,
+        base_url: str = DEFAULT_SAFEGUARD_BASE_URL,
+        model: str = DEFAULT_SAFEGUARD_MODEL,
+        temperature: float = DEFAULT_SAFEGUARD_TEMPERATURE,
+        max_tokens: int = DEFAULT_SAFEGUARD_MAX_TOKENS,
+        reasoning_effort: Optional[str] = "low",
+        timeout_seconds: float = 10.0,
+        max_input_chars: Optional[int] = DEFAULT_SAFEGUARD_MAX_INPUT_CHARS,
+        **kwargs,
+    ):
+        self.api_key_name = api_key_name
+        self.api_key = api_key or os.environ.get(api_key_name, "")
+        self.base_url = base_url.rstrip("/")
+        self.chat_completions_url = f"{self.base_url}/chat/completions"
+        self.model = model
+        self.temperature = temperature
+        self.max_tokens = max_tokens
+        self.reasoning_effort = reasoning_effort
+        self.timeout_seconds = timeout_seconds
+        self.max_input_chars = max_input_chars
+        self.response_string = f"Method:{MODERATION_MBERT_SAFEGUARD}"
+        self.run_in_executor = False
+        if not self.api_key:
+            logger.warning(
+                f"{api_key_name} not set \u2014 {MODERATION_MBERT_SAFEGUARD} will fail at runtime"
+            )
+        logger.info(
+            "Initialized moderation mbert detector "
+            f"(Safeguard mode, model={model}, base_url={self.base_url})"
+        )
+
+    def _truncate_if_needed(self, text: str) -> str:
+        if self.max_input_chars is not None and len(text) > self.max_input_chars:
+            logger.warning(
+                "moderation-mbert-safeguard input truncated from %d to %d chars",
+                len(text),
+                self.max_input_chars,
+            )
+            return text[: self.max_input_chars]
+        return text
+
+    def _build_payload(self, query_string: str) -> dict:
+        payload = {
+            "model": self.model,
+            "messages": [
+                {"role": "system", "content": MODERATION_SAFEGUARD_SYSTEM_PROMPT},
+                {"role": "user", "content": query_string},
+            ],
+            "temperature": self.temperature,
+            "max_tokens": self.max_tokens,
+        }
+        if self.reasoning_effort is not None:
+            payload["reasoning_effort"] = self.reasoning_effort
+        return payload
+
+    async def _call_safeguard(
+        self, client: httpx.AsyncClient, query_string: str
+    ) -> str:
+        resp = await client.post(
+            self.chat_completions_url,
+            headers={
+                "Authorization": f"Bearer {self.api_key}",
+                "Content-Type": "application/json",
+            },
+            json=self._build_payload(query_string),
+        )
+        resp.raise_for_status()
+        return resp.json()["choices"][0]["message"].get("content", "").strip().lower()
+
+    async def detect(self, dome_input: DomePayload) -> DetectionResult:
+        dome_input = DomePayload.coerce(dome_input)
+        query_string = self._truncate_if_needed(dome_input.query_string)
+        logger.info("Detecting toxicity using Safeguard...")
+        try:
+            async with httpx.AsyncClient(timeout=self.timeout_seconds) as client:
+                content = await self._call_safeguard(client, query_string)
+            flagged = "unsafe" in content
+            return flagged, {
+                "type": type(self),
+                "detector": MODERATION_MBERT_SAFEGUARD,
+                "score": 1.0 if flagged else 0.0,
+                "label": "toxic" if flagged else "safe",
+                "safeguard_verdict": content,
+                "response_string": self.response_string if flagged else query_string,
+            }
+        except Exception as e:
+            logger.error(f"Moderation Safeguard API call failed: {e}")
+            return False, {
+                "type": type(self),
+                "detector": MODERATION_MBERT_SAFEGUARD,
+                "score": 0.0,
+                "label": "error",
+                "error": str(e),
+                "response_string": query_string,
+            }
+
+    async def detect_batch(
+        self, inputs: List[Union[str, DomePayload]]
+    ) -> BatchDetectionResult:
+        return await self._gather_with_concurrency(
+            [self.detect(DomePayload.coerce(item)) for item in inputs]
+        )
+
+
+# ----------------------------------------------------------------------
+# Remote mode (Vijil inference endpoint, no local model)
+# ----------------------------------------------------------------------
+
+
+@register_method(DetectionCategory.Moderation, MODERATION_MBERT_REMOTE)
+class MBertToxicContentRemote(DetectionMethod):
+    """Toxicity detection via Vijil's remote inference service.
+
+    Calls Vijil's hosted ModernBERT endpoint — no local model, no torch.
+    Suitable for lightweight deployments where the inference server is
+    co-located or latency is acceptable.
+
+    This detector only works with Vijil's inference endpoint — do not
+    point it at arbitrary OpenAI-compatible services.
+    """
+
+    def __init__(
+        self,
+        vijil_inference_url: str,
+        vijil_inference_model: Optional[str] = None,
+        vijil_inference_api_key: Optional[str] = None,
+        score_threshold: float = 0.5,
+        timeout_seconds: float = 10.0,
+    ):
+        from vijil_dome.detectors.utils.vijil_inference import VijilInferenceClient
+
+        self.score_threshold = score_threshold
+        self.response_string = f"Method:{MODERATION_MBERT_REMOTE}"
+        self.run_in_executor = False
+        self._vijil_client = VijilInferenceClient(
+            base_url=vijil_inference_url,
+            model=vijil_inference_model or DEFAULT_VIJIL_INFERENCE_TOXICITY_MODEL,
+            api_key=vijil_inference_api_key,
+            timeout_seconds=timeout_seconds,
+        )
+        logger.info(
+            "Initialized moderation mbert detector (remote mode, "
+            f"model={self._vijil_client.model}, url={self._vijil_client.base_url})"
+        )
+
+    async def detect(self, dome_input: DomePayload) -> DetectionResult:
+        dome_input = DomePayload.coerce(dome_input)
+        query_string = dome_input.query_string
+        logger.info("Detecting toxicity using Vijil remote inference...")
+        try:
+            async with httpx.AsyncClient(
+                timeout=self._vijil_client.timeout_seconds
+            ) as client:
+                score = await self._vijil_client.classify(client, query_string)
+            flagged = score >= self.score_threshold
+            return flagged, {
+                "type": type(self),
+                "detector": MODERATION_MBERT_REMOTE,
+                "score": score,
+                "label": "toxic" if flagged else "safe",
+                "response_string": self.response_string if flagged else query_string,
+            }
+        except Exception as e:
+            logger.error(f"Vijil remote inference failed: {e}")
+            return False, {
+                "type": type(self),
+                "detector": MODERATION_MBERT_REMOTE,
+                "score": 0.0,
+                "label": "error",
+                "error": str(e),
+                "response_string": query_string,
+            }
+
+    async def detect_batch(
+        self, inputs: List[Union[str, DomePayload]]
+    ) -> BatchDetectionResult:
+        return await self._gather_with_concurrency(
+            [self.detect(DomePayload.coerce(item)) for item in inputs]
+        )
+
+
+# ----------------------------------------------------------------------
+# Hybrid mode (fast + Safeguard escalation)
+# ----------------------------------------------------------------------
+
+
+@register_method(DetectionCategory.Moderation, MODERATION_MBERT_HYBRID)
+class ModerationMbertHybrid(MBertToxicContentModel):
+    """
+    Hybrid toxicity / moderation detection: fast stage first (local
+    ModernBERT or Vijil remote inference), Safeguard on low-confidence.
+
+    When ``vijil_inference_url`` is provided the fast stage calls Vijil's
+    hosted inference endpoint instead of loading ModernBERT locally,
+    eliminating the torch/transformers dependency for the fast stage.
+    """
+
+    def __init__(
+        self,
+        vijil_inference_url: Optional[str] = None,
+        vijil_inference_model: Optional[str] = None,
+        vijil_inference_api_key: Optional[str] = None,
+        confidence_threshold: float = 0.85,
+        api_key: Optional[str] = None,
+        api_key_name: str = DEFAULT_SAFEGUARD_API_KEY_NAME,
+        base_url: str = DEFAULT_SAFEGUARD_BASE_URL,
+        model: str = DEFAULT_SAFEGUARD_MODEL,
+        temperature: float = DEFAULT_SAFEGUARD_TEMPERATURE,
+        max_tokens: int = DEFAULT_SAFEGUARD_MAX_TOKENS,
+        reasoning_effort: Optional[str] = "low",
+        timeout_seconds: float = 10.0,
+        max_input_chars: Optional[int] = DEFAULT_SAFEGUARD_MAX_INPUT_CHARS,
+        **kwargs,
+    ):
+        self._use_vijil_inference = vijil_inference_url is not None
+
+        if self._use_vijil_inference:
+            from vijil_dome.detectors.utils.vijil_inference import VijilInferenceClient
+            assert vijil_inference_url is not None
+            self.score_threshold = kwargs.get("score_threshold", 0.5)
+            self._vijil_client = VijilInferenceClient(
+                base_url=vijil_inference_url,
+                model=vijil_inference_model or DEFAULT_VIJIL_INFERENCE_TOXICITY_MODEL,
+                api_key=vijil_inference_api_key,
+            )
+        else:
+            super().__init__(**kwargs)
+
+        self.confidence_threshold = confidence_threshold
+        self.api_key_name = api_key_name
+        self.api_key = api_key or os.environ.get(api_key_name, "")
+        self.base_url = base_url.rstrip("/")
+        self.chat_completions_url = f"{self.base_url}/chat/completions"
+        self.model = model
+        self.temperature = temperature
+        self.max_tokens = max_tokens
+        self.reasoning_effort = reasoning_effort
+        self.timeout_seconds = timeout_seconds
+        self.max_input_chars = max_input_chars
+        self.response_string = f"Method:{MODERATION_MBERT_HYBRID}"
+        self.run_in_executor = False  # async for Safeguard fallback
+
+        if not self.api_key:
+            logger.warning(
+                f"{api_key_name} not set \u2014 {MODERATION_MBERT_HYBRID} will fall back to fast-only"
+            )
+        fast_mode = (
+            f"vijil-inference ({self._vijil_client.base_url})"
+            if self._use_vijil_inference
+            else "local"
+        )
+        logger.info(
+            "Initialized moderation mbert detector "
+            f"(hybrid mode, fast={fast_mode}, "
+            f"confidence_threshold={confidence_threshold}, "
+            f"safeguard_model={model}, safeguard_url={self.base_url})"
+        )
+
+    # ------------------------------------------------------------------
+    # Payload builders
+    # ------------------------------------------------------------------
+
+    def _fast_payload(
+        self,
+        dome_input: DomePayload,
+        score: float,
+        prediction: dict,
+        stage: str,
+    ) -> Dict:
+        flagged = score >= self.score_threshold
+        return {
+            "type": type(self),
+            "detector": MODERATION_MBERT_HYBRID,
+            "stage": stage,
+            "score": score,
+            "prediction": prediction,
+            "threshold": self.score_threshold,
+            "confidence": max(score, 1.0 - score),
+            "label": "toxic" if flagged else "safe",
+            "response_string": (
+                self.response_string if flagged else dome_input.query_string
+            ),
+        }
+
+    def _safeguard_payload(
+        self,
+        dome_input: DomePayload,
+        content: str,
+        fast_score: float,
+    ) -> Dict:
+        flagged = "unsafe" in content
+        return {
+            "type": type(self),
+            "detector": MODERATION_MBERT_HYBRID,
+            "stage": "safeguard",
+            "score": 1.0 if flagged else 0.0,
+            "fast_score": fast_score,
+            "fast_confidence": max(fast_score, 1.0 - fast_score),
+            "label": "toxic" if flagged else "safe",
+            "safeguard_verdict": content,
+            "response_string": (
+                self.response_string if flagged else dome_input.query_string
+            ),
+        }
+
+    def _truncate_if_needed(self, text: str) -> str:
+        if self.max_input_chars is not None and len(text) > self.max_input_chars:
+            logger.warning(
+                "moderation-mbert-hybrid escalation input truncated from %d to %d chars",
+                len(text),
+                self.max_input_chars,
+            )
+            return text[: self.max_input_chars]
+        return text
+
+    # ------------------------------------------------------------------
+    # Safeguard escalation
+    # ------------------------------------------------------------------
+
+    async def _escalate(
+        self,
+        client: httpx.AsyncClient,
+        dome_input: DomePayload,
+        fast_score: float,
+        prediction: dict,
+    ) -> DetectionResult:
+        """Run Safeguard on one low-confidence item, with graceful fallback."""
+        query_string = self._truncate_if_needed(dome_input.query_string)
+        payload = {
+            "model": self.model,
+            "messages": [
+                {"role": "system", "content": MODERATION_SAFEGUARD_SYSTEM_PROMPT},
+                {"role": "user", "content": query_string},
+            ],
+            "temperature": self.temperature,
+            "max_tokens": self.max_tokens,
+        }
+        if self.reasoning_effort is not None:
+            payload["reasoning_effort"] = self.reasoning_effort
+        try:
+            resp = await client.post(
+                self.chat_completions_url,
+                headers={
+                    "Authorization": f"Bearer {self.api_key}",
+                    "Content-Type": "application/json",
+                },
+                json=payload,
+            )
+            resp.raise_for_status()
+            content = (
+                resp.json()["choices"][0]["message"].get("content", "").strip().lower()
+            )
+            payload = self._safeguard_payload(dome_input, content, fast_score)
+            return "unsafe" in content, payload
+        except Exception as e:
+            logger.error(
+                f"Moderation Safeguard escalation failed: {e}, using fast result"
+            )
+            payload = self._fast_payload(
+                dome_input, fast_score, prediction, stage="fast-fallback"
+            )
+            payload["error"] = str(e)
+            return fast_score >= self.score_threshold, payload
+
+    # ------------------------------------------------------------------
+    # Vijil remote inference helpers (hybrid fast stage)
+    # ------------------------------------------------------------------
+
+    async def _classify_vijil(
+        self, client: httpx.AsyncClient, dome_input: DomePayload
+    ) -> Tuple[float, dict]:
+        """Classify a single input via Vijil's remote inference endpoint."""
+        score = await self._vijil_client.classify(client, dome_input.query_string)
+        return score, {}
+
+    async def _classify_batch_vijil(
+        self, dome_inputs: List[DomePayload]
+    ) -> List[Tuple[float, dict]]:
+        """Classify a batch via Vijil's remote inference endpoint."""
+        async with httpx.AsyncClient(
+            timeout=self._vijil_client.timeout_seconds
+        ) as client:
+            semaphore = asyncio.Semaphore(self.max_batch_concurrency)
+
+            async def _one(di: DomePayload) -> Tuple[float, dict]:
+                async with semaphore:
+                    try:
+                        score = await self._vijil_client.classify(
+                            client, di.query_string
+                        )
+                        return score, {}
+                    except Exception as e:
+                        logger.error(f"Vijil inference batch item failed: {e}")
+                        return 0.0, {"error": str(e)}
+
+            return list(await asyncio.gather(*(_one(di) for di in dome_inputs)))
+
+    # ------------------------------------------------------------------
+    # Public detection interface
+    # ------------------------------------------------------------------
+
+    async def detect(self, dome_input: DomePayload) -> DetectionResult:
+        dome_input = DomePayload.coerce(dome_input)
+        logger.info("Detecting toxicity using hybrid mode...")
+
+        # Stage 1: fast classification (remote or local)
+        if self._use_vijil_inference:
+            try:
+                async with httpx.AsyncClient(
+                    timeout=self._vijil_client.timeout_seconds
+                ) as client:
+                    score, prediction = await self._classify_vijil(client, dome_input)
+            except Exception as e:
+                logger.error(f"Vijil inference failed in hybrid fast stage: {e}")
+                return False, {
+                    "type": type(self),
+                    "detector": MODERATION_MBERT_HYBRID,
+                    "stage": "vijil-inference-error",
+                    "score": 0.0,
+                    "label": "error",
+                    "error": str(e),
+                    "response_string": dome_input.query_string,
+                }
+        else:
+            loop = asyncio.get_running_loop()
+            score, prediction = await loop.run_in_executor(
+                None, self._classify, dome_input
+            )
+
+        confidence = max(score, 1.0 - score)
+        logger.debug(
+            "moderation-mbert-hybrid fast-stage prediction=%s score=%.3f",
+            prediction,
+            score,
+        )
+
+        # Confident enough -> return the fast result immediately.
+        if confidence >= self.confidence_threshold:
+            flagged = score >= self.score_threshold
+            return flagged, self._fast_payload(
+                dome_input, score, prediction, stage="fast"
+            )
+
+        # Low confidence -> escalate to Safeguard if we have a key.
+        if not self.api_key:
+            flagged = score >= self.score_threshold
+            return flagged, self._fast_payload(
+                dome_input, score, prediction, stage="fast-fallback"
+            )
+
+        logger.info(
+            f"Low confidence ({confidence:.2f} < {self.confidence_threshold}), "
+            "escalating to Safeguard..."
+        )
+        async with httpx.AsyncClient(timeout=self.timeout_seconds) as client:
+            return await self._escalate(client, dome_input, score, prediction)
+
+    async def detect_batch(
+        self, inputs: List[Union[str, DomePayload]]
+    ) -> BatchDetectionResult:
+        """Batched hybrid detection.
+
+        Runs the fast stage on the whole batch (remote or local), then
+        escalates any low-confidence items to Safeguard concurrently.
+        """
+        dome_inputs = [DomePayload.coerce(x) for x in inputs]
+
+        # Stage 1: batched fast classification (remote or local).
+        if self._use_vijil_inference:
+            scored = await self._classify_batch_vijil(dome_inputs)
+        else:
+            loop = asyncio.get_running_loop()
+            scored = await loop.run_in_executor(
+                None, self._classify_batch, dome_inputs
+            )
+
+        # Partition into "confident enough" vs "escalate".
+        results: List[Optional[DetectionResult]] = [None] * len(dome_inputs)
+        escalate_indices: List[int] = []
+        for idx, (dome_input, (score, prediction)) in enumerate(
+            zip(dome_inputs, scored)
+        ):
+            confidence = max(score, 1.0 - score)
+            if confidence >= self.confidence_threshold:
+                flagged = score >= self.score_threshold
+                results[idx] = (
+                    flagged,
+                    self._fast_payload(dome_input, score, prediction, stage="fast"),
+                )
+            elif not self.api_key:
+                flagged = score >= self.score_threshold
+                results[idx] = (
+                    flagged,
+                    self._fast_payload(
+                        dome_input, score, prediction, stage="fast-fallback"
+                    ),
+                )
+            else:
+                escalate_indices.append(idx)
+
+        # Stage 2: concurrent Safeguard escalation for low-confidence items.
+        if escalate_indices:
+            logger.info(
+                "moderation-mbert-hybrid escalating %d/%d low-confidence items",
+                len(escalate_indices),
+                len(dome_inputs),
+            )
+            async with httpx.AsyncClient(timeout=self.timeout_seconds) as client:
+                semaphore = asyncio.Semaphore(self.max_batch_concurrency)
+
+                async def run_one(i: int) -> DetectionResult:
+                    async with semaphore:
+                        score, prediction = scored[i]
+                        return await self._escalate(
+                            client, dome_inputs[i], score, prediction
+                        )
+
+                escalated = await asyncio.gather(
+                    *(run_one(i) for i in escalate_indices)
+                )
+                for i, r in zip(escalate_indices, escalated):
+                    results[i] = r
+
+        return [r for r in results if r is not None]

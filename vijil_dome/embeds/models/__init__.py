@@ -72,9 +72,10 @@ def init_embedding_model(
             from .fastembed import FastEmbedEmbeddingModel
 
             model = FastEmbedEmbeddingModel(embedding_model)
-        # elif embedding_engine == "openai":
-        #     from .openai import OpenAIEmbeddingModel
-        #     model = OpenAIEmbeddingModel(embedding_model)
+        elif embedding_engine == "OpenAI":
+            from .openai import OpenAIEmbeddingModel
+
+            model = OpenAIEmbeddingModel(embedding_model)
         else:
             raise ValueError(f"Invalid embedding engine: {embedding_engine}")
 

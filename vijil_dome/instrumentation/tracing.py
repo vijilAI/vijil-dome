@@ -16,12 +16,17 @@
 
 from functools import wraps
 from inspect import iscoroutinefunction
+from typing import Union
+
 from pydantic import BaseModel
 from opentelemetry.sdk.trace import Tracer
 from opentelemetry.trace.span import Span
 
+# OTEL AttributeValue — the union of types span.set_attribute accepts.
+_AttributeValue = Union[str, bool, int, float, list]
 
-def _safe_set_attribute(span: Span, key: str, value: object) -> None:
+
+def _safe_set_attribute(span: Span, key: str, value: _AttributeValue | None) -> None:
     """Set a span attribute only when the value is not None.
 
     The OTLP protobuf encoder rejects None values, crashing the entire
@@ -40,6 +45,12 @@ def _set_func_span_attributes(span: Span, *args, **kwargs):
     agent_id = kwargs.get("agent_id")
     if agent_id:
         _safe_set_attribute(span, "agent.id", str(agent_id))
+    team_id = kwargs.get("team_id")
+    if team_id:
+        _safe_set_attribute(span, "team.id", str(team_id))
+    user_id = kwargs.get("user_id")
+    if user_id:
+        _safe_set_attribute(span, "user.id", str(user_id))
 
 
 def _set_func_span_result_attributes(span: Span, result):

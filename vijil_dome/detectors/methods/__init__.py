@@ -14,24 +14,42 @@
 #
 # vijil and vijil-dome are trademarks owned by Vijil Inc.
 
-# Exposing all method files for ease of import
+# Exposing all method files for ease of import.
+# Modules that support both local (torch) and remote (no torch) modes
+# are always importable. Torch-only modules are gated behind a check
+# so that ``pip install vijil-dome`` (without the ``local`` extra)
+# still loads the remote / API-only detectors.
 __all__ = [
-    "factcheck_roberta",
     "flashtext_kw_banlist",
-    "hhem_hallucination",
-    "jb_perplexity_heuristics",
     "llm_models",
     "openai_models",
-    "pi_hf_deberta",
-    "pi_hf_mbert",
     "pii_presidio",
-    "toxicity_deberta",
-    "toxicity_mbert",
-    "embedding_models",
     "secret_detector",
     "encoding_heuristics",
     "gpt_oss_safeguard_policy",
+    "policy_sections_detector",
+    # These three have lazy torch imports and work without torch
+    # (remote + safeguard modes stay available).
+    "pi_hf_mbert",
+    "toxicity_mbert",
+    "stereotype_eeoc",
+    "prompt_harmfulness",
 ]
+
+# Modules that require torch for all functionality.
+try:
+    import torch  # noqa: F401
+
+    __all__.extend([
+        "factcheck_roberta",
+        "hhem_hallucination",
+        "jb_perplexity_heuristics",
+        "pi_hf_deberta",
+        "toxicity_deberta",
+        "embedding_models",
+    ])
+except ImportError:
+    pass
 
 try:
     import googleapiclient  # noqa: F401

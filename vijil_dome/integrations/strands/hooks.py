@@ -24,7 +24,7 @@ Usage:
     from vijil_dome.integrations.strands import DomeHookProvider
 
     dome = Dome(config)
-    agent = Agent(hooks=[DomeHookProvider(dome, agent_id="...")])
+    agent = Agent(hooks=[DomeHookProvider(dome, agent_id="...", team_id="...", user_id="...")])
 """
 
 import logging
@@ -32,6 +32,7 @@ from collections.abc import Sequence
 from typing import Any, Optional
 
 from vijil_dome import Dome
+from vijil_dome.types import DomePayload
 
 try:
     from strands.hooks import (
@@ -104,12 +105,16 @@ class DomeHookProvider(HookProvider):
     def __init__(
         self,
         dome: Dome,
-        agent_id: str = "",
+        agent_id: Optional[str] = None,
+        team_id: Optional[str] = None,
+        user_id: Optional[str] = None,
         input_blocked_message: str = DEFAULT_INPUT_BLOCKED_MESSAGE,
         output_blocked_message: str = DEFAULT_OUTPUT_BLOCKED_MESSAGE,
     ):
         self.dome = dome
         self.agent_id = agent_id
+        self.team_id = team_id
+        self.user_id = user_id
         self.input_blocked_message = input_blocked_message
         self.output_blocked_message = output_blocked_message
 
@@ -123,8 +128,15 @@ class DomeHookProvider(HookProvider):
         if text is None or idx is None:
             return
 
-        scan = await self.dome.async_guard_input(text, agent_id=self.agent_id)
-        if not scan.is_safe():
+        scan = await self.dome.async_guard_input(
+            text,
+            agent_id=self.agent_id,
+            team_id=self.team_id,
+            user_id=self.user_id,
+        )
+        if scan.flagged and not scan.enforced:
+            logger.info("Dome shadow: input flagged but not enforced (score=%.2f)", scan.detection_score)
+        elif scan.enforced:
             logger.warning("Dome blocked input: %s...", text[:80])
             event.agent.messages[idx]["content"] = [
                 {"text": self.input_blocked_message}
@@ -139,8 +151,22 @@ class DomeHookProvider(HookProvider):
         if not text:
             return
 
-        scan = await self.dome.async_guard_output(text, agent_id=self.agent_id)
-        if not scan.is_safe():
+        # Build structured payload with prompt context when available
+        user_text, _ = _extract_last_user_text(event.agent.messages)
+        if user_text:
+            payload = DomePayload(prompt=user_text, response=text)
+        else:
+            payload = DomePayload(response=text)
+
+        scan = await self.dome.async_guard_output(
+            payload,
+            agent_id=self.agent_id,
+            team_id=self.team_id,
+            user_id=self.user_id,
+        )
+        if scan.flagged and not scan.enforced:
+            logger.info("Dome shadow: output flagged but not enforced (score=%.2f)", scan.detection_score)
+        elif scan.enforced:
             logger.warning("Dome blocked output: %s...", text[:80])
             event.stop_response.message["content"] = [
                 {"text": self.output_blocked_message}

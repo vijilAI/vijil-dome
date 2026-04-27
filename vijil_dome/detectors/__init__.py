@@ -14,14 +14,18 @@
 #
 # vijil and vijil-dome are trademarks owned by Vijil Inc.
 
+import asyncio
 import time
 import json
 import logging
+import inspect
 from enum import Enum, auto
 from abc import ABC, abstractmethod
-from typing import Type, Dict, Tuple, Callable, Coroutine, Any, Optional
+from typing import Type, Dict, List, Tuple, Callable, Coroutine, Any, Optional, Union
 from collections import defaultdict
 from pydantic import BaseModel
+
+from vijil_dome.types import DomePayload
 
 
 MODERATION_FLASHTXT_BANLIST = "moderation-flashtext"
@@ -31,6 +35,9 @@ MODERATION_LLM = "moderation-prompt-engineering"
 MODERATION_PERSPECTIVE = "moderation-perspective-api"
 MODERATION_DEBERTA = "moderation-deberta"
 MODERATION_MBERT = "moderation-mbert"
+MODERATION_MBERT_SAFEGUARD = "moderation-mbert-safeguard"
+MODERATION_MBERT_HYBRID = "moderation-mbert-hybrid"
+MODERATION_MBERT_REMOTE = "moderation-mbert-remote"
 
 PRIVACY_PRESIDIO = "privacy-presidio"
 DETECT_SECRETS = "detect-secrets"
@@ -40,6 +47,9 @@ JB_PREFIX_SUFFIX_PERPLEXITY = "jb-prefix-suffix-perplexity"
 PI_DEBERTA_V3_BASE = "prompt-injection-deberta-v3-base"
 PI_DEBERTA_FINETUNED_11122024 = "prompt-injection-deberta-finetuned-11122024"
 PI_MBERT = "prompt-injection-mbert"
+PI_MBERT_SAFEGUARD = "prompt-injection-mbert-safeguard"
+PI_MBERT_HYBRID = "prompt-injection-mbert-hybrid"
+PI_MBERT_REMOTE = "prompt-injection-mbert-remote"
 SECURITY_LLM = "security-llm"
 SECURITY_EMBEDDINGS = "security-embeddings"
 SECURITY_PROMPTGUARD = "security-promptguard"
@@ -52,12 +62,22 @@ FACTCHECK_LLM = "fact-check-llm"
 
 GENERIC_LLM = "generic-llm"
 POLICY_GPT_OSS_SAFEGUARD = "policy-gpt-oss-safeguard"
+POLICY_SECTIONS = "policy-sections"
+
+STEREOTYPE_EEOC_FAST = "stereotype-eeoc-fast"
+STEREOTYPE_EEOC_SAFEGUARD = "stereotype-eeoc-safeguard"
+STEREOTYPE_EEOC_HYBRID = "stereotype-eeoc-hybrid"
+STEREOTYPE_EEOC_REMOTE = "stereotype-eeoc-remote"
+
+PROMPT_HARMFULNESS_FAST = "prompt-harmfulness-fast"
+PROMPT_HARMFULNESS_SAFEGUARD = "prompt-harmfulness-safeguard"
 
 # Define types for detection results and data
 DetectorType = Dict["type", str]
 Hit = bool
 HitData = Dict[str, Any]
 DetectionResult = Tuple[Hit, HitData]
+BatchDetectionResult = List[DetectionResult]
 
 
 class DetectionCategory(Enum):
@@ -66,6 +86,7 @@ class DetectionCategory(Enum):
     Moderation = auto()
     Integrity = auto()
     Generic = auto()
+    Policy = auto()
 
 
 class DetectionTimingResult(BaseModel):
@@ -95,35 +116,142 @@ class DetectionTimingResult(BaseModel):
         return self.__str__()
 
 
+class BatchDetectionTimingResult(BaseModel):
+    results: List[DetectionTimingResult]
+    exec_time: float  # total wall-clock for entire batch
+
+
 class DetectionMethod(ABC):
     """
     Abstract base class for all detection methods.
     """
 
+    DEFAULT_MAX_BATCH_CONCURRENCY = 5
+    max_batch_concurrency: int = DEFAULT_MAX_BATCH_CONCURRENCY
+
+    async def _gather_with_concurrency(
+        self, coros: List[Coroutine],
+    ) -> List[Any]:
+        """Run coroutines with a concurrency cap of self.max_batch_concurrency."""
+        semaphore = asyncio.Semaphore(self.max_batch_concurrency)
+
+        async def _limited(coro):
+            async with semaphore:
+                return await coro
+
+        return list(await asyncio.gather(*[_limited(c) for c in coros]))
+
+    @staticmethod
+    def _call_with_supported_kwargs(func, *args, **kwargs):
+        signature = inspect.signature(func)
+        supports_var_kwargs = any(
+            param.kind == inspect.Parameter.VAR_KEYWORD
+            for param in signature.parameters.values()
+        )
+        if supports_var_kwargs:
+            return func(*args, **kwargs)
+        filtered_kwargs = {
+            key: value for key, value in kwargs.items() if key in signature.parameters
+        }
+        return func(*args, **filtered_kwargs)
+
     @abstractmethod
-    async def detect(self, query_string: str) -> DetectionResult:
+    async def detect(self, dome_input: DomePayload) -> DetectionResult:
         """
         Perform the detection logic.
         """
         pass
 
     async def detect_with_time(
-        self, query_string: str, agent_id: Optional[str] = None
+        self,
+        query_string: Union[str, DomePayload],
+        agent_id: Optional[str] = None,
+        team_id: Optional[str] = None,
+        user_id: Optional[str] = None,
     ) -> DetectionTimingResult:
         """
         Perform the detection and return the result along with the execution time.
         """
+        dome_input = DomePayload.coerce(query_string)
         start_time = time.time()
-        result = await self.detect(query_string)
+        result = await self._call_with_supported_kwargs(
+            self.detect,
+            dome_input,
+            agent_id=agent_id,
+            team_id=team_id,
+            user_id=user_id,
+        )
         execution_time = round((time.time() - start_time) * 1000, 3)
 
+        result_payload = dict(result[1])
+        if agent_id:
+            result_payload.setdefault("agent_id", agent_id)
+        if team_id:
+            result_payload.setdefault("team_id", team_id)
+        if user_id:
+            result_payload.setdefault("user_id", user_id)
+
         detection_result = DetectionTimingResult(
-            hit=result[0], result=result[1], exec_time=execution_time
+            hit=result[0], result=result_payload, exec_time=execution_time
         )
         sanitized_result = self._sanitize_result(result)
         logging.info(f"{sanitized_result}")
 
         return detection_result
+
+    async def detect_batch(
+        self, inputs: List[Union[str, DomePayload]]
+    ) -> BatchDetectionResult:
+        """
+        Process a batch of inputs. Default implementation loops over detect().
+        Subclasses can override for optimized batch processing.
+        """
+        results = []
+        for item in inputs:
+            dome_input = DomePayload.coerce(item)
+            result = await self.detect(dome_input)
+            results.append(result)
+        return results
+
+    async def detect_batch_with_time(
+        self,
+        inputs: List[Union[str, DomePayload]],
+        agent_id: Optional[str] = None,
+        team_id: Optional[str] = None,
+        user_id: Optional[str] = None,
+    ) -> BatchDetectionTimingResult:
+        """
+        Timing wrapper for batch detection. Calls detect_batch and wraps
+        each result in DetectionTimingResult.
+        """
+        start_time = time.time()
+        batch_results = await self._call_with_supported_kwargs(
+            self.detect_batch,
+            inputs,
+            agent_id=agent_id,
+            team_id=team_id,
+            user_id=user_id,
+        )
+        total_time = round((time.time() - start_time) * 1000, 3)
+
+        timing_results = []
+        for result in batch_results:
+            result_payload = dict(result[1])
+            if agent_id:
+                result_payload.setdefault("agent_id", agent_id)
+            if team_id:
+                result_payload.setdefault("team_id", team_id)
+            if user_id:
+                result_payload.setdefault("user_id", user_id)
+            timing_results.append(
+                DetectionTimingResult(
+                    hit=result[0], result=result_payload, exec_time=0.0
+                )
+            )
+
+        return BatchDetectionTimingResult(
+            results=timing_results, exec_time=total_time
+        )
 
     def setDetectorHyperParams(self, **params):
         """
@@ -186,17 +314,17 @@ class DetectionFactory:
     @staticmethod
     async def get_detect(
         category: DetectionCategory, method_name: str, **kwargs
-    ) -> Callable[[str], Coroutine[Any, Any, DetectionResult]]:
+    ) -> Callable[..., Coroutine[Any, Any, DetectionResult]]:
         detector = DetectionFactory.get_detector(category, method_name, **kwargs)
         return detector.detect
 
     @staticmethod
     async def get_detect_with_time(
         category: DetectionCategory, method_name: str, **kwargs
-    ) -> Callable[[str], Coroutine[Any, Any, DetectionTimingResult]]:
+    ) -> Callable[[Union[str, DomePayload]], Coroutine[Any, Any, DetectionTimingResult]]:
         detector = DetectionFactory.get_detector(category, method_name, **kwargs)
         # warm the model
-        await detector.detect("")
+        await detector.detect(DomePayload(text=""))
 
         return detector.detect_with_time
 

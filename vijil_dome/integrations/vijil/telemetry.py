@@ -48,6 +48,7 @@ def _set_darwin_span_attributes(
     result: Union[GuardrailResult, GuardResult],
     agent_id: Optional[str] = None,
     team_id: Optional[str] = None,
+    user_id: Optional[str] = None,
 ) -> None:
     """Set Darwin-compatible span attributes from native result fields.
 
@@ -61,6 +62,8 @@ def _set_darwin_span_attributes(
         _safe_set_attribute(span, "team.id", str(team_id))
     if agent_id:
         _safe_set_attribute(span, "agent.id", str(agent_id))
+    if user_id:
+        _safe_set_attribute(span, "user.id", str(user_id))
 
     is_flagged = (
         result.flagged if isinstance(result, GuardrailResult) else result.triggered
