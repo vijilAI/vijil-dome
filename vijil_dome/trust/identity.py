@@ -206,7 +206,7 @@ class AgentIdentity:
         # SPIFFE attestation is a sync gRPC call — run in a thread
         if _HAS_SPIFFE and os.path.exists(self._spire_socket):
             import asyncio
-            await asyncio.to_thread(self._try_spiffe_attestation)
+            await asyncio.to_thread(self._try_spire_attestation)
             if self._attested:
                 return
 
