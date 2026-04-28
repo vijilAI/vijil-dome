@@ -5,80 +5,116 @@
 [![Downloads](https://static.pepy.tech/badge/vijil-dome)](https://pepy.tech/project/vijil-dome)
 [![Docs](https://img.shields.io/badge/Docs-blue?link=https%3A%2F%2Fdocs.vijil.ai%2Fdome%2Fintro.html)](https://docs.vijil.ai/dome/intro.html)
 
-**Vijil Dome** is a fast, lightweight, and highly configurable library for adding runtime guardrails to your AI agents. It combines top open-source LLM safety tools with proprietary Vijil models to detect and respond to unsafe content — with built-in support for observability, tracing, and popular agent frameworks.
+**Vijil Dome** secures AI agents at runtime. It guards inputs and outputs with 20+ content detectors, enforces tool-level access control, attests agent and tool identity via SPIFFE, and emits structured audit logs — all in a single pip-installable library that works with LangGraph, Google ADK, Strands, and any other agent framework.
 
-
-## 🚀 Installation
-
-Install the core library:
+## Installation
 
 ```bash
 pip install vijil-dome
 ```
 
-Optional extras for common integrations:
+Optional extras:
 
-* `opentelemetry` – OTel-compatible tracing/logging
-* `google` – GCP-native metrics and logging
-* `langchain` – Seamless integration with LangChain/LangGraph
-* `embeddings` – Fast similarity search using `annoy`
-
-> ⚠️ Note: `annoy` is not currently compatible with agents built using Google ADK + Cloud Run. Use in-memory embeddings in those cases.
-
-### CPU-Only Installation
-
-By default, `pip install vijil-dome` installs PyTorch with CUDA support (~2-3GB). For CPU-only environments, you can significantly reduce the installation size (~100-200MB) by using the CPU-only version of PyTorch:
+| Extra | What it adds |
+|-------|-------------|
+| `trust` | Trust runtime: identity, MAC, signed manifests (cryptography, httpx) |
+| `trust-adapters` | Framework adapters for `secure_agent()` (langgraph, google-adk, strands) |
+| `opentelemetry` | OTel-compatible tracing and logging |
+| `local` | Local model inference (torch, transformers) |
+| `embeddings` | Similarity search (annoy, faiss) |
+| `s3` | S3-backed configuration loading (boto3) |
+| `mcp` | MCP tool wrapping |
 
 ```bash
-# Install vijil-dome
-pip install vijil-dome
+# Trust runtime with framework adapters
+pip install "vijil-dome[trust,trust-adapters]"
 
-# Replace with CPU-only PyTorch (saves ~2GB)
+# Content guards with local models
+pip install "vijil-dome[local]"
+
+# Everything
+pip install "vijil-dome[trust,trust-adapters,local,opentelemetry]"
+```
+
+### CPU-only PyTorch
+
+By default, PyTorch installs with CUDA support (~2-3GB). For CPU-only environments:
+
+```bash
+pip install vijil-dome
 pip install --force-reinstall torch --index-url https://download.pytorch.org/whl/cpu
 ```
 
-**When to use CPU-only PyTorch:**
-- Deploying to cloud environments without GPU (Lambda, Cloud Run, etc.)
-- Running on machines without NVIDIA GPUs
-- Reducing Docker image sizes
-- Development/testing environments where GPU isn't needed
+All detectors remain fully functional on CPU. Inference is slower (2-5x) but acceptable for guardrailing.
 
-**Performance considerations:**
-- All guardrails remain fully functional on CPU
-- Model inference will be slower than GPU (typically 2-5x)
-- For most guardrailing use cases, CPU performance is acceptable
-- The library automatically detects available devices and falls back to CPU gracefully
 
-## 🔒 Guarding Agents in One Line
+## Two ways to use Dome
+
+### 1. Content guards — protect any agent in three lines
+
+```python
+from vijil_dome import Dome
+
+dome = Dome()
+input_scan = dome.guard_input("How can I rob a bank?")
+print(input_scan.is_safe())  # False
+```
+
+Dome scans inputs for prompt injections, jailbreaks, and toxicity. It scans outputs for toxicity and masks PII. Configure guards via Python dict or TOML — see [Configuration](#configuration) below.
+
+### 2. Trust runtime — full agent security in one line
+
+```python
+from vijil_dome import secure_agent
+
+# Wraps any supported framework with identity, MAC, guards, and audit
+app = secure_agent(graph, agent_id="travel-agent", mode="enforce")
+```
+
+`secure_agent()` detects your framework and applies the full trust stack:
+
+| Layer | What it does |
+|-------|-------------|
+| **Identity** | Attests agent identity via API key or SPIFFE workload identity (mTLS) |
+| **Constraints** | Fetches tool permissions and guard config from the Vijil Console (or local config) |
+| **Content guards** | Runs Dome input/output guards on every LLM call |
+| **MAC enforcement** | Checks each tool call against the agent's permission policy before execution |
+| **Audit** | Emits structured events for every guard pass, MAC decision, and attestation check |
+
+Supported frameworks:
+
+| Framework | What `secure_agent()` returns |
+|-----------|------------------------------|
+| **LangGraph** (`StateGraph`) | A `SecureGraph` that wraps `graph.compile()` |
+| **Google ADK** (`Agent`) | The agent with trust callbacks injected |
+| **Strands** (`Agent`) | A `TrustHookProvider` for the agent's `hooks` parameter |
+
+For other frameworks, use `TrustRuntime` directly — it operates on strings and tool names, with no framework dependency.
+
+
+## Content guards
+
+### Basic usage
 
 ```python
 from vijil_dome import Dome
 
 dome = Dome()
 
-query = "How can I rob a bank?"
-input_scan = dome.guard_input(query)
-print(input_scan.is_safe(), input_scan.guarded_response())
+# Guard input
+input_scan = dome.guard_input("How can I hack a system?")
+if not input_scan.is_safe():
+    return input_scan.guarded_response()
 
-# Get a response from your agent 
-
-response = "Here's how to rob a bank!"
-output_scan = dome.guard_output(response)
-print(output_scan.is_safe(), output_scan.guarded_response())
+# Guard output
+output_scan = dome.guard_output(agent_response)
+if not output_scan.is_safe():
+    return output_scan.guarded_response()
 ```
 
-By default, Dome:
-
-* Scans inputs for prompt injections, jailbreaks, and toxicity
-* Scans outputs for toxicity and masks PII
-
-### Batch Processing
-
-For workloads involving multiple inputs or outputs, Dome supports batch processing at every layer. Each detector type uses its optimal batch strategy (e.g., HuggingFace pipeline batching, concurrent API calls).
+### Batch processing
 
 ```python
-from vijil_dome import Dome
-
 dome = Dome()
 
 inputs = [
@@ -88,39 +124,106 @@ inputs = [
 ]
 
 result = dome.guard_input_batch(inputs)
-
-print(result.all_safe())   # False — at least one input was flagged
-print(result[0].is_safe()) # True
+print(result.all_safe())   # False
 print(result[1].is_safe()) # False
 
 # Async variant
 result = await dome.async_guard_input_batch(inputs)
-
-# Output scanning works the same way
-result = dome.guard_output_batch(outputs)
 ```
 
-The `BatchScanResult` supports `all_safe()`, `any_flagged()`, indexing, iteration, and `len()`.
+
+## Trust runtime
+
+### Direct usage with `TrustRuntime`
+
+Use `TrustRuntime` directly when you need fine-grained control or work with a framework that `secure_agent()` does not support.
+
+```python
+from vijil_dome import TrustRuntime
+
+runtime = TrustRuntime(
+    agent_id="travel-agent",
+    constraints={
+        "agent_id": "travel-agent",
+        "tool_permissions": [
+            {"tool_name": "search_flights", "permitted": True},
+            {"tool_name": "process_payment", "permitted": False},
+        ],
+        "dome_config": {
+            "input_guards": ["prompt-injection"],
+            "output_guards": ["output-toxicity"],
+            "guards": {},
+        },
+        "organization": {
+            "required_input_guards": [],
+            "required_output_guards": [],
+            "denied_tools": ["get_api_credentials"],
+        },
+        "enforcement_mode": "enforce",
+    },
+    mode="enforce",
+)
+
+# Guard input
+guard_result = runtime.guard_input(user_query)
+
+# Check tool permission before calling
+mac_result = runtime.check_tool_call("search_flights", {})
+if mac_result.permitted:
+    result = search_flights(**args)
+
+# Wrap tools with automatic MAC + guard enforcement
+safe_tools = runtime.wrap_tools([search_flights, book_hotel])
+```
+
+### Modes
+
+| Mode | Behavior |
+|------|----------|
+| `"warn"` | Logs policy violations but allows execution. Use during development. |
+| `"enforce"` | Blocks denied tool calls and replaces flagged content. Use in production. |
+
+### Identity
+
+`TrustRuntime` resolves agent identity in three ways, in priority order:
+
+1. **API key** — extracted from a Vijil client object, if provided
+2. **SPIFFE workload identity** — via the local SPIRE agent socket (mTLS)
+3. **Unattested** — agent ID only, no cryptographic identity
+
+When SPIFFE is available, `TrustRuntime` can verify tool identity by connecting to each tool's endpoint and checking the server certificate's SPIFFE ID against the signed manifest.
+
+### Tool manifests
+
+A tool manifest lists every tool the agent is authorized to call, along with each tool's expected SPIFFE identity. Manifests are signed via the Vijil Console and verified locally.
+
+```python
+runtime = TrustRuntime(
+    agent_id="travel-agent",
+    manifest="manifest.json",
+    mode="enforce",
+)
+
+# Verify all tool identities against the manifest
+attestation = runtime.attest()
+print(attestation.all_verified)  # True if every tool's cert matches
+```
 
 
-## ⚙️ Configuration Options
+## Configuration
 
-You can configure Dome using a TOML file or a Python dictionary.
+Configure content guards via Python dict or TOML file.
 
-### Example TOML
+### TOML
 
 ```toml
 [guardrail]
 input-guards = ["prompt-injection", "input-toxicity"]
 output-guards = ["output-toxicity"]
-input-early-exit = false
 agent_id = "agent-123"
-team_id = "team-001"
-user_id = "user-001"
 
 [prompt-injection]
 type = "security"
-early-exit = false
 methods = ["prompt-injection-deberta-v3-base", "security-llm"]
 
 [prompt-injection.security-llm]
@@ -135,74 +238,77 @@ type = "moderation"
 methods = ["moderation-prompt-engineering"]
 ```
 
-### Same Configuration in Python
+### Python dict
 
 ```python
 config = {
     "input-guards": ["prompt-injection", "input-toxicity"],
     "output-guards": ["output-toxicity"],
-    "input-early-exit": False,
     "agent_id": "agent-123",
-    "team_id": "team-001",
-    "user_id": "user-001",
     "prompt-injection": {
         "type": "security",
-        "early-exit": False,
         "methods": ["prompt-injection-deberta-v3-base", "security-llm"],
-        "security-llm": {
-            "model_name": "gpt-4o"
-        }
+        "security-llm": {"model_name": "gpt-4o"},
     },
-    "input-toxicity": {
-        "type": "moderation",
-        "methods": ["moderations-oai-api"]
-    },
-    "output-toxicity": {
-        "type": "moderation",
-        "methods": ["moderation-prompt-engineering"]
-    },
+    "input-toxicity": {"type": "moderation", "methods": ["moderations-oai-api"]},
+    "output-toxicity": {"type": "moderation", "methods": ["moderation-prompt-engineering"]},
 }
+dome = Dome(config)
 ```
 
-### Identity Fields
-
-You can include these optional top-level fields in config:
-
-- `agent_id`
-- `team_id`
-- `user_id`
-
-Dome includes 20+ prebuilt guardrails and supports building your own! See the [Detector Reference](vijil_dome/detectors/DETECTOR_INFO.md) for a full list of detectors, their parameters, and configuration examples.
-
-For policy-based GPT-OSS safeguard usage (direct detector + TOML config pattern), see:
-- `vijil_dome/integrations/examples/gpt_oss_safeguard_README.md`
-- `examples/gpt_oss_safeguard_guardrail.toml`
-
-👉 For the full list of guardrail methods, advanced config options, and extensibility, check out the [Docs](https://docs.vijil.ai/dome/intro.html).
-
-## 🔌 Compatibility
-
-Dome works with **any agent framework or LLM** — it operates directly on strings, so there's no dependency on your stack!
-
-For popular frameworks, we provide dedicated wrappers and tutorials to make integration seamless:
-
-* [**Google ADK**](https://docs.vijil.ai/dome/tutorials/adk.html)
-* [**LangChain & LangGraph**](https://docs.vijil.ai/dome/tutorials/)
-
-### Observability Integrations:
-
-Dome is compatible with the following observability framworks out of the box
-
-* **OpenTelemetry**
-* **Weave** (Weights & Biases)
-* **AgentOps**
-* **Google Cloud Trace**
-
-See the [documentation](https://docs.vijil.ai/dome/tutorials/observability.html) for more details
+Dome includes 20+ prebuilt detectors. See the [Detector Reference](vijil_dome/detectors/DETECTOR_INFO.md) for the full list.
 
 
-📚 Learn More
----
-Get detailed guides, examples, and custom guardrail walkthroughs in the [official documentation →](https://docs.vijil.ai/dome/intro.html)
+## Framework integrations
 
-Have more questions, or want us to include another guardrailing technique? Reach out to us at contact@vijil.ai!
+### Google ADK
+
+```python
+from vijil_dome import secure_agent
+from google.adk import Agent
+
+agent = Agent(model="gemini-2.0-flash", tools=[search_flights])
+secure_agent(agent, agent_id="travel-agent", mode="enforce")
+```
+
+### LangGraph
+
+```python
+from vijil_dome import secure_agent
+from langgraph.graph import StateGraph
+
+graph = StateGraph(AgentState)
+# ... build graph ...
+app = secure_agent(graph, agent_id="travel-agent", mode="enforce")
+```
+
+### Strands
+
+```python
+from vijil_dome import secure_agent
+from strands import Agent
+
+agent = Agent(tools=[search_flights])
+hooks = secure_agent(agent, agent_id="travel-agent", mode="enforce")
+agent = Agent(tools=[search_flights], hooks=[hooks])
+```
+
+### Content guards only (any framework)
+
+```python
+from vijil_dome.integrations.adk import DomeCallback
+agent = Agent(model="gemini-2.0-flash", callbacks=[DomeCallback()])
+```
+
+### Observability
+
+Dome integrates with OpenTelemetry, Weave, AgentOps, and Google Cloud Trace. See the [observability docs](https://docs.vijil.ai/dome/tutorials/observability.html).
+
+
+## Learn more
+
+- [Documentation](https://docs.vijil.ai/dome/intro.html) — full guides, tutorials, and API reference
+- [Detector Reference](vijil_dome/detectors/DETECTOR_INFO.md) — all 20+ detectors with parameters and examples
+- [Trust Runtime Design](docs/trust/2026-04-03-trust-runtime-design.md) — architecture and security model
+
+Questions or feature requests? Reach out at contact@vijil.ai.
