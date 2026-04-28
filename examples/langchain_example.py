@@ -83,13 +83,13 @@ chain_if_not_flagged = prompt_template | model | parser
 chain_if_flagged = lambda x: "Input query blocked by guardrails."
 
 # Create branched execution based on input guardrail results
-input_branch = RunnableBranch(
+input_branch: RunnableBranch = RunnableBranch(
     (lambda x: x["flagged"], chain_if_flagged),
     chain_if_not_flagged,
 )
 
 # Create branched execution based on output guardrail results
-output_branch = RunnableBranch(
+output_branch: RunnableBranch = RunnableBranch(
     (lambda x: x["flagged"], lambda x: "Output response blocked by guardrails."),
     lambda x: x["guardrail_response_message"]
 )
