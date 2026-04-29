@@ -104,6 +104,15 @@ def create_detector_for_guard(
                 **config,
             )
         except Exception as e:
+            # If this is a remote-capable detector that failed locally,
+            # give a clear message about missing deps or inference server
+            if detector_name in REMOTE_DETECTORS:
+                raise ValueError(
+                    f"Detector '{detector_name}' requires either: "
+                    f"(1) DOME_INFERENCE_URL set to route to inference server, or "
+                    f"(2) pip install vijil-dome[full] for local execution. "
+                    f"Original error: {e}"
+                )
             raise ValueError(
                 f"Something broke when creating the detector {detector_name}. "
                 f"You might have passed an invalid parameter. Exception:{e}"
