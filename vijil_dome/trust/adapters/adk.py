@@ -200,3 +200,28 @@ def secure_agent(
     )
 
     return agent
+
+
+# ------------------------------------------------------------------
+# Adapter registry
+# ------------------------------------------------------------------
+
+from vijil_dome.trust.adapters.base import BaseAdapter, register_adapter
+
+
+@register_adapter("adk")
+class ADKAdapter(BaseAdapter):
+    @classmethod
+    def detect(cls, agent: Any) -> bool:
+        module = type(agent).__module__ or ""
+        if module.startswith("google.adk") or module.startswith("google.genai"):
+            return True
+        return (
+            hasattr(agent, "before_model_callback")
+            and hasattr(agent, "before_tool_callback")
+        )
+
+    @classmethod
+    def wrap(cls, agent: Any, **kwargs: Any) -> Any:
+        kwargs.pop("policy", None)
+        return secure_agent(agent, **kwargs)

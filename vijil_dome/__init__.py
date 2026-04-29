@@ -18,12 +18,25 @@ from .Dome import Dome, create_dome_config, BatchScanResult
 from .defaults import get_default_config
 from .types import DomePayload
 
-# Trust runtime — lazy imports to avoid pulling in cryptography when not needed
+# Lazy imports — avoid pulling in heavy deps when not needed
 def __getattr__(name: str):
     _lazy = {
+        # Trust runtime
         "trust": ("vijil_dome", "trust"),
         "TrustRuntime": ("vijil_dome.trust.runtime", "TrustRuntime"),
         "secure_agent": ("vijil_dome.trust.adapters.auto", "secure_agent"),
+        # Controls
+        "VijilDome": ("vijil_dome.core", "VijilDome"),
+        "ControlEngine": ("vijil_dome.controls.engine", "ControlEngine"),
+        "control": ("vijil_dome.controls.decorator", "control"),
+        "register_evaluator": ("vijil_dome.controls.evaluators", "register_evaluator"),
+        "Evaluator": ("vijil_dome.controls.evaluators.base", "Evaluator"),
+        "EvaluatorResult": ("vijil_dome.controls.evaluators.base", "EvaluatorResult"),
+        "ControlViolationError": ("vijil_dome.controls.errors", "ControlViolationError"),
+        "ControlSteerError": ("vijil_dome.controls.errors", "ControlSteerError"),
+        # Adapter registry
+        "register_adapter": ("vijil_dome.trust.adapters.base", "register_adapter"),
+        "BaseAdapter": ("vijil_dome.trust.adapters.base", "BaseAdapter"),
     }
     if name in _lazy:
         module_path, attr = _lazy[name]
@@ -33,6 +46,7 @@ def __getattr__(name: str):
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 __all__ = [
+    # Existing
     "Dome",
     "DomePayload",
     "BatchScanResult",
@@ -41,4 +55,16 @@ __all__ = [
     "TrustRuntime",
     "secure_agent",
     "trust",
+    # Controls
+    "VijilDome",
+    "ControlEngine",
+    "control",
+    "register_evaluator",
+    "Evaluator",
+    "EvaluatorResult",
+    "ControlViolationError",
+    "ControlSteerError",
+    # Adapter registry
+    "register_adapter",
+    "BaseAdapter",
 ]

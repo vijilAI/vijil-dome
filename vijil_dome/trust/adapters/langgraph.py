@@ -201,3 +201,25 @@ def secure_graph(
         logger.debug("Could not wrap graph tools — skipping tool-level enforcement.")
 
     return SecureGraph(graph=compiled, runtime=runtime)
+
+
+# ------------------------------------------------------------------
+# Adapter registry
+# ------------------------------------------------------------------
+
+from vijil_dome.trust.adapters.base import BaseAdapter, register_adapter
+
+
+@register_adapter("langgraph")
+class LangGraphAdapter(BaseAdapter):
+    @classmethod
+    def detect(cls, agent: Any) -> bool:
+        module = type(agent).__module__ or ""
+        if module.startswith("langgraph"):
+            return True
+        return hasattr(agent, "compile") or hasattr(agent, "get_graph")
+
+    @classmethod
+    def wrap(cls, agent: Any, **kwargs: Any) -> Any:
+        kwargs.pop("policy", None)
+        return secure_graph(agent, **kwargs)

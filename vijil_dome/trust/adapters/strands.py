@@ -274,3 +274,23 @@ def _extract_response_text(message: dict[str, Any]) -> str | None:
         if isinstance(block, dict) and "text" in block
     ]
     return " ".join(texts) if texts else None
+
+
+# ------------------------------------------------------------------
+# Adapter registry
+# ------------------------------------------------------------------
+
+from vijil_dome.trust.adapters.base import BaseAdapter, register_adapter
+
+
+@register_adapter("strands")
+class StrandsAdapter(BaseAdapter):
+    @classmethod
+    def detect(cls, agent: Any) -> bool:
+        module = type(agent).__module__ or ""
+        return module.startswith("strands")
+
+    @classmethod
+    def wrap(cls, agent: Any, **kwargs: Any) -> Any:
+        kwargs.pop("policy", None)
+        return secure_agent(agent, **kwargs)

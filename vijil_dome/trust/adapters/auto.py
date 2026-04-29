@@ -36,6 +36,7 @@ def secure_agent(
     constraints: AgentConstraints | dict[str, Any] | None = None,
     manifest: Any = None,
     mode: str = "warn",
+    policy: Any = None,
     **kwargs: Any,
 ) -> Any:
     """Add trust enforcement to any supported agent framework.
@@ -110,12 +111,27 @@ def secure_agent(
             mode=mode,
         )
 
+    # Fallback: try the adapter registry for custom-registered adapters
+    from vijil_dome.trust.adapters.base import detect_adapter
+
+    adapter_cls = detect_adapter(agent)
+    if adapter_cls is not None:
+        return adapter_cls.wrap(
+            agent,
+            client=client,
+            agent_id=agent_id,
+            constraints=constraints,
+            manifest=manifest,
+            mode=mode,
+            policy=policy,
+            **kwargs,
+        )
+
     raise TypeError(
         f"Unsupported agent type: {type(agent).__module__}.{type(agent).__qualname__}. "
         f"secure_agent() supports LangGraph (StateGraph), Google ADK (Agent), "
-        f"and Strands (Agent). For other frameworks, use the framework-specific "
-        f"adapter directly (vijil_dome.trust.adapters.langgraph, "
-        f"vijil_dome.trust.adapters.adk, vijil_dome.trust.adapters.strands)."
+        f"and Strands (Agent). Register custom adapters with @register_adapter. "
+        f"For other frameworks, use the framework-specific adapter directly."
     )
 
 
