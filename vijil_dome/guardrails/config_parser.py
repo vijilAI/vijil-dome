@@ -17,8 +17,13 @@
 from vijil_dome.guardrails import Guard, Guardrail
 from vijil_dome.detectors.methods import *  # noqa: F403
 from vijil_dome.detectors import DetectionCategory, DetectionFactory
+from vijil_dome.detectors.methods.remote_method import RemoteDetectionMethod
+from vijil_dome.detectors.remote_dispatcher import RemoteDetectorDispatcher
 import toml
+import logging
 from typing import Tuple, Dict, Any, Optional  # noqa: F401
+
+logger = logging.getLogger("vijil.dome")
 
 GUARDRAIL_CATEGORY_MAPPING = {
     "security": DetectionCategory.Security,
@@ -29,8 +34,49 @@ GUARDRAIL_CATEGORY_MAPPING = {
     "policy": DetectionCategory.Policy,
 }
 
+# Detectors that require model weights or LLM calls — routed to the
+# inference server when DOME_INFERENCE_URL is set. Detectors NOT in this
+# set always run locally (they're pure Python: regex, keywords, etc.).
+REMOTE_DETECTORS: set[str] = {
+    # ML classifiers (torch + transformers)
+    "prompt-injection-deberta",
+    "prompt-injection-mbert",
+    "toxicity-deberta",
+    "toxicity-mbert",
+    "stereotype-eeoc-fast",
+    "prompt-harmfulness-fast",
+    "factcheck-roberta",
+    "hhem-hallucination",
+    "jailbreak-heuristics",
+    # PII (presidio + spacy)
+    "pii-presidio",
+    # LLM-based detectors (litellm)
+    "security-llm",
+    "moderation-llm",
+    "privacy-llm",
+    "integrity-llm",
+    "generic-llm",
+    "policy-llm",
+    "moderations-oai-api",
+    # Embeddings
+    "embedding-similarity",
+}
+
 EARLY_EXIT = "early-exit"
 PARALLELIZED = "run-parallel"
+
+
+def _should_use_remote(detector_name: str) -> bool:
+    """Check if a detector should be routed to the inference server.
+
+    Returns True when:
+    1. The detector is in the REMOTE_DETECTORS set, AND
+    2. DOME_INFERENCE_URL is configured
+    """
+    if detector_name not in REMOTE_DETECTORS:
+        return False
+    dispatcher = RemoteDetectorDispatcher()
+    return dispatcher.is_configured
 
 
 def create_detector_for_guard(
@@ -40,16 +86,28 @@ def create_detector_for_guard(
         raise ValueError(f"Invalid detector type encountered: {detector_type}")
     config = dict(detector_config_dict)
     max_batch_concurrency = config.pop("max_batch_concurrency", None)
-    try:
-        detector_instance = DetectionFactory.get_detector(
-            GUARDRAIL_CATEGORY_MAPPING[detector_type],
-            detector_name,
-            **config,
+
+    # Route to inference server when available
+    if _should_use_remote(detector_name):
+        threshold = config.pop("threshold", 0.5)
+        logger.info("Using remote detector for %s (threshold=%.2f)", detector_name, threshold)
+        detector_instance = RemoteDetectionMethod(
+            detector_name=detector_name,
+            threshold=threshold,
+            config=config,
         )
-    except Exception as e:
-        raise ValueError(
-            f"Something broke when creating the detector {detector_name}. You might have passed an invalid parameter. Exception:{e}"
-        )
+    else:
+        try:
+            detector_instance = DetectionFactory.get_detector(
+                GUARDRAIL_CATEGORY_MAPPING[detector_type],
+                detector_name,
+                **config,
+            )
+        except Exception as e:
+            raise ValueError(
+                f"Something broke when creating the detector {detector_name}. "
+                f"You might have passed an invalid parameter. Exception:{e}"
+            )
     if max_batch_concurrency is not None:
         detector_instance.max_batch_concurrency = max_batch_concurrency
     return detector_instance
