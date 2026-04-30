@@ -24,8 +24,10 @@ into the ``(hit, data)`` tuple the pipeline expects.
 
 Usage in config parser:
     Instead of instantiating ``PIHFMbert(**kwargs)``, instantiate
-    ``RemoteDetectionMethod(detector_name="pi_mbert", threshold=0.5)``.
-    The guard pipeline treats it identically.
+    ``RemoteDetectionMethod(detector_name="prompt-injection-mbert",
+    threshold=0.5)``. The guard pipeline treats it identically. Use
+    dome's canonical detector names from ``vijil_dome/detectors/__init__.py``;
+    the inference server registers handlers under the same strings.
 """
 
 from __future__ import annotations
@@ -40,8 +42,10 @@ from vijil_dome.types import DomePayload
 
 logger = logging.getLogger(__name__)
 
-# Shared dispatcher singleton — one HTTP client for all remote detectors.
-# Initialized lazily on first use.
+# Shared dispatcher singleton across all RemoteDetectionMethod instances.
+# Initialized lazily on first use. Note: the dispatcher currently spins
+# up a fresh httpx.AsyncClient per request (no connection pooling) — a
+# follow-up PR will add a long-lived AsyncClient on this singleton.
 _dispatcher: RemoteDetectorDispatcher | None = None
 
 

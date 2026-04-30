@@ -36,13 +36,24 @@ from typing import Any
 from pydantic import BaseModel, Field
 
 
+# Resource bounds for the wire format. The server enforces these at
+# request-validation time so a single client can't tie up the GPU pool
+# with an unbounded detector list or megabyte-sized inputs. Keep these
+# in sync with detection-server/detection_api.py on the inference repo.
+_MAX_DETECTORS_PER_REQUEST = 50
+_MAX_INPUT_TEXT_CHARS = 64_000
+_MAX_CONTEXT_TEXT_CHARS = 256_000
+
+
 class DetectorInvocation(BaseModel):
     """A single detector to run on the input text.
 
     Attributes:
         detector_name: Registry name matching the detector implementation
-            on the inference server (e.g., ``pi_mbert``, ``pii_presidio``,
-            ``gpt_oss_safeguard``).
+            on the inference server. Use dome's canonical names from
+            ``vijil_dome/detectors/__init__.py`` (e.g.,
+            ``prompt-injection-mbert``, ``privacy-presidio``,
+            ``policy-gpt-oss-safeguard``).
         config: Detector-specific parameters. Passed through to the
             detector's ``detect()`` method. Common keys include
             ``hub_name``, ``model_name``, ``entity_types``.
@@ -56,18 +67,24 @@ class DetectRequest(BaseModel):
     """Batch detection request — one or more detectors on the same input.
 
     Attributes:
-        detectors: List of detectors to run. Each is dispatched
+        detectors: List of detectors to run (0..50). Each is dispatched
             independently on the server; results are returned in the
-            same order.
+            same order. The upper bound prevents a single client from
+            exhausting the GPU pool with an unbounded detector list.
+            An empty list is permitted (returns an empty results list).
         input_text: The text to analyze (user prompt or agent response).
+            Bounded at 64K characters; longer inputs should be chunked
+            client-side.
         context_text: Optional prior conversation context. Used by
             detectors that need dialogue history (e.g., hallucination
             detection compares response against context).
     """
 
-    detectors: list[DetectorInvocation]
-    input_text: str
-    context_text: str | None = None
+    detectors: list[DetectorInvocation] = Field(
+        ..., max_length=_MAX_DETECTORS_PER_REQUEST,
+    )
+    input_text: str = Field(..., max_length=_MAX_INPUT_TEXT_CHARS)
+    context_text: str | None = Field(default=None, max_length=_MAX_CONTEXT_TEXT_CHARS)
 
 
 class DetectorResult(BaseModel):

@@ -21,7 +21,9 @@ Each detector returns scores based on simple heuristic rules —
 not real model inference, but enough to validate the thin client
 pipeline end-to-end.
 
-Usage:
+Usage (requires fastapi + uvicorn — installed via Poetry's dev group;
+``pip install fastapi uvicorn`` is enough for ad-hoc runs):
+
     python -m vijil_dome.detectors.inference_stub          # port 9100
     python -m vijil_dome.detectors.inference_stub --port 9200
 
