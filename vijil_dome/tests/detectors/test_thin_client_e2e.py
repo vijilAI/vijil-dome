@@ -82,6 +82,19 @@ def stub_server():
         os.environ.pop("DOME_INFERENCE_URL", None)
     remote_method._dispatcher = None
     server.should_exit = True
+    # Join the server thread so it doesn't outlive the test module and
+    # cause port-in-use flakiness or warnings in larger test suites.
+    # The thread is daemonic, so a hung shutdown won't block process
+    # exit, but we want a clean teardown when uvicorn cooperates.
+    thread.join(timeout=3.0)
+    if thread.is_alive():
+        # Don't fail the suite; uvicorn occasionally takes longer to
+        # release accept loops on some platforms. Surface as a warning.
+        import warnings
+        warnings.warn(
+            "Stub server thread did not stop within 3s of should_exit",
+            stacklevel=2,
+        )
 
 
 # ---------------------------------------------------------------------------

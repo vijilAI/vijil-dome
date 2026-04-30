@@ -13,7 +13,7 @@
 | **Overview** | Refactor Dome from a heavyweight library (2 GB with torch, transformers, presidio, litellm) into a thin client (~5 MB) that calls a unified inference server for all model-based detection. Locally executed detectors (regex, keyword, heuristic) stay in-process. Touches vijil-dome (client refactor) and vijil-inference (Ray Serve deployment). |
 | **Architecture decisions** | Split detectors into local (4) and remote (11). Replace litellm with direct httpx calls. Host ML classifiers and Python detectors on Ray Serve alongside vLLM for LLM models. Single `/v1/detect` API contract for all remote detectors. |
 | **Data flow** | Agent → Dome client → local detectors (in-process) + remote detectors (httpx POST to inference server) → aggregate verdicts → block/pass decision. |
-| **Success criteria** | `pip install vijil-dome[lite]` has no torch/transformers/presidio/litellm. All 18 detectors produce identical verdicts. Payments agent code-mode bundle < 10 MB. |
+| **Success criteria** | `pip install vijil-dome (no extras)` has no torch/transformers/presidio/litellm. All 18 detectors produce identical verdicts. Payments agent code-mode bundle < 10 MB. |
 
 ---
 
@@ -25,7 +25,7 @@ The inference server already hosts most of these models (pi-mbert, toxicity-mber
 
 ## Objective
 
-A Dome thin client that an agent can import with `pip install vijil-dome[lite]` in under 10 seconds, with all model-based detection delegated to the inference server. Local detectors (regex, keywords, secret scanning) stay in-process. The inference server runs all 11 model-based detectors behind a unified API.
+A Dome thin client that an agent can import with `pip install vijil-dome (no extras)` in under 10 seconds, with all model-based detection delegated to the inference server. Local detectors (regex, keywords, secret scanning) stay in-process. The inference server runs all 11 model-based detectors behind a unified API.
 
 ## Design Principles
 

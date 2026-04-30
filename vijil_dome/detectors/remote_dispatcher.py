@@ -54,6 +54,21 @@ _DEFAULT_TIMEOUT = 30.0
 _DEFAULT_RETRIES = 1
 
 
+def _parse_env_number(name, default, cast):
+    """Read a numeric env var, falling back to default on missing/empty/invalid."""
+    raw = os.environ.get(name, "").strip()
+    if not raw:
+        return default
+    try:
+        return cast(raw)
+    except (ValueError, TypeError):
+        logger.warning(
+            "RemoteDetectorDispatcher: invalid %s=%r; using default %r",
+            name, raw, default,
+        )
+        return default
+
+
 class RemoteDetectorDispatcher:
     """Dispatch detection requests to the inference server via httpx.
 
@@ -86,15 +101,18 @@ class RemoteDetectorDispatcher:
             self._timeout = timeout
         else:
             # Guard against empty-string env var (DOME_INFERENCE_TIMEOUT="" in
-            # k8s manifests, shell exports). float("")/int("") raise; treat
-            # blank-or-missing as "use the default".
-            raw_timeout = os.environ.get("DOME_INFERENCE_TIMEOUT", "").strip()
-            self._timeout = float(raw_timeout) if raw_timeout else _DEFAULT_TIMEOUT
+            # k8s manifests, shell exports) and non-numeric values like "30s".
+            # float("")/int("") and float("30s") raise ValueError; treat any
+            # of those as "use the default" with a warning.
+            self._timeout = _parse_env_number(
+                "DOME_INFERENCE_TIMEOUT", _DEFAULT_TIMEOUT, float,
+            )
         if retries is not None:
             self._retries = retries
         else:
-            raw_retries = os.environ.get("DOME_INFERENCE_RETRIES", "").strip()
-            self._retries = int(raw_retries) if raw_retries else _DEFAULT_RETRIES
+            self._retries = _parse_env_number(
+                "DOME_INFERENCE_RETRIES", _DEFAULT_RETRIES, int,
+            )
 
     @property
     def is_configured(self) -> bool:
@@ -121,7 +139,7 @@ class RemoteDetectorDispatcher:
         if not self._url:
             logger.warning(
                 "RemoteDetectorDispatcher: DOME_INFERENCE_URL not set, "
-                "returning empty results for %d detectors",
+                "returning error results (is_flagged=False) for %d detectors",
                 len(detectors),
             )
             return self._error_results(detectors, "DOME_INFERENCE_URL not configured")
@@ -153,6 +171,20 @@ class RemoteDetectorDispatcher:
 
                 resp.raise_for_status()
                 response = DetectResponse.model_validate(resp.json())
+
+                # Contract: server returns one result per requested detector,
+                # in the same order. If that's violated, callers would
+                # silently misattribute scores to the wrong detector. Fail
+                # the request rather than emit wrong data.
+                if len(response.results) != len(detectors):
+                    last_error = (
+                        f"Server returned {len(response.results)} results "
+                        f"for {len(detectors)} detectors (contract violation)"
+                    )
+                    logger.error(
+                        "RemoteDetectorDispatcher: %s", last_error,
+                    )
+                    return self._error_results(detectors, last_error)
 
                 elapsed = (time.monotonic() - start) * 1000
                 logger.info(
