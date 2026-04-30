@@ -125,59 +125,47 @@ def _run_detector(invocation: DetectorInvocation, input_text: str, context_text:
     name = invocation.detector_name
     threshold = invocation.config.get("threshold", 0.5)
 
-    # Route to appropriate heuristic
-    if name in ("prompt-injection-deberta", "prompt-injection-mbert", "pi_mbert", "pi_deberta"):
+    # LLM-detector → semantic category (matches inference#30 server)
+    _LLM_CATEGORIES = {
+        "security-llm": "security",
+        "moderation-prompt-engineering": "moderation",
+        "hallucination-llm": "hallucination",
+        "fact-check-llm": "fact-check",
+        "generic-llm": "generic",
+        "policy-gpt-oss-safeguard": "policy",
+    }
+
+    # Route to appropriate heuristic. Names match dome's canonical
+    # registry and the inference server's @register_detector decorators.
+    if name in ("prompt-injection-mbert",
+                "prompt-injection-deberta-v3-base",
+                "prompt-injection-deberta-finetuned-11122024"):
         score = _score_patterns(input_text, _PI_PATTERNS)
         category = "prompt_injection"
         details: dict[str, Any] = {}
-    elif name in ("toxicity-deberta", "toxicity-mbert"):
+    elif name in ("moderation-mbert", "moderation-deberta"):
         score = _score_patterns(input_text, _TOXIC_PATTERNS)
-        category = "toxicity"
+        category = "moderation"
         details = {}
-    elif name in ("pii-presidio",):
+    elif name == "privacy-presidio":
         score, details = _detect_pii(input_text)
-        category = "pii"
-    elif name in ("stereotype-eeoc-fast",):
+        category = "privacy"
+    elif name == "stereotype-eeoc-fast":
         score = _score_patterns(input_text, _STEREOTYPE_PATTERNS)
         category = "stereotype"
         details = {}
-    elif name in ("prompt-harmfulness-fast",):
+    elif name == "prompt-harmfulness-fast":
         score = _score_patterns(input_text, _HARMFUL_PATTERNS)
         category = "prompt_harmfulness"
         details = {}
-    elif name in ("jailbreak-heuristics",):
-        score = _score_patterns(input_text, _PI_PATTERNS)  # reuse PI patterns
-        category = "jailbreak"
-        details = {}
-    elif name in ("hhem-hallucination", "factcheck-roberta"):
-        # Hallucination: low score unless context is missing
-        score = 0.3 if context_text else 0.1
-        category = "hallucination"
-        details = {}
-    elif name in ("security-llm", "moderation-llm", "privacy-llm", "integrity-llm",
-                   "generic-llm", "policy-llm", "gpt_oss_safeguard"):
+    elif name in _LLM_CATEGORIES:
         # LLM-based: combine multiple pattern sets
         pi_score = _score_patterns(input_text, _PI_PATTERNS)
         toxic_score = _score_patterns(input_text, _TOXIC_PATTERNS)
         harmful_score = _score_patterns(input_text, _HARMFUL_PATTERNS)
         score = max(pi_score, toxic_score, harmful_score)
-        category = name.replace("-llm", "").replace("_", " ")
+        category = _LLM_CATEGORIES[name]
         details = {"model": "stub", "reasoning": "heuristic pattern match"}
-    elif name in ("moderations-oai-api",):
-        toxic_score = _score_patterns(input_text, _TOXIC_PATTERNS)
-        harmful_score = _score_patterns(input_text, _HARMFUL_PATTERNS)
-        score = max(toxic_score, harmful_score)
-        category = "moderation"
-        details = {}
-    elif name in ("embedding-similarity",):
-        score = 0.1  # always low — no reference to compare against
-        category = "similarity"
-        details = {}
-    elif name in ("secret-detector",):
-        # Check for API key patterns
-        score = 0.9 if re.search(_PII_PATTERNS["API_KEY"], input_text) else 0.0
-        category = "secrets"
-        details = {}
     else:
         # Unknown detector — return safe with a warning
         latency = (time.monotonic() - start) * 1000
@@ -232,21 +220,28 @@ async def health() -> dict[str, str]:
 
 @app.get("/v1/detectors")
 async def list_detectors() -> dict[str, list[str]]:
-    """List available detectors in this stub server."""
+    """List available detectors in this stub server.
+
+    Mirrors the canonical set the real inference server (vijil-inference#30)
+    advertises. Mode (``stub`` vs production) is reported by ``/health``.
+    """
     return {
         "detectors": [
-            "prompt-injection-deberta", "prompt-injection-mbert",
-            "toxicity-deberta", "toxicity-mbert",
-            "pii-presidio",
-            "stereotype-eeoc-fast", "prompt-harmfulness-fast",
-            "jailbreak-heuristics",
-            "hhem-hallucination", "factcheck-roberta",
-            "security-llm", "moderation-llm", "privacy-llm",
-            "integrity-llm", "generic-llm", "policy-llm",
-            "moderations-oai-api",
-            "embedding-similarity",
+            "prompt-injection-mbert",
+            "prompt-injection-deberta-v3-base",
+            "prompt-injection-deberta-finetuned-11122024",
+            "moderation-mbert",
+            "moderation-deberta",
+            "stereotype-eeoc-fast",
+            "prompt-harmfulness-fast",
+            "privacy-presidio",
+            "security-llm",
+            "moderation-prompt-engineering",
+            "hallucination-llm",
+            "fact-check-llm",
+            "generic-llm",
+            "policy-gpt-oss-safeguard",
         ],
-        "mode": "stub",
     }
 
 
