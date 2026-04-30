@@ -8137,4 +8137,4 @@ trust-cli = ["cryptography", "httpx", "typer"]
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.11,<3.14"
-content-hash = "d5459786aa1b8eec7f65996ab8666d56b1eaec61b73530468d1796321e69e8a5"
+content-hash = "bb143233b32ead048be8a5442bcd139f6aac3b2852731af3403e3152f8246f08"

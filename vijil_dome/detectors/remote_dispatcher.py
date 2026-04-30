@@ -74,16 +74,27 @@ class RemoteDetectorDispatcher:
         timeout: float | None = None,
         retries: int | None = None,
     ) -> None:
-        self._url = (
-            inference_url
-            or os.environ.get("DOME_INFERENCE_URL", "").strip()
-        )
-        self._timeout = timeout or float(
-            os.environ.get("DOME_INFERENCE_TIMEOUT", str(_DEFAULT_TIMEOUT))
-        )
-        self._retries = retries if retries is not None else int(
-            os.environ.get("DOME_INFERENCE_RETRIES", str(_DEFAULT_RETRIES))
-        )
+        # Use `is not None` so caller-supplied falsy values (timeout=0.0,
+        # retries=0, inference_url="") are honored exactly. `.strip()`
+        # both branches so whitespace-only configuration always reads
+        # as "not configured" instead of producing invalid request URLs.
+        if inference_url is not None:
+            self._url = inference_url.strip()
+        else:
+            self._url = os.environ.get("DOME_INFERENCE_URL", "").strip()
+        if timeout is not None:
+            self._timeout = timeout
+        else:
+            # Guard against empty-string env var (DOME_INFERENCE_TIMEOUT="" in
+            # k8s manifests, shell exports). float("")/int("") raise; treat
+            # blank-or-missing as "use the default".
+            raw_timeout = os.environ.get("DOME_INFERENCE_TIMEOUT", "").strip()
+            self._timeout = float(raw_timeout) if raw_timeout else _DEFAULT_TIMEOUT
+        if retries is not None:
+            self._retries = retries
+        else:
+            raw_retries = os.environ.get("DOME_INFERENCE_RETRIES", "").strip()
+            self._retries = int(raw_retries) if raw_retries else _DEFAULT_RETRIES
 
     @property
     def is_configured(self) -> bool:

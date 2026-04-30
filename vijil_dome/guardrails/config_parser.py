@@ -16,7 +16,7 @@
 
 from vijil_dome.guardrails import Guard, Guardrail
 from vijil_dome.detectors.methods import *  # noqa: F403
-from vijil_dome.detectors import DetectionCategory, DetectionFactory
+from vijil_dome.detectors import DetectionCategory, DetectionFactory, DetectionMethod
 from vijil_dome.detectors.methods.remote_method import RemoteDetectionMethod
 from vijil_dome.detectors.remote_dispatcher import RemoteDetectorDispatcher
 import toml
@@ -35,31 +35,28 @@ GUARDRAIL_CATEGORY_MAPPING = {
 }
 
 # Detectors that require model weights or LLM calls — routed to the
-# inference server when DOME_INFERENCE_URL is set. Detectors NOT in this
-# set always run locally (they're pure Python: regex, keywords, etc.).
+# inference server (vijil-inference#30) when DOME_INFERENCE_URL is set.
+# Names match dome's canonical registry (vijil_dome/detectors/__init__.py)
+# and the @register_detector strings on the inference server. The
+# server-side contract test asserts both sides hold the same set.
 REMOTE_DETECTORS: set[str] = {
-    # ML classifiers (torch + transformers)
-    "prompt-injection-deberta",
+    # Transformer classifiers
     "prompt-injection-mbert",
-    "toxicity-deberta",
-    "toxicity-mbert",
+    "prompt-injection-deberta-v3-base",
+    "prompt-injection-deberta-finetuned-11122024",
+    "moderation-mbert",
+    "moderation-deberta",
     "stereotype-eeoc-fast",
     "prompt-harmfulness-fast",
-    "factcheck-roberta",
-    "hhem-hallucination",
-    "jailbreak-heuristics",
     # PII (presidio + spacy)
-    "pii-presidio",
-    # LLM-based detectors (litellm)
+    "privacy-presidio",
+    # LLM-based detectors
     "security-llm",
-    "moderation-llm",
-    "privacy-llm",
-    "integrity-llm",
+    "moderation-prompt-engineering",
+    "hallucination-llm",
+    "fact-check-llm",
     "generic-llm",
-    "policy-llm",
-    "moderations-oai-api",
-    # Embeddings
-    "embedding-similarity",
+    "policy-gpt-oss-safeguard",
 }
 
 EARLY_EXIT = "early-exit"
@@ -81,12 +78,13 @@ def _should_use_remote(detector_name: str) -> bool:
 
 def create_detector_for_guard(
     detector_name: str, detector_type: str, detector_config_dict: dict
-):
+) -> DetectionMethod:
     if detector_type not in GUARDRAIL_CATEGORY_MAPPING:
         raise ValueError(f"Invalid detector type encountered: {detector_type}")
     config = dict(detector_config_dict)
     max_batch_concurrency = config.pop("max_batch_concurrency", None)
 
+    detector_instance: DetectionMethod
     # Route to inference server when available
     if _should_use_remote(detector_name):
         threshold = config.pop("threshold", 0.5)

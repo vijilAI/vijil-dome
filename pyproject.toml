@@ -30,9 +30,9 @@ toml = "^0.10.2"
 nest-asyncio = "^1.6.0"
 
 # --- Deps used by local detectors and Dome internals ---
-# These are required for full local mode but not for thin client.
-# Moving them to optional would be a breaking change for existing users,
-# so they stay in core for now. The [lite] extra is the opt-in thin path.
+# Required for the local-mode detectors today. Moving them to optional
+# would break existing installs, so they stay in core for now. Future
+# work: split a true thin-client distribution that drops these.
 openai = ">=1.93.2"
 numpy = "^2.1.0"
 scipy = "^1.16.0"
@@ -128,8 +128,9 @@ test = [
     "pytest-asyncio"
 ]
 
-[dependency-groups]
-dev = [
-    "fastapi (>=0.136.1,<0.137.0)",
-    "uvicorn (>=0.46.0,<0.47.0)"
-]
+# Dev deps for the thin-client e2e stub server. Test files import these
+# (vijil_dome/detectors/inference_stub.py uses fastapi; the e2e test
+# spins it up with uvicorn). Not shipped to end users.
+[tool.poetry.group.dev.dependencies]
+fastapi = "^0.136.1"
+uvicorn = "^0.46.0"

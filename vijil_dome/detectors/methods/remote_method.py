@@ -87,15 +87,19 @@ class RemoteDetectionMethod(DetectionMethod):
 
         Returns:
             Tuple of (hit: bool, data: dict) matching the DetectionMethod
-            contract. ``data`` includes ``response_string``, ``score``,
-            and ``detector_name``.
+            contract. ``data`` always includes ``response_string``,
+            ``score``, and ``detector_name`` so downstream tracing can
+            attribute the result regardless of which return path fires.
         """
         dispatcher = _get_dispatcher()
         input_text = dome_input.query_string
 
+        # Per detection_api.py contract: thresholds apply client-side.
+        # Don't include self._threshold in the payload; the server returns
+        # raw scores and this class compares against the threshold below.
         invocation = DetectorInvocation(
             detector_name=self._detector_name,
-            config={**self._config, "threshold": self._threshold},
+            config=dict(self._config),
         )
 
         # Context text: use response field if available (output guard scenario)
@@ -109,7 +113,11 @@ class RemoteDetectionMethod(DetectionMethod):
 
         if not results:
             logger.warning("RemoteDetectionMethod: no results for %s", self._detector_name)
-            return (False, {"response_string": input_text, "score": 0.0})
+            return (False, {
+                "response_string": input_text,
+                "score": 0.0,
+                "detector_name": self._detector_name,
+            })
 
         result = results[0]
 
@@ -121,6 +129,7 @@ class RemoteDetectionMethod(DetectionMethod):
             return (False, {
                 "response_string": input_text,
                 "score": 0.0,
+                "detector_name": self._detector_name,
                 "error": result.error,
             })
 
