@@ -205,8 +205,10 @@ async def detect(request: DetectRequest) -> JSONResponse:
     start = time.monotonic()
 
     # Flatten DomePayload to (input_text, prompt_text) at the dispatch
-    # boundary. input_text is what flat-text detectors consume; prompt_text
-    # is the upstream context for response-scoring detectors.
+    # boundary. Mirror of inference-server/server.py:detect — see the
+    # KNOWN FIDELITY GAP note there about prompt-harmfulness-fast and
+    # stereotype-eeoc-fast (deferred to a follow-up; this stub adopts
+    # the same flatten so behavior matches the real server).
     input_text = request.payload.query_string
     prompt_text = request.payload.prompt if request.payload.response else None
 

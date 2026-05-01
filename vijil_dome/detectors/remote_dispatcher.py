@@ -168,6 +168,27 @@ class RemoteDetectorDispatcher:
                     )
                     continue
 
+                # 4xx is not retryable — it's a contract violation
+                # (payload too large, schema drift, bad detector name).
+                # Surface the server's error message verbatim so the
+                # caller can distinguish "field exceeds bound" from a
+                # generic timeout/connection failure. Without this
+                # branch, raise_for_status() would raise into the
+                # `except Exception` block and the user sees an opaque
+                # "Unexpected error" — exactly the silent-failure
+                # signature this branch eliminates.
+                if 400 <= resp.status_code < 500:
+                    last_error = (
+                        f"Client error {resp.status_code}: {resp.text[:500]}"
+                    )
+                    logger.error(
+                        "RemoteDetectorDispatcher: %s — payload may exceed "
+                        "field bounds or schemas have drifted between dome "
+                        "and the inference server",
+                        last_error,
+                    )
+                    return self._error_results(detectors, last_error)
+
                 resp.raise_for_status()
                 response = DetectResponse.model_validate(resp.json())
 

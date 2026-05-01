@@ -39,7 +39,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from vijil_dome.types import DomePayload
 
@@ -47,9 +47,18 @@ from vijil_dome.types import DomePayload
 # Resource bounds for the wire format. The server enforces these at
 # request-validation time so a single client can't tie up the GPU pool
 # with an unbounded detector list or megabyte-sized inputs. Keep these
-# in sync with detection-server/detection_api.py on the inference repo.
+# in sync with detection-server/detection_api.py on the inference repo —
+# both sides assert these constants in their test suites so a one-sided
+# change becomes a tripwire rather than silent wire-format drift.
 _MAX_DETECTORS_PER_REQUEST = 50
-_MAX_PAYLOAD_FIELD_CHARS = 64_000
+# text and response are bounded tighter (single user input or single
+# agent response). prompt allows long upstream conversation history fed
+# to context-aware detectors (hallucination, fact-check). Asymmetry
+# matches the old input_text=64K / context_text=256K pre-DomePayload
+# schema and preserves prior capacity for context-heavy callers.
+_MAX_TEXT_CHARS = 64_000
+_MAX_PROMPT_CHARS = 256_000
+_MAX_RESPONSE_CHARS = 64_000
 
 
 class DetectorInvocation(BaseModel):
@@ -66,8 +75,21 @@ class DetectorInvocation(BaseModel):
             ``hub_name``, ``model_name``, ``entity_types``.
     """
 
+    # Reject unknown fields. The two detection_api.py mirrors must stay
+    # in lockstep; silently dropping unknown fields would let one side
+    # add a field the other can't see and produce a zero-result success
+    # path (the cardinal-sin pattern from AUDITING.md).
+    model_config = ConfigDict(extra="forbid")
+
     detector_name: str
     config: dict[str, Any] = Field(default_factory=dict)
+
+
+_PAYLOAD_FIELD_BOUNDS: dict[str, int] = {
+    "text": _MAX_TEXT_CHARS,
+    "prompt": _MAX_PROMPT_CHARS,
+    "response": _MAX_RESPONSE_CHARS,
+}
 
 
 class DetectRequest(BaseModel):
@@ -79,12 +101,16 @@ class DetectRequest(BaseModel):
             same order. The upper bound prevents a single client from
             exhausting the GPU pool with an unbounded detector list.
             An empty list is permitted (returns an empty results list).
-        payload: The ``DomePayload`` to analyze. Each field
-            (``text``, ``prompt``, ``response``) is bounded at 64K chars;
-            longer inputs should be chunked client-side. ``DomePayload``'s
-            own validator requires at least one of the three to be set
-            and forbids mixing ``text`` with ``prompt``/``response``.
+        payload: The ``DomePayload`` to analyze. ``text`` and ``response``
+            are bounded at 64K chars each; ``prompt`` is bounded at 256K
+            to accommodate long upstream conversation history fed to
+            context-aware detectors (hallucination, fact-check).
+            ``DomePayload``'s own validator requires at least one of the
+            three to be set and forbids mixing ``text`` with
+            ``prompt``/``response``.
     """
+
+    model_config = ConfigDict(extra="forbid")
 
     detectors: list[DetectorInvocation] = Field(
         ..., max_length=_MAX_DETECTORS_PER_REQUEST,
@@ -96,11 +122,11 @@ class DetectRequest(BaseModel):
         # DomePayload doesn't bound field lengths (it's a runtime envelope).
         # Bound them here at the wire boundary so a single client can't
         # send a megabyte-sized field and tie up the inference server.
-        for field_name in ("text", "prompt", "response"):
+        for field_name, max_chars in _PAYLOAD_FIELD_BOUNDS.items():
             value = getattr(self.payload, field_name, None)
-            if value is not None and len(value) > _MAX_PAYLOAD_FIELD_CHARS:
+            if value is not None and len(value) > max_chars:
                 raise ValueError(
-                    f"payload.{field_name} exceeds {_MAX_PAYLOAD_FIELD_CHARS} "
+                    f"payload.{field_name} exceeds {max_chars} "
                     f"chars ({len(value)})"
                 )
         return self
