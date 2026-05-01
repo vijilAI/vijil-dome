@@ -14,31 +14,28 @@
 #
 # vijil and vijil-dome are trademarks owned by Vijil Inc.
 
-"""Stub inference server for local testing of the Dome thin client.
+"""Stub inference server for the thin-client end-to-end tests.
 
-Implements POST /v1/detect with realistic detector responses.
-Each detector returns scores based on simple heuristic rules —
-not real model inference, but enough to validate the thin client
-pipeline end-to-end.
+Test-only scaffolding — never imported by the shipped library. Implements
+``POST /v1/detect`` with heuristic scoring (regex pattern matches, not
+real model inference) so ``test_thin_client_e2e.py`` can drive the full
+Dome → dispatcher → HTTP → server → result pipeline without spinning up
+the real inference stack.
 
-Usage (requires fastapi + uvicorn — installed via Poetry's dev group;
-``pip install fastapi uvicorn`` is enough for ad-hoc runs):
+Used as a sibling import from ``test_thin_client_e2e.py``::
 
-    python -m vijil_dome.detectors.inference_stub          # port 9100
-    python -m vijil_dome.detectors.inference_stub --port 9200
+    from _stub_server import app
 
-Then set DOME_INFERENCE_URL=http://localhost:9100 and run Dome.
+Requires fastapi + uvicorn (Poetry dev group).
 """
 
 from __future__ import annotations
 
-import argparse
 import logging
 import re
 import time
 from typing import Any
 
-import uvicorn
 from fastapi import FastAPI
 from fastapi.responses import JSONResponse
 
@@ -245,13 +242,3 @@ async def list_detectors() -> dict[str, list[str]]:
             "policy-gpt-oss-safeguard",
         ],
     }
-
-
-if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Vijil Inference Stub Server")
-    parser.add_argument("--port", type=int, default=9100, help="Port (default: 9100)")
-    args = parser.parse_args()
-
-    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
-    logger.info("Starting stub inference server on port %d", args.port)
-    uvicorn.run(app, host="0.0.0.0", port=args.port)

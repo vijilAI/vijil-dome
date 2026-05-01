@@ -41,7 +41,7 @@ _STUB_PORT = 9199  # Use unusual port to avoid collisions
 @pytest.fixture(scope="module", autouse=True)
 def stub_server():
     """Start the stub inference server for the test module."""
-    from vijil_dome.detectors.inference_stub import app
+    from _stub_server import app
 
     config = uvicorn.Config(app, host="127.0.0.1", port=_STUB_PORT, log_level="warning")
     server = uvicorn.Server(config)
