@@ -96,7 +96,6 @@ class RemoteDetectionMethod(DetectionMethod):
             attribute the result regardless of which return path fires.
         """
         dispatcher = _get_dispatcher()
-        input_text = dome_input.query_string
 
         # Per detection_api.py contract: thresholds apply client-side.
         # Don't include self._threshold in the payload; the server returns
@@ -106,19 +105,22 @@ class RemoteDetectionMethod(DetectionMethod):
             config=dict(self._config),
         )
 
-        # Context text: use response field if available (output guard scenario)
-        context_text = dome_input.prompt if dome_input.response else None
-
+        # Send the DomePayload over the wire intact — no client-side
+        # flattening. Detectors that need prompt+response separately can
+        # read them on the server; flat-text detectors use payload.query_string.
         results = await dispatcher.detect(
-            input_text=input_text,
+            payload=dome_input,
             detectors=[invocation],
-            context_text=context_text,
         )
+
+        # response_string for the dome trace falls back to the flattened
+        # payload when the detector doesn't override it (no hit path).
+        flat_text = dome_input.query_string
 
         if not results:
             logger.warning("RemoteDetectionMethod: no results for %s", self._detector_name)
             return (False, {
-                "response_string": input_text,
+                "response_string": flat_text,
                 "score": 0.0,
                 "detector_name": self._detector_name,
             })
@@ -131,14 +133,14 @@ class RemoteDetectionMethod(DetectionMethod):
                 self._detector_name, result.error,
             )
             return (False, {
-                "response_string": input_text,
+                "response_string": flat_text,
                 "score": 0.0,
                 "detector_name": self._detector_name,
                 "error": result.error,
             })
 
         hit = result.score >= self._threshold
-        response_string = self._blocked_response if hit else input_text
+        response_string = self._blocked_response if hit else flat_text
 
         return (hit, {
             "response_string": response_string,

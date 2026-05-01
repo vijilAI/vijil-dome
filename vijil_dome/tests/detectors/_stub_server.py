@@ -118,8 +118,14 @@ def _detect_pii(text: str) -> tuple[float, dict[str, Any]]:
     return score, {"entity_types": found_types, "count": len(found_types)}
 
 
-def _run_detector(invocation: DetectorInvocation, input_text: str, context_text: str | None) -> DetectorResult:
-    """Run a single stub detector and return a result."""
+def _run_detector(invocation: DetectorInvocation, input_text: str, prompt_text: str | None) -> DetectorResult:
+    """Run a single stub detector and return a result.
+
+    ``input_text`` is the flattened query string (``payload.query_string``).
+    ``prompt_text`` is ``payload.prompt`` when ``payload.response`` is also
+    set — used by detectors that need the upstream input as context
+    (hallucination, fact-check) separate from the response under review.
+    """
     start = time.monotonic()
     name = invocation.detector_name
     threshold = invocation.config.get("threshold", 0.5)
@@ -198,8 +204,14 @@ async def detect(request: DetectRequest) -> JSONResponse:
     """Batch detection endpoint — matches the inference server contract."""
     start = time.monotonic()
 
+    # Flatten DomePayload to (input_text, prompt_text) at the dispatch
+    # boundary. input_text is what flat-text detectors consume; prompt_text
+    # is the upstream context for response-scoring detectors.
+    input_text = request.payload.query_string
+    prompt_text = request.payload.prompt if request.payload.response else None
+
     results = [
-        _run_detector(inv, request.input_text, request.context_text)
+        _run_detector(inv, input_text, prompt_text)
         for inv in request.detectors
     ]
 

@@ -21,8 +21,14 @@ Both the Dome thin client and the inference server import these types
 to guarantee schema compatibility.
 
 The API is designed for batching: a single ``POST /v1/detect`` request
-can invoke multiple detectors on the same input text, reducing HTTP
+can invoke multiple detectors on the same payload, reducing HTTP
 round-trips when Dome runs 3-5 detectors per guard pass.
+
+The wire payload is a ``DomePayload`` — the same envelope Dome uses
+internally — so callers don't lose the prompt/response distinction at
+the client boundary. Detectors that operate on a single string read
+``payload.query_string``; detectors that need the prompt and response
+separately (hallucination, fact-check) can read the fields directly.
 
 Thresholds are applied CLIENT-SIDE by Dome from the agent's dome.yaml
 config. The server returns raw scores so the decision boundary stays
@@ -33,7 +39,9 @@ from __future__ import annotations
 
 from typing import Any
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
+
+from vijil_dome.types import DomePayload
 
 
 # Resource bounds for the wire format. The server enforces these at
@@ -41,12 +49,11 @@ from pydantic import BaseModel, Field
 # with an unbounded detector list or megabyte-sized inputs. Keep these
 # in sync with detection-server/detection_api.py on the inference repo.
 _MAX_DETECTORS_PER_REQUEST = 50
-_MAX_INPUT_TEXT_CHARS = 64_000
-_MAX_CONTEXT_TEXT_CHARS = 256_000
+_MAX_PAYLOAD_FIELD_CHARS = 64_000
 
 
 class DetectorInvocation(BaseModel):
-    """A single detector to run on the input text.
+    """A single detector to run on the payload.
 
     Attributes:
         detector_name: Registry name matching the detector implementation
@@ -64,7 +71,7 @@ class DetectorInvocation(BaseModel):
 
 
 class DetectRequest(BaseModel):
-    """Batch detection request — one or more detectors on the same input.
+    """Batch detection request — one or more detectors on the same payload.
 
     Attributes:
         detectors: List of detectors to run (0..50). Each is dispatched
@@ -72,19 +79,31 @@ class DetectRequest(BaseModel):
             same order. The upper bound prevents a single client from
             exhausting the GPU pool with an unbounded detector list.
             An empty list is permitted (returns an empty results list).
-        input_text: The text to analyze (user prompt or agent response).
-            Bounded at 64K characters; longer inputs should be chunked
-            client-side.
-        context_text: Optional prior conversation context. Used by
-            detectors that need dialogue history (e.g., hallucination
-            detection compares response against context).
+        payload: The ``DomePayload`` to analyze. Each field
+            (``text``, ``prompt``, ``response``) is bounded at 64K chars;
+            longer inputs should be chunked client-side. ``DomePayload``'s
+            own validator requires at least one of the three to be set
+            and forbids mixing ``text`` with ``prompt``/``response``.
     """
 
     detectors: list[DetectorInvocation] = Field(
         ..., max_length=_MAX_DETECTORS_PER_REQUEST,
     )
-    input_text: str = Field(..., max_length=_MAX_INPUT_TEXT_CHARS)
-    context_text: str | None = Field(default=None, max_length=_MAX_CONTEXT_TEXT_CHARS)
+    payload: DomePayload
+
+    @model_validator(mode="after")
+    def _validate_payload_field_bounds(self) -> "DetectRequest":
+        # DomePayload doesn't bound field lengths (it's a runtime envelope).
+        # Bound them here at the wire boundary so a single client can't
+        # send a megabyte-sized field and tie up the inference server.
+        for field_name in ("text", "prompt", "response"):
+            value = getattr(self.payload, field_name, None)
+            if value is not None and len(value) > _MAX_PAYLOAD_FIELD_CHARS:
+                raise ValueError(
+                    f"payload.{field_name} exceeds {_MAX_PAYLOAD_FIELD_CHARS} "
+                    f"chars ({len(value)})"
+                )
+        return self
 
 
 class DetectorResult(BaseModel):
