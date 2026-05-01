@@ -47,6 +47,7 @@ from vijil_dome.detectors.detection_api import (
     DetectorInvocation,
     DetectorResult,
 )
+from vijil_dome.types import DomePayload
 
 logger = logging.getLogger(__name__)
 
@@ -121,16 +122,15 @@ class RemoteDetectorDispatcher:
 
     async def detect(
         self,
-        input_text: str,
+        payload: DomePayload | str,
         detectors: list[DetectorInvocation],
-        context_text: str | None = None,
     ) -> list[DetectorResult]:
         """Send a batch detection request to the inference server.
 
         Args:
-            input_text: Text to analyze.
+            payload: The ``DomePayload`` to analyze. A bare ``str`` is
+                accepted for ergonomics and coerced to ``DomePayload(text=...)``.
             detectors: List of detectors to invoke.
-            context_text: Optional conversation context.
 
         Returns:
             List of DetectorResult in the same order as ``detectors``.
@@ -146,8 +146,7 @@ class RemoteDetectorDispatcher:
 
         request = DetectRequest(
             detectors=detectors,
-            input_text=input_text,
-            context_text=context_text,
+            payload=DomePayload.coerce(payload),
         )
 
         start = time.monotonic()
