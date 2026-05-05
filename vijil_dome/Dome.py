@@ -306,6 +306,64 @@ class Dome:
             **(self._s3_aws_kwargs or {}),
         )
 
+    @staticmethod
+    def _equivalent_s3_configs(
+        local: Optional[Dict], remote: Dict
+    ) -> bool:
+        """Return True if *remote* should be treated as unchanged vs *local*.
+
+        Mirrors :func:`vijil_dome.utils.config_loader.config_has_changed` equality
+        semantics (``id`` fast path when both present, else deep dict compare).
+        """
+        if local is None:
+            return False
+        remote_id = remote.get("id")
+        local_id = local.get("id")
+        if remote_id is not None and local_id is not None:
+            return bool(remote_id == local_id)
+        return remote == local
+
+    def reload_from_s3_if_changed(self) -> bool:
+        """Reload guardrails from S3 when the remote config differs from the local snapshot.
+
+        Only available for instances created via :meth:`create_from_s3`. Performs a
+        fresh S3 read (``cache_ttl_seconds=0``), rebuilds guardrails when the config
+        changed, and updates the stored snapshot on the instance.
+
+        Returns:
+            ``True`` if guardrails were rebuilt from a new config, ``False`` if the
+            remote config was equivalent to the current snapshot.
+
+        Raises:
+            ValueError: If the instance was not created from S3.
+        """
+        if self._s3_bucket is None or self._s3_key is None:
+            raise ValueError(
+                "reload_from_s3_if_changed() is only available for Dome instances "
+                "created via Dome.create_from_s3()."
+            )
+        remote = load_dome_config_from_s3(
+            bucket=self._s3_bucket,
+            key=self._s3_key,
+            cache_dir=self._s3_cache_dir,
+            cache_ttl_seconds=0,
+            **(self._s3_aws_kwargs or {}),
+        )
+        if self._equivalent_s3_configs(self._s3_config_dict, remote):
+            return False
+        self._init_from_dome_config(create_dome_config(remote))
+        self._s3_config_dict = remote
+        return True
+
+    def apply_config_dict(self, config_dict: Dict) -> None:
+        """Replace guardrails from a Dome configuration dictionary.
+
+        Used after loading config from S3 (or elsewhere) without requiring
+        :meth:`create_from_s3`. Does not update S3 origin metadata used by
+        :meth:`reload_from_s3_if_changed`.
+        """
+        self._init_from_dome_config(create_dome_config(config_dict))
+
     def _init_from_dome_config(self, dome_config: DomeConfig):
         self.input_guardrail = dome_config.input_guardrail
         self.output_guardrail = dome_config.output_guardrail

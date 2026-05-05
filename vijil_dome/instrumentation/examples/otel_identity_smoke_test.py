@@ -37,6 +37,27 @@ def _auth_header(token: str) -> dict:
     return {"Authorization": f"{method} {token}"}
 
 
+def _append_otlp_signal_path(base_endpoint: str, signal_path: str) -> str:
+    base = base_endpoint.strip()
+    if base.endswith("/"):
+        return f"{base}{signal_path}"
+    return f"{base}/{signal_path}"
+
+
+def _resolved_signal_url(base: str, per_signal_env: str, rel_path: str) -> str:
+    per = os.getenv(per_signal_env, "").strip()
+    if per:
+        return per
+    return _append_otlp_signal_path(base, rel_path)
+
+
+def _collector_auth_headers() -> dict:
+    token = os.getenv("OTEL_COLLECTOR_TOKEN", "").strip()
+    if not token:
+        return {}
+    return _auth_header(token)
+
+
 def _build_resource(agent_id: str | None, team_id: str | None, user_id: str | None) -> Resource:
     attributes = {
         "service.name": "vijil-dome-telemetry-smoke",
@@ -53,32 +74,35 @@ def _build_resource(agent_id: str | None, team_id: str | None, user_id: str | No
 
 
 def _create_log_handler(resource: Resource) -> tuple[LoggerProvider, LoggingHandler]:
-    endpoint = _required_env("DOME_LOGS_COLLECTOR_ENDPOINT")
-    token = _required_env("DOME_LOGS_COLLECTOR_TOKEN")
+    base = _required_env("DOME_OTEL_EXPORTER_OTLP_ENDPOINT")
+    endpoint = _resolved_signal_url(base, "OTEL_EXPORTER_OTLP_LOGS_ENDPOINT", "v1/logs")
+    headers = _collector_auth_headers()
 
     provider = LoggerProvider(resource=resource)
     set_logger_provider(provider)
-    exporter = OTLPLogExporter(endpoint=endpoint, headers=_auth_header(token))
+    exporter = OTLPLogExporter(endpoint=endpoint, headers=headers)
     provider.add_log_record_processor(BatchLogRecordProcessor(exporter))
     return provider, LoggingHandler(level=logging.INFO, logger_provider=provider)
 
 
 def _create_tracer(resource: Resource):
-    endpoint = _required_env("DOME_TRACES_COLLECTOR_ENDPOINT")
-    token = _required_env("DOME_TRACES_COLLECTOR_TOKEN")
+    base = _required_env("DOME_OTEL_EXPORTER_OTLP_ENDPOINT")
+    endpoint = _resolved_signal_url(base, "OTEL_EXPORTER_OTLP_TRACES_ENDPOINT", "v1/traces")
+    headers = _collector_auth_headers()
 
     provider = TracerProvider(resource=resource)
     trace.set_tracer_provider(provider)
-    exporter = OTLPSpanExporter(endpoint=endpoint, headers=_auth_header(token))
+    exporter = OTLPSpanExporter(endpoint=endpoint, headers=headers)
     provider.add_span_processor(BatchSpanProcessor(exporter))
     return provider, provider.get_tracer("vijil-dome-telemetry-smoke")
 
 
 def _create_meter(resource: Resource):
-    endpoint = _required_env("DOME_METRICS_COLLECTOR_ENDPOINT")
-    token = _required_env("DOME_METRICS_COLLECTOR_TOKEN")
+    base = _required_env("DOME_OTEL_EXPORTER_OTLP_ENDPOINT")
+    endpoint = _resolved_signal_url(base, "OTEL_EXPORTER_OTLP_METRICS_ENDPOINT", "v1/metrics")
+    headers = _collector_auth_headers()
 
-    exporter = OTLPMetricExporter(endpoint=endpoint, headers=_auth_header(token))
+    exporter = OTLPMetricExporter(endpoint=endpoint, headers=headers)
     reader = PeriodicExportingMetricReader(exporter)
     provider = MeterProvider(metric_readers=[reader], resource=resource)
     metrics.set_meter_provider(provider)
