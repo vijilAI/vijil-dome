@@ -52,7 +52,12 @@ class ListEvaluator(Evaluator):
         mode = config.get("match_mode", "exact")
         case_sensitive = config.get("case_sensitive", True)
         logic = config.get("logic", "any")
-        negate = config.get("negate", False)
+        # AC compat: match_on="no_match" is equivalent to negate=True
+        match_on = config.get("match_on")
+        if match_on is not None:
+            negate = match_on == "no_match"
+        else:
+            negate = config.get("negate", False)
 
         results = [_check_one(text, v, mode, case_sensitive) for v in values]
 

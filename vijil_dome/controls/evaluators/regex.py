@@ -19,18 +19,35 @@ except ImportError:
 
     _USING_RE2 = False
 
-_FLAG_MAP = {
+_FLAG_SHORT = {
     "i": _re.IGNORECASE,
     "m": _re.MULTILINE,
     "s": _re.DOTALL,
 }
 
+_FLAG_LONG = {
+    "ignorecase": _re.IGNORECASE,
+    "multiline": _re.MULTILINE,
+    "dotall": _re.DOTALL,
+}
 
-def _compile(pattern: str, flags_str: str = "") -> Any:
-    flags = 0
-    for ch in flags_str:
-        flags |= _FLAG_MAP.get(ch, 0)
-    return _re.compile(pattern, flags)
+
+def _resolve_flags(flags: str | list[str] | None) -> int:
+    """Accept short string (``"i"``), long-name list (``["IGNORECASE"]``), or None."""
+    if not flags:
+        return 0
+    result = 0
+    if isinstance(flags, str):
+        for ch in flags:
+            result |= _FLAG_SHORT.get(ch, 0)
+    else:
+        for name in flags:
+            result |= _FLAG_LONG.get(name.lower(), 0)
+    return result
+
+
+def _compile(pattern: str, flags: str | list[str] | None = None) -> Any:
+    return _re.compile(pattern, _resolve_flags(flags))
 
 
 @register_evaluator("regex")
@@ -48,7 +65,7 @@ class RegexEvaluator(Evaluator):
         self, value: Any, config: dict[str, Any]
     ) -> EvaluatorResult:
         text = str(value) if value is not None else ""
-        flags_str = config.get("flags", "")
+        flags = config.get("flags")
         negate = config.get("negate", False)
 
         patterns: list[str] = []
@@ -61,7 +78,7 @@ class RegexEvaluator(Evaluator):
             return EvaluatorResult(matched=False, message="No pattern provided")
 
         for pattern in patterns:
-            compiled = _compile(pattern, flags_str)
+            compiled = _compile(pattern, flags)
             if compiled.search(text):
                 matched = not negate
                 return EvaluatorResult(

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 
 class Step(BaseModel):
@@ -52,6 +52,16 @@ class ConditionNode(BaseModel):
     or_: list[ConditionNode] | None = Field(None, alias="or")
     not_: ConditionNode | None = Field(None, alias="not")
 
+    @model_validator(mode="before")
+    @classmethod
+    def _normalize_selector(cls, data: Any) -> Any:
+        """Accept AgentControl's ``{"path": "output"}`` selector format."""
+        if isinstance(data, dict):
+            sel = data.get("selector")
+            if isinstance(sel, dict) and "path" in sel:
+                data = {**data, "selector": sel["path"]}
+        return data
+
     def is_leaf(self) -> bool:
         return self.selector is not None or self.evaluator is not None
 
@@ -82,14 +92,16 @@ class ControlAction(BaseModel):
 class Control(BaseModel):
     """A single policy control definition."""
 
-    model_config = {"populate_by_name": True}
+    model_config = {"populate_by_name": True, "extra": "ignore"}
 
     name: str
+    description: str | None = None
     enabled: bool = True
     scope: ControlScope = Field(default_factory=ControlScope)
     condition: ConditionNode
     action: ControlAction
     priority: int = 100
+    tags: list[str] = Field(default_factory=list)
 
 
 class ControlMatch(BaseModel):

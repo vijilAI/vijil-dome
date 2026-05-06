@@ -35,27 +35,62 @@ def register_evaluator(name: str):
     return decorator
 
 
+_EVALUATOR_ALIASES: dict[str, str] = {
+    "json": "json_schema",
+}
+
+_UNSUPPORTED_EVALUATORS: dict[str, str] = {
+    "sql": (
+        "The 'sql' evaluator from AgentControl is not available in Dome. "
+        "Consider using the 'regex' evaluator for pattern-based SQL checks, "
+        "or register a custom evaluator with @register_evaluator('sql')."
+    ),
+    "galileo.luna2": (
+        "The 'galileo.luna2' evaluator is a proprietary Galileo integration "
+        "from AgentControl and is not available in Dome. "
+        "Use 'dome:toxicity-deberta' or 'dome:prompt-harmfulness-fast' for similar coverage."
+    ),
+    "cisco.ai_defense": (
+        "The 'cisco.ai_defense' evaluator is a proprietary Cisco integration "
+        "from AgentControl and is not available in Dome. "
+        "Use Dome's built-in detectors (dome:prompt-injection-*, dome:toxicity-*) for similar coverage."
+    ),
+    "budget": (
+        "The 'budget' evaluator from AgentControl (token/cost tracking) "
+        "is not available in Dome. Register a custom evaluator with "
+        "@register_evaluator('budget') to implement budget tracking."
+    ),
+}
+
+
 def resolve_evaluator(name: str) -> Evaluator:
     """Resolve an evaluator by name.
 
     Resolution order:
 
-    1. Built-in evaluators (regex, list, json_schema, cel)
-    2. Custom registered evaluators (``@register_evaluator``)
-    3. Dome bridge (``dome:*`` namespace) — wraps any Dome detector
+    1. Aliases (e.g. ``"json"`` → ``"json_schema"``)
+    2. Built-in evaluators (regex, list, json_schema, cel)
+    3. Custom registered evaluators (``@register_evaluator``)
+    4. Dome bridge (``dome:*`` namespace) — wraps any Dome detector
+    5. Known unsupported evaluators — clear error with alternatives
 
     Raises :class:`ValueError` if the evaluator is not found.
     """
     _ensure_builtins_loaded()
 
-    if name in _evaluator_registry:
-        return _evaluator_registry[name]()
+    resolved_name = _EVALUATOR_ALIASES.get(name, name)
+
+    if resolved_name in _evaluator_registry:
+        return _evaluator_registry[resolved_name]()
 
     # Dome bridge: names starting with "dome:" e.g. "dome:prompt-injection-deberta-v3-base"
-    if name.startswith("dome:"):
+    if resolved_name.startswith("dome:"):
         from vijil_dome.controls.evaluators.dome_bridge import DomeBridgeEvaluator
 
-        return DomeBridgeEvaluator(detector_name=name[5:])
+        return DomeBridgeEvaluator(detector_name=resolved_name[5:])
+
+    if name in _UNSUPPORTED_EVALUATORS:
+        raise ValueError(_UNSUPPORTED_EVALUATORS[name])
 
     available = sorted(_evaluator_registry.keys())
     raise ValueError(

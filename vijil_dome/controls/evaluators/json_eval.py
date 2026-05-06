@@ -43,10 +43,23 @@ class JsonSchemaEvaluator(Evaluator):
             )
 
         schema = config.get("schema")
+        # AC compat: json_schema key and field_constraints use inverted
+        # semantics — match on VIOLATION (constraint broken → trigger),
+        # not on valid.  Our "schema" key matches on valid by default.
+        ac_mode = False
+        if schema is None:
+            schema = config.get("json_schema")
+            if schema is not None:
+                ac_mode = True
+        if schema is None:
+            schema = _build_schema_from_constraints(config)
+            if schema is not None:
+                ac_mode = True
         if schema is None:
             return EvaluatorResult(matched=False, message="No schema provided")
 
-        negate = config.get("negate", False)
+        negate_default = ac_mode
+        negate = config.get("negate", negate_default)
 
         try:
             _jsonschema.validate(instance=value, schema=schema)
@@ -65,3 +78,40 @@ class JsonSchemaEvaluator(Evaluator):
             message="; ".join(errors) if errors else "Schema valid",
             metadata={"valid": valid, "errors": errors},
         )
+
+
+def _build_schema_from_constraints(
+    config: dict[str, Any],
+) -> dict[str, Any] | None:
+    """Build a JSON Schema from AC-style ``field_constraints``.
+
+    AC's ``field_constraints`` maps field names to constraint dicts with
+    keys like ``type``, ``min``, ``max``, ``enum``, ``min_length``,
+    ``max_length``.
+    """
+    field_constraints = config.get("field_constraints")
+    if not field_constraints:
+        return None
+
+    properties: dict[str, Any] = {}
+    for field, constraints in field_constraints.items():
+        prop: dict[str, Any] = {}
+        if "type" in constraints:
+            prop["type"] = constraints["type"]
+        if "min" in constraints:
+            prop["minimum"] = constraints["min"]
+        if "max" in constraints:
+            prop["maximum"] = constraints["max"]
+        if "enum" in constraints:
+            prop["enum"] = constraints["enum"]
+        if "min_length" in constraints:
+            prop["minLength"] = constraints["min_length"]
+        if "max_length" in constraints:
+            prop["maxLength"] = constraints["max_length"]
+        properties[field] = prop
+
+    return {
+        "type": "object",
+        "properties": properties,
+        "required": list(properties.keys()),
+    }
