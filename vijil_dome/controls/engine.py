@@ -59,7 +59,7 @@ class ControlEngine:
 
         if p.suffix in (".yaml", ".yml"):
             try:
-                import yaml
+                import yaml  # type: ignore[import-untyped]
             except ImportError as exc:
                 raise ImportError(
                     "PyYAML is required to load YAML policy files. "

@@ -137,7 +137,7 @@ def _build_step(
     args: tuple,
     kwargs: dict,
     *,
-    step_type: str,
+    step_type: Literal["tool", "llm"],
     step_name: str,
     input_mapper: Callable[..., Any] | None,
     context_mapper: Callable[..., dict[str, Any] | None] | None,
