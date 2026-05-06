@@ -9,6 +9,7 @@ from vijil_dome.controls.models import (
     ConditionNode,
     Control,
     ControlAction,
+    ControlScope,
     EvaluatorRef,
     SteeringContext,
 )
@@ -19,7 +20,7 @@ def _deny_on_pattern(
     stage: str | None = None,
     selector: str = "input",
 ) -> Control:
-    scope = {"stages": [stage]} if stage else {}
+    scope = ControlScope(stages=[stage]) if stage else ControlScope()  # type: ignore[list-item]
     return Control(
         name="test-deny",
         scope=scope,
@@ -246,7 +247,7 @@ class TestInputExtraction:
         assert result == "tell me a joke"
 
     def test_well_known_name_input(self):
-        def fn(input: str, ctx: dict = None): ...
+        def fn(input: str, ctx: dict | None = None): ...
         result = _extract_input(fn, ("data",), {}, "llm")
         assert result == "data"
 
@@ -384,7 +385,7 @@ class TestExplicitMappers:
             engine=engine,
             context_mapper=lambda msg, user=None: {"user_role": user or "guest"},
         )
-        async def admin_action(msg: str, user: str = None) -> str:
+        async def admin_action(msg: str, user: str | None = None) -> str:
             return "done"
 
         # Guest should be denied

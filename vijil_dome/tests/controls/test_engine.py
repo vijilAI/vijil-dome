@@ -1,5 +1,9 @@
 """Tests for the control engine."""
 
+from __future__ import annotations
+
+from typing import Literal
+
 import pytest
 
 from vijil_dome.controls.engine import ControlEngine
@@ -15,7 +19,7 @@ from vijil_dome.controls.models import (
 
 
 def _step(
-    type_: str = "llm",
+    type_: Literal["tool", "llm"] = "llm",
     name: str = "chat",
     input_: dict | str | None = None,
     output_: dict | str | None = None,
@@ -37,17 +41,19 @@ def _deny_control(
     evaluator_config: dict | None = None,
     scope: dict | None = None,
     priority: int = 100,
-    on_error: str = "fail_closed",
+    on_error: Literal["fail_open", "fail_closed"] = "fail_closed",
 ) -> Control:
     return Control(
         name=name,
         scope=ControlScope.model_validate(scope or {}),
-        condition=ConditionNode(
-            selector=selector,
-            evaluator=EvaluatorRef(
-                name=evaluator_name,
-                config=evaluator_config or {"pattern": ".*"},
-            ),
+        condition=ConditionNode.model_validate(
+            {
+                "selector": selector,
+                "evaluator": {
+                    "name": evaluator_name,
+                    "config": evaluator_config or {"pattern": ".*"},
+                },
+            }
         ),
         action=ControlAction(decision="deny", message=f"Denied by {name}", on_error=on_error),
         priority=priority,
