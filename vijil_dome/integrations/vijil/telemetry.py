@@ -29,6 +29,20 @@ if TYPE_CHECKING:
 from vijil_dome.guardrails import GuardrailResult, GuardResult
 
 
+def _safe_set_attribute(span: "Span", key: str, value: object) -> None:
+    """Set a span attribute only when the value is not None.
+
+    Inlined here (rather than imported from instrumentation.tracing) to
+    avoid pulling in the OpenTelemetry SDK at import time. This module
+    must remain importable without the opentelemetry extra installed.
+    """
+    if value is None:
+        return
+    setter = getattr(span, "set_attribute", None)
+    if setter is not None:
+        setter(key, value)
+
+
 def _set_darwin_span_attributes(
     span: "Span",
     result: Union[GuardrailResult, GuardResult],
@@ -45,18 +59,18 @@ def _set_darwin_span_attributes(
         team_id: Team ID for multi-tenant filtering.
     """
     if team_id:
-        span.set_attribute("team.id", team_id)
+        _safe_set_attribute(span, "team.id", str(team_id))
     if agent_id:
-        span.set_attribute("agent.id", agent_id)
+        _safe_set_attribute(span, "agent.id", str(agent_id))
     if user_id:
-        span.set_attribute("user.id", user_id)
+        _safe_set_attribute(span, "user.id", str(user_id))
 
     is_flagged = (
         result.flagged if isinstance(result, GuardrailResult) else result.triggered
     )
-    span.set_attribute("detection.label", "flagged" if is_flagged else "clean")
-    span.set_attribute("detection.score", result.detection_score)
+    _safe_set_attribute(span, "detection.label", "flagged" if is_flagged else "clean")
+    _safe_set_attribute(span, "detection.score", float(result.detection_score or 0.0))
 
     if result.triggered_methods:
-        span.set_attribute("detection.methods", result.triggered_methods)
-        span.set_attribute("detection.method", result.triggered_methods[0])
+        _safe_set_attribute(span, "detection.methods", result.triggered_methods)
+        _safe_set_attribute(span, "detection.method", result.triggered_methods[0])
