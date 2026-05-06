@@ -1,7 +1,5 @@
 """Tests for control data models."""
 
-import pytest
-
 from vijil_dome.controls.models import (
     ConditionNode,
     Control,

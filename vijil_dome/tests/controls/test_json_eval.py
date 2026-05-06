@@ -2,6 +2,8 @@
 
 import pytest
 
+from vijil_dome.controls.evaluators import resolve_evaluator
+
 try:
     import jsonschema  # noqa: F401
 
@@ -12,8 +14,6 @@ except ImportError:
 pytestmark = pytest.mark.skipif(
     not _HAS_JSONSCHEMA, reason="jsonschema not installed"
 )
-
-from vijil_dome.controls.evaluators import resolve_evaluator
 
 
 class TestJsonSchemaEvaluator:

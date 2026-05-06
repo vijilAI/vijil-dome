@@ -8,7 +8,6 @@ from vijil_dome.controls.models import (
     Control,
     ControlAction,
     EvaluatorRef,
-    SteeringContext,
 )
 from vijil_dome.core import VijilDome
 

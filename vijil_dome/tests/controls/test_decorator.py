@@ -2,7 +2,7 @@
 
 import pytest
 
-from vijil_dome.controls.decorator import control, _extract_input, _safe_bind
+from vijil_dome.controls.decorator import control, _extract_input
 from vijil_dome.controls.engine import ControlEngine
 from vijil_dome.controls.errors import ControlSteerError, ControlViolationError
 from vijil_dome.controls.models import (

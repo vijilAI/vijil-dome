@@ -11,6 +11,7 @@ import logging
 from collections.abc import Iterator
 from typing import Any
 
+from vijil_dome.trust.adapters.base import BaseAdapter, register_adapter
 from vijil_dome.trust.runtime import TrustRuntime
 
 logger = logging.getLogger(__name__)
@@ -206,8 +207,6 @@ def secure_graph(
 # ------------------------------------------------------------------
 # Adapter registry
 # ------------------------------------------------------------------
-
-from vijil_dome.trust.adapters.base import BaseAdapter, register_adapter
 
 
 @register_adapter("langgraph")

@@ -13,6 +13,8 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+from vijil_dome.trust.adapters.base import BaseAdapter, register_adapter
+
 from vijil_dome.trust.constraints import AgentConstraints
 from vijil_dome.trust.runtime import TrustRuntime
 
@@ -205,8 +207,6 @@ def secure_agent(
 # ------------------------------------------------------------------
 # Adapter registry
 # ------------------------------------------------------------------
-
-from vijil_dome.trust.adapters.base import BaseAdapter, register_adapter
 
 
 @register_adapter("adk")
