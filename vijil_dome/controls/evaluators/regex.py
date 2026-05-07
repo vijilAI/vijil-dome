@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 import logging
 from typing import Any
 
@@ -11,24 +12,24 @@ from vijil_dome.controls.evaluators.base import Evaluator, EvaluatorResult
 logger = logging.getLogger(__name__)
 
 try:
-    import re2 as _re
+    import re2 as _re_engine
 
     _USING_RE2 = True
 except ImportError:
-    import re as _re  # type: ignore[no-redef]
-
+    _re_engine = re  # type: ignore[assignment]
     _USING_RE2 = False
 
+# Flag constants always come from stdlib re (re2 packages may not expose them)
 _FLAG_SHORT = {
-    "i": _re.IGNORECASE,
-    "m": _re.MULTILINE,
-    "s": _re.DOTALL,
+    "i": re.IGNORECASE,
+    "m": re.MULTILINE,
+    "s": re.DOTALL,
 }
 
 _FLAG_LONG = {
-    "ignorecase": _re.IGNORECASE,
-    "multiline": _re.MULTILINE,
-    "dotall": _re.DOTALL,
+    "ignorecase": re.IGNORECASE,
+    "multiline": re.MULTILINE,
+    "dotall": re.DOTALL,
 }
 
 
@@ -47,7 +48,10 @@ def _resolve_flags(flags: str | list[str] | None) -> int:
 
 
 def _compile(pattern: str, flags: str | list[str] | None = None) -> Any:
-    return _re.compile(pattern, _resolve_flags(flags))
+    resolved = _resolve_flags(flags)
+    # re2 doesn't accept stdlib re flags — fall back to re when flags are set
+    engine = re if (_USING_RE2 and resolved) else _re_engine
+    return engine.compile(pattern, resolved)
 
 
 @register_evaluator("regex")
