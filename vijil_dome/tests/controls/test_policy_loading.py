@@ -105,6 +105,24 @@ class TestLoadFromYamlFile:
         assert result.action == "deny"
 
 
+class TestLoadFromUnsupportedFile:
+    def test_toml_rejected(self, tmp_path):
+        path = tmp_path / "policy.toml"
+        path.write_text("[controls]")
+
+        engine = ControlEngine()
+        with pytest.raises(ValueError, match="Unsupported policy file format"):
+            engine.load_controls_from_file(str(path))
+
+    def test_txt_rejected(self, tmp_path):
+        path = tmp_path / "policy.txt"
+        path.write_text("{}")
+
+        engine = ControlEngine()
+        with pytest.raises(ValueError, match="Unsupported policy file format"):
+            engine.load_controls_from_file(str(path))
+
+
 class TestDecoratorWithPolicyFile:
     @pytest.mark.asyncio
     async def test_control_with_json_policy_file(self, tmp_path):

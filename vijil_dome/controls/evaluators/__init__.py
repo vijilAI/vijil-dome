@@ -116,12 +116,12 @@ def _ensure_builtins_loaded() -> None:
 
     try:
         import vijil_dome.controls.evaluators.json_eval  # noqa: F401
-    except Exception:
+    except ImportError:
         pass  # jsonschema may not be installed
 
     try:
         import vijil_dome.controls.evaluators.expr  # noqa: F401
-    except Exception:
+    except ImportError:
         pass  # cel-python may not be installed
 
     _builtins_loaded = True

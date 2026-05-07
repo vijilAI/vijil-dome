@@ -225,6 +225,15 @@ class TestControlDecoratorWithPolicy:
 # ------------------------------------------------------------------
 
 
+class TestDecoratorValidation:
+    def test_engine_and_policy_raises(self):
+        engine = ControlEngine([_deny_on_pattern()])
+        with pytest.raises(ValueError, match="Cannot specify both"):
+            @control(engine=engine, policy=[{"name": "x", "condition": {"selector": "input", "evaluator": {"name": "regex", "config": {"pattern": ".*"}}}, "action": {"decision": "deny"}}])
+            async def chat(msg: str) -> str:
+                return msg
+
+
 class TestInputExtraction:
     def test_single_param_returns_value_directly(self):
         def fn(msg: str): ...

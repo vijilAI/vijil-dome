@@ -71,6 +71,13 @@ def control(
         ``step.context``.  When ``None``, context is empty.
     """
 
+    if engine is not None and policy is not None:
+        raise ValueError(
+            "Cannot specify both 'engine' and 'policy'. "
+            "Use 'engine' for a pre-configured ControlEngine, "
+            "or 'policy' to create one from definitions."
+        )
+
     def decorator(fn: Callable) -> Callable:
         _engine = _resolve_engine(engine, policy)
         _step_name = step_name or fn.__name__

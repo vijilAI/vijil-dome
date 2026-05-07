@@ -112,15 +112,15 @@ def _ensure_adapters_loaded() -> None:
 
     try:
         import vijil_dome.trust.adapters.langgraph  # noqa: F401
-    except Exception:
+    except ImportError:
         pass
     try:
         import vijil_dome.trust.adapters.adk  # noqa: F401
-    except Exception:
+    except ImportError:
         pass
     try:
         import vijil_dome.trust.adapters.strands  # noqa: F401
-    except Exception:
+    except ImportError:
         pass
 
     _adapters_loaded = True

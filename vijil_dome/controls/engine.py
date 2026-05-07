@@ -75,8 +75,13 @@ class ControlEngine:
                     "Install with: pip install 'vijil-dome[controls]'"
                 ) from exc
             data = yaml.safe_load(text)
-        else:
+        elif p.suffix == ".json":
             data = json.loads(text)
+        else:
+            raise ValueError(
+                f"Unsupported policy file format: '{p.suffix}'. "
+                f"Use .json, .yaml, or .yml."
+            )
 
         controls_list = data if isinstance(data, list) else data.get("controls", [])
         self.load_controls(controls_list)
