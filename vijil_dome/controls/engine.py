@@ -10,6 +10,14 @@ import time
 from pathlib import Path
 from typing import Any, Literal
 
+try:
+    import re2 as _re2_engine
+
+    _SCOPE_HAS_RE2 = True
+except ImportError:
+    _re2_engine = None  # type: ignore[assignment]
+    _SCOPE_HAS_RE2 = False
+
 from vijil_dome.controls.models import (
     ConditionNode,
     Control,
@@ -172,7 +180,7 @@ class ControlEngine:
         if scope.step_names is not None and step.name not in scope.step_names:
             return False
         if scope.step_name_regex is not None:
-            if not re.search(scope.step_name_regex, step.name):
+            if not _safe_regex_search(scope.step_name_regex, step.name):
                 return False
 
         return True
@@ -310,6 +318,23 @@ class ControlEngine:
         evaluator = resolve_evaluator(node.evaluator.name)
         result = await evaluator.evaluate(value, node.evaluator.config)
         return result.matched
+
+
+def _safe_regex_search(pattern: str, text: str) -> re.Match[str] | None:
+    """Regex search with ReDoS protection.
+
+    Uses re2 (linear-time) when available, falls back to stdlib re with a
+    warning.
+    """
+    if _SCOPE_HAS_RE2:
+        return _re2_engine.search(pattern, text)
+    logger.warning(
+        "re2 not installed — step_name_regex '%s' uses stdlib re, "
+        "which is vulnerable to ReDoS on adversarial patterns. "
+        "Install google-re2 for linear-time matching.",
+        pattern,
+    )
+    return re.search(pattern, text)
 
 
 def _elapsed_ms(start: float) -> float:

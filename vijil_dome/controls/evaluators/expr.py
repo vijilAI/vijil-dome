@@ -77,18 +77,15 @@ class CelEvaluator(Evaluator):
         ast = env.compile(expression)
         prog = env.program(ast)
 
-        activation = {"value": _to_cel_value(value)}
+        activation: dict[str, Any] = {}
         if isinstance(value, dict):
             for k, v in value.items():
-                if isinstance(k, str):
+                if isinstance(k, str) and k != "value":
                     activation[k] = _to_cel_value(v)
+        activation["value"] = _to_cel_value(value)
 
         result = prog.evaluate(activation)
-
-        if isinstance(result, celtypes.BoolType):
-            matched = bool(result)
-        else:
-            matched = bool(result)
+        matched = bool(result)
 
         return EvaluatorResult(
             matched=matched,

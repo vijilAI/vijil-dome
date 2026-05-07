@@ -49,9 +49,15 @@ def _resolve_flags(flags: str | list[str] | None) -> int:
 
 def _compile(pattern: str, flags: str | list[str] | None = None) -> Any:
     resolved = _resolve_flags(flags)
-    # re2 doesn't accept stdlib re flags — fall back to re when flags are set
-    engine = re if (_USING_RE2 and resolved) else _re_engine
-    return engine.compile(pattern, resolved)
+    if _USING_RE2 and resolved:
+        logger.warning(
+            "re2 does not support stdlib re flags — falling back to "
+            "stdlib re for pattern '%s'. Linear-time ReDoS protection "
+            "is not active for this pattern.",
+            pattern,
+        )
+        return re.compile(pattern, resolved)
+    return _re_engine.compile(pattern, resolved)
 
 
 @register_evaluator("regex")

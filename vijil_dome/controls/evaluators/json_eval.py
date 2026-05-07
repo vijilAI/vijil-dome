@@ -18,6 +18,13 @@ except ImportError:
     _jsonschema = None  # type: ignore[assignment]
     _HAS_JSONSCHEMA = False
 
+try:
+    from referencing import Registry as _Registry
+
+    _EMPTY_REGISTRY = _Registry()
+except ImportError:
+    _EMPTY_REGISTRY = None  # type: ignore[assignment]
+
 
 @register_evaluator("json_schema")
 class JsonSchemaEvaluator(Evaluator):
@@ -62,7 +69,12 @@ class JsonSchemaEvaluator(Evaluator):
         negate = config.get("negate", negate_default)
 
         try:
-            _jsonschema.validate(instance=value, schema=schema)
+            validator_cls = _jsonschema.validators.validator_for(schema)
+            kwargs: dict[str, Any] = {}
+            if _EMPTY_REGISTRY is not None:
+                kwargs["registry"] = _EMPTY_REGISTRY
+            validator = validator_cls(schema, **kwargs)
+            validator.validate(value)
             valid = True
             errors: list[str] = []
         except _jsonschema.ValidationError as exc:
