@@ -48,6 +48,7 @@ class ControlEngine:
             controls or [],
             key=lambda c: c.priority,
         )
+        self._evaluator_cache: dict[str, Any] = {}
 
     @property
     def controls(self) -> list[Control]:
@@ -102,12 +103,13 @@ class ControlEngine:
         deny_controls = [c for c in applicable if c.action.decision == "deny"]
         other_controls = [c for c in applicable if c.action.decision != "deny"]
 
+        step_data = step.model_dump()
         matches: list[ControlMatch] = []
 
         # Phase 1: deny controls with cancel-on-deny
         if deny_controls:
             deny_matches = await self._evaluate_with_cancel_on_deny(
-                deny_controls, step
+                deny_controls, step, step_data
             )
             matches.extend(deny_matches)
             for m in deny_matches:
@@ -122,7 +124,8 @@ class ControlEngine:
         # Phase 2: steer / observe controls in parallel
         if other_controls:
             other_matches = await asyncio.gather(
-                *(self._evaluate_control(c, step) for c in other_controls)
+                *(self._evaluate_control(c, step, step_data)
+                  for c in other_controls)
             )
             matches.extend(other_matches)
 
@@ -190,11 +193,12 @@ class ControlEngine:
     # ------------------------------------------------------------------
 
     async def _evaluate_with_cancel_on_deny(
-        self, controls: list[Control], step: Step
+        self, controls: list[Control], step: Step,
+        step_data: dict[str, Any],
     ) -> list[ControlMatch]:
         tasks: dict[asyncio.Task[ControlMatch], Control] = {}
         for c in controls:
-            task = asyncio.create_task(self._evaluate_control(c, step))
+            task = asyncio.create_task(self._evaluate_control(c, step, step_data))
             tasks[task] = c
 
         results: list[ControlMatch] = []
@@ -244,11 +248,16 @@ class ControlEngine:
     # ------------------------------------------------------------------
 
     async def _evaluate_control(
-        self, control: Control, step: Step
+        self, control: Control, step: Step,
+        step_data: dict[str, Any] | None = None,
     ) -> ControlMatch:
         start = time.monotonic()
+        if step_data is None:
+            step_data = step.model_dump()
         try:
-            triggered = await self._evaluate_condition(control.condition, step)
+            triggered = await self._evaluate_condition(
+                control.condition, step, step_data
+            )
             return ControlMatch(
                 control_name=control.name,
                 triggered=triggered,
@@ -279,45 +288,54 @@ class ControlEngine:
     # ------------------------------------------------------------------
 
     async def _evaluate_condition(
-        self, node: ConditionNode, step: Step
+        self, node: ConditionNode, step: Step,
+        step_data: dict[str, Any],
     ) -> bool:
         if node.is_leaf():
-            return await self._evaluate_leaf(node, step)
+            return await self._evaluate_leaf(node, step, step_data)
 
         if node.and_ is not None:
             results = await asyncio.gather(
-                *(self._evaluate_condition(child, step) for child in node.and_)
+                *(self._evaluate_condition(child, step, step_data)
+                  for child in node.and_)
             )
             return all(results)
 
         if node.or_ is not None:
             results = await asyncio.gather(
-                *(self._evaluate_condition(child, step) for child in node.or_)
+                *(self._evaluate_condition(child, step, step_data)
+                  for child in node.or_)
             )
             return any(results)
 
         if node.not_ is not None:
-            return not await self._evaluate_condition(node.not_, step)
+            return not await self._evaluate_condition(node.not_, step, step_data)
 
         raise ValueError("ConditionNode is neither leaf nor composite")
 
     async def _evaluate_leaf(
-        self, node: ConditionNode, step: Step
+        self, node: ConditionNode, step: Step,
+        step_data: dict[str, Any],
     ) -> bool:
         if node.selector is None or node.evaluator is None:
             raise ValueError(
                 "Leaf condition must have both selector and evaluator"
             )
 
-        value = resolve(step, node.selector)
+        value = resolve(step, node.selector, _step_data=step_data)
         if value is MISSING:
             return False
 
-        from vijil_dome.controls.evaluators import resolve_evaluator
-
-        evaluator = resolve_evaluator(node.evaluator.name)
+        evaluator = self._get_evaluator(node.evaluator.name)
         result = await evaluator.evaluate(value, node.evaluator.config)
         return result.matched
+
+    def _get_evaluator(self, name: str) -> Any:
+        if name not in self._evaluator_cache:
+            from vijil_dome.controls.evaluators import resolve_evaluator
+
+            self._evaluator_cache[name] = resolve_evaluator(name)
+        return self._evaluator_cache[name]
 
 
 def _safe_regex_search(pattern: str, text: str) -> re.Match[str] | None:

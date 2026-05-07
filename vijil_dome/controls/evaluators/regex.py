@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import functools
 import re
 import logging
 from typing import Any
@@ -49,15 +50,20 @@ def _resolve_flags(flags: str | list[str] | None) -> int:
 
 def _compile(pattern: str, flags: str | list[str] | None = None) -> Any:
     resolved = _resolve_flags(flags)
-    if _USING_RE2 and resolved:
+    return _compile_cached(pattern, resolved)
+
+
+@functools.lru_cache(maxsize=256)
+def _compile_cached(pattern: str, resolved_flags: int) -> Any:
+    if _USING_RE2 and resolved_flags:
         logger.warning(
             "re2 does not support stdlib re flags — falling back to "
             "stdlib re for pattern '%s'. Linear-time ReDoS protection "
             "is not active for this pattern.",
             pattern,
         )
-        return re.compile(pattern, resolved)
-    return _re_engine.compile(pattern, resolved)
+        return re.compile(pattern, resolved_flags)
+    return _re_engine.compile(pattern, resolved_flags)
 
 
 @register_evaluator("regex")

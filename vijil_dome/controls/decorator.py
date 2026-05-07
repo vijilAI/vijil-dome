@@ -74,6 +74,7 @@ def control(
     def decorator(fn: Callable) -> Callable:
         _engine = _resolve_engine(engine, policy)
         _step_name = step_name or fn.__name__
+        _sig = inspect.signature(fn)
 
         if asyncio.iscoroutinefunction(fn):
 
@@ -85,6 +86,7 @@ def control(
                     step_name=_step_name,
                     input_mapper=input_mapper,
                     context_mapper=context_mapper,
+                    sig=_sig,
                 )
 
                 pre_result = await _engine.evaluate(step, stage="pre")
@@ -109,6 +111,7 @@ def control(
                     step_name=_step_name,
                     input_mapper=input_mapper,
                     context_mapper=context_mapper,
+                    sig=_sig,
                 )
 
                 pre_result = _engine.evaluate_sync(step, stage="pre")
@@ -141,11 +144,12 @@ def _build_step(
     step_name: str,
     input_mapper: Callable[..., Any] | None,
     context_mapper: Callable[..., dict[str, Any] | None] | None,
+    sig: inspect.Signature | None = None,
 ) -> Step:
     if input_mapper is not None:
         step_input = input_mapper(*args, **kwargs)
     else:
-        step_input = _extract_input(fn, args, kwargs, step_type)
+        step_input = _extract_input(fn, args, kwargs, step_type, sig=sig)
 
     context: dict[str, Any] = {}
     if context_mapper is not None:
@@ -162,7 +166,8 @@ def _build_step(
 
 
 def _extract_input(
-    fn: Callable, args: tuple, kwargs: dict, step_type: str
+    fn: Callable, args: tuple, kwargs: dict, step_type: str,
+    *, sig: inspect.Signature | None = None,
 ) -> Any:
     """Heuristic input extraction from function arguments.
 
@@ -178,7 +183,7 @@ def _extract_input(
       4. Multiple parameters → dict of all (minus self/cls)
       5. Last resort → stringify everything
     """
-    bound = _safe_bind(fn, args, kwargs)
+    bound = _safe_bind(fn, args, kwargs, sig=sig)
     if bound is None:
         return _stringify_fallback(args, kwargs)
 
@@ -211,10 +216,14 @@ def _extract_input(
     return _stringify_fallback(args, kwargs)
 
 
-def _safe_bind(fn: Callable, args: tuple, kwargs: dict) -> dict[str, Any] | None:
+def _safe_bind(
+    fn: Callable, args: tuple, kwargs: dict,
+    *, sig: inspect.Signature | None = None,
+) -> dict[str, Any] | None:
     """Bind args to function signature, return dict or None on failure."""
     try:
-        sig = inspect.signature(fn)
+        if sig is None:
+            sig = inspect.signature(fn)
         bound = sig.bind(*args, **kwargs)
         bound.apply_defaults()
         return dict(bound.arguments)

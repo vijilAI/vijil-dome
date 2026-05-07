@@ -30,7 +30,7 @@ MISSING = _Missing()
 _INDEX_RE = re.compile(r"^([^\[]+)\[(\d+)\]$")
 
 
-def resolve(step: Step, path: str) -> Any:
+def resolve(step: Step, path: str, *, _step_data: dict[str, Any] | None = None) -> Any:
     """Resolve a dot-notation path against a Step.
 
     Supports:
@@ -44,11 +44,15 @@ def resolve(step: Step, path: str) -> Any:
       ``"input.items[0].id"``  → array index access
 
     Returns :data:`MISSING` if the path does not resolve.
-    """
-    if path == "*":
-        return step.model_dump()
 
-    data = step.model_dump()
+    The optional ``_step_data`` parameter accepts a pre-computed
+    ``step.model_dump()`` dict to avoid redundant serialisation when
+    the same step is resolved multiple times.
+    """
+    data = _step_data if _step_data is not None else step.model_dump()
+
+    if path == "*":
+        return data
     segments = path.split(".")
 
     current: Any = data
