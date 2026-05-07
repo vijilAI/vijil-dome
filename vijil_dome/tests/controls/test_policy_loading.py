@@ -105,15 +105,110 @@ class TestLoadFromYamlFile:
         assert result.action == "deny"
 
 
-class TestLoadFromUnsupportedFile:
-    def test_toml_rejected(self, tmp_path):
+class TestLoadFromTomlFile:
+    def test_toml_native_controls(self, tmp_path):
+        """TOML with a [[controls]] array loads like JSON/YAML."""
+        toml_text = """\
+[[controls]]
+name = "block-ssn"
+
+[controls.condition]
+selector = "input"
+
+[controls.condition.evaluator]
+name = "regex"
+
+[controls.condition.evaluator.config]
+pattern = '\\d{3}-\\d{2}-\\d{4}'
+
+[controls.action]
+decision = "deny"
+message = "SSN detected"
+"""
         path = tmp_path / "policy.toml"
-        path.write_text("[controls]")
+        path.write_text(toml_text)
 
         engine = ControlEngine()
-        with pytest.raises(ValueError, match="Unsupported policy file format"):
+        engine.load_controls_from_file(str(path))
+        assert len(engine.controls) == 1
+        assert engine.controls[0].name == "block-ssn"
+
+    def test_toml_dome_guardrail_translation(self, tmp_path):
+        """Legacy Dome [guardrail] TOML is translated to controls."""
+        toml_text = """\
+[guardrail]
+input-guards = ["prompt-injection"]
+
+[prompt-injection]
+type = "security"
+methods = ["prompt-injection-deberta-v3-base"]
+"""
+        path = tmp_path / "guards.toml"
+        path.write_text(toml_text)
+
+        engine = ControlEngine()
+        engine.load_controls_from_file(str(path))
+
+        assert len(engine.controls) == 1
+        ctrl = engine.controls[0]
+        assert ctrl.name == "prompt-injection"
+        assert ctrl.scope.stages == ["pre"]
+        assert ctrl.condition.evaluator.name == "dome:prompt-injection-deberta-v3-base"
+        assert ctrl.action.decision == "deny"
+        assert ctrl.annotations["vijil.ai/source"] == "dome-toml"
+        assert ctrl.annotations["vijil.ai/category"] == "security"
+
+    def test_toml_dome_multi_method_guard(self, tmp_path):
+        """Guard with multiple methods produces OR condition."""
+        toml_text = """\
+[guardrail]
+input-guards = ["security-guard"]
+
+[security-guard]
+type = "security"
+methods = ["prompt-injection-deberta-v3-base", "prompt-injection-mbert"]
+"""
+        path = tmp_path / "multi.toml"
+        path.write_text(toml_text)
+
+        engine = ControlEngine()
+        engine.load_controls_from_file(str(path))
+
+        ctrl = engine.controls[0]
+        assert ctrl.condition.or_ is not None
+        assert len(ctrl.condition.or_) == 2
+
+    def test_toml_dome_output_guard(self, tmp_path):
+        """Output guards get stage=post and selector=output."""
+        toml_text = """\
+[guardrail]
+output-guards = ["toxicity"]
+
+[toxicity]
+type = "moderation"
+methods = ["moderation-deberta"]
+"""
+        path = tmp_path / "output.toml"
+        path.write_text(toml_text)
+
+        engine = ControlEngine()
+        engine.load_controls_from_file(str(path))
+
+        ctrl = engine.controls[0]
+        assert ctrl.scope.stages == ["post"]
+        assert ctrl.condition.selector == "output"
+
+    def test_toml_missing_sections_raises(self, tmp_path):
+        """TOML without 'controls' or 'guardrail' raises ValueError."""
+        path = tmp_path / "empty.toml"
+        path.write_text('[metadata]\nname = "test"\n')
+
+        engine = ControlEngine()
+        with pytest.raises(ValueError, match="must contain either"):
             engine.load_controls_from_file(str(path))
 
+
+class TestLoadFromUnsupportedFile:
     def test_txt_rejected(self, tmp_path):
         path = tmp_path / "policy.txt"
         path.write_text("{}")

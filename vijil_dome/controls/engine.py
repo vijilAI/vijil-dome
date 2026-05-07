@@ -77,14 +77,52 @@ class ControlEngine:
             data = yaml.safe_load(text)
         elif p.suffix == ".json":
             data = json.loads(text)
+        elif p.suffix == ".toml":
+            self._load_from_toml(p, text)
+            return
         else:
             raise ValueError(
                 f"Unsupported policy file format: '{p.suffix}'. "
-                f"Use .json, .yaml, or .yml."
+                f"Use .json, .yaml, .yml, or .toml."
             )
 
         controls_list = data if isinstance(data, list) else data.get("controls", [])
         self.load_controls(controls_list)
+
+    def _load_from_toml(self, path: Path, text: str) -> None:
+        """Load controls from TOML.
+
+        Supports two formats:
+        1. Native control definitions under ``[controls]``
+        2. Legacy Dome guard config under ``[guardrail]``
+        """
+        try:
+            import tomllib
+        except ImportError:
+            try:
+                import tomli as tomllib  # type: ignore[no-redef]
+            except ImportError as exc:
+                raise ImportError(
+                    "Python 3.11+ or tomli is required for TOML policy files."
+                ) from exc
+
+        data = tomllib.loads(text)
+
+        if "controls" in data:
+            controls_list = data["controls"]
+            if isinstance(controls_list, list):
+                self.load_controls(controls_list)
+                return
+
+        if "guardrail" in data:
+            controls = _translate_dome_toml(data)
+            self.load_controls(controls)
+            return
+
+        raise ValueError(
+            f"TOML policy file '{path.name}' must contain either a "
+            f"'controls' list or a 'guardrail' section."
+        )
 
     # ------------------------------------------------------------------
     # Public evaluation API
@@ -362,3 +400,82 @@ def _safe_regex_search(pattern: str, text: str) -> re.Match[str] | None:
 
 def _elapsed_ms(start: float) -> float:
     return round((time.monotonic() - start) * 1000, 3)
+
+
+# ------------------------------------------------------------------
+# Legacy Dome TOML translation
+# ------------------------------------------------------------------
+
+_STAGE_MAP = {
+    "input-guards": "pre",
+    "output-guards": "post",
+}
+
+_CATEGORY_TO_ACTION: dict[str, str] = {
+    "security": "deny",
+    "moderation": "deny",
+    "privacy": "deny",
+    "integrity": "steer",
+    "generic": "observe",
+    "policy": "deny",
+}
+
+
+def _translate_dome_toml(data: dict[str, Any]) -> list[dict[str, Any]]:
+    """Translate a legacy Dome TOML guardrail config into control dicts."""
+    guardrail = data.get("guardrail", {})
+    controls: list[dict[str, Any]] = []
+
+    for guard_list_key, stage in _STAGE_MAP.items():
+        guard_names = guardrail.get(guard_list_key, [])
+        for guard_name in guard_names:
+            guard_cfg = data.get(guard_name, {})
+            category = guard_cfg.get("type", "generic")
+            methods = guard_cfg.get("methods", [])
+
+            if not methods:
+                continue
+
+            if len(methods) == 1:
+                detector_name = methods[0]
+                detector_cfg = guard_cfg.get(detector_name, {})
+                condition: dict[str, Any] = {
+                    "selector": "input" if stage == "pre" else "output",
+                    "evaluator": {
+                        "name": f"dome:{detector_name}",
+                        "config": detector_cfg,
+                    },
+                }
+            else:
+                condition = {
+                    "or": [
+                        {
+                            "selector": "input" if stage == "pre" else "output",
+                            "evaluator": {
+                                "name": f"dome:{m}",
+                                "config": guard_cfg.get(m, {}),
+                            },
+                        }
+                        for m in methods
+                    ]
+                }
+
+            decision = _CATEGORY_TO_ACTION.get(category, "deny")
+            controls.append({
+                "name": guard_name,
+                "scope": {"stages": [stage]},
+                "condition": condition,
+                "action": {
+                    "decision": decision,
+                    "message": guardrail.get(
+                        f"{stage}-blocked-message",
+                        f"Blocked by {guard_name}",
+                    ) if decision == "deny" else None,
+                },
+                "annotations": {
+                    "vijil.ai/source": "dome-toml",
+                    "vijil.ai/category": category,
+                },
+            })
+
+    return controls

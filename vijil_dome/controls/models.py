@@ -115,7 +115,7 @@ class ControlAction(BaseModel):
 class Control(BaseModel):
     """A single policy control definition."""
 
-    model_config = {"populate_by_name": True, "extra": "ignore"}
+    model_config = {"populate_by_name": True, "extra": "allow"}
 
     name: str
     description: str | None = None
@@ -125,6 +125,14 @@ class Control(BaseModel):
     action: ControlAction
     priority: int = 100
     tags: list[str] = Field(default_factory=list)
+    annotations: dict[str, Any] = Field(
+        default_factory=dict,
+        description=(
+            "Vendor and extension metadata. Keys should use reverse-DNS "
+            "form (e.g. 'vijil.ai/trust-delta'). Values are preserved "
+            "verbatim through parse and serialize."
+        ),
+    )
 
 
 class ControlMatch(BaseModel):

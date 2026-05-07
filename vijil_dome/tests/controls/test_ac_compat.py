@@ -275,9 +275,9 @@ class TestACPolicyParsing:
         ctrl = Control.model_validate(AC_BLOCK_SSN)
         assert ctrl.tags == ["pii", "ssn", "output-filter"]
 
-    def test_execution_field_ignored(self):
+    def test_execution_field_preserved_as_extra(self):
         ctrl = Control.model_validate(AC_BLOCK_SSN)
-        assert not hasattr(ctrl, "execution")
+        assert ctrl.model_extra.get("execution") == "server"
 
     def test_composite_selectors_normalized(self):
         ctrl = Control.model_validate(AC_COMPOSITE_AND_NOT)

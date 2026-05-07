@@ -165,6 +165,70 @@ class TestControl:
         assert ctrl.action.steering_context.message == "Require 2FA"
 
 
+class TestControlAnnotations:
+    def test_annotations_roundtrip(self):
+        data = {
+            "name": "annotated",
+            "condition": {
+                "selector": "input",
+                "evaluator": {"name": "regex", "config": {"pattern": ".*"}},
+            },
+            "action": {"decision": "deny"},
+            "annotations": {
+                "vijil.ai/trust-delta": {"dimension": "security", "delta": 0.15},
+                "galileo.com/scoring": "strict",
+            },
+        }
+        ctrl = Control.model_validate(data)
+        assert ctrl.annotations["vijil.ai/trust-delta"]["delta"] == 0.15
+        assert ctrl.annotations["galileo.com/scoring"] == "strict"
+
+        dumped = ctrl.model_dump()
+        assert dumped["annotations"] == data["annotations"]
+
+    def test_annotations_default_empty(self):
+        ctrl = Control(
+            name="no-ann",
+            condition=ConditionNode(
+                selector="input",
+                evaluator=EvaluatorRef(name="regex", config={"pattern": "x"}),
+            ),
+            action=ControlAction(decision="deny"),
+        )
+        assert ctrl.annotations == {}
+
+    def test_annotations_structured_values(self):
+        ctrl = Control.model_validate({
+            "name": "structured",
+            "condition": {
+                "selector": "input",
+                "evaluator": {"name": "regex", "config": {"pattern": "x"}},
+            },
+            "action": {"decision": "deny"},
+            "annotations": {
+                "vendor/nested": {"list": [1, 2, 3], "flag": True, "score": 0.95},
+            },
+        })
+        ann = ctrl.annotations["vendor/nested"]
+        assert ann["list"] == [1, 2, 3]
+        assert ann["flag"] is True
+        assert ann["score"] == 0.95
+
+    def test_unknown_fields_preserved(self):
+        """With extra='allow', unknown top-level fields survive parsing."""
+        data = {
+            "name": "with-extras",
+            "condition": {
+                "selector": "input",
+                "evaluator": {"name": "regex", "config": {"pattern": "x"}},
+            },
+            "action": {"decision": "deny"},
+            "custom_vendor_field": "some-value",
+        }
+        ctrl = Control.model_validate(data)
+        assert ctrl.model_extra.get("custom_vendor_field") == "some-value"
+
+
 class TestEvaluationResult:
     def test_defaults(self):
         r = EvaluationResult()
