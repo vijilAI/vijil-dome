@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Any, Callable, Literal
 
 from vijil_dome.controls.engine import ControlEngine
-from vijil_dome.controls.errors import ControlSteerError, ControlViolationError
+from vijil_dome.controls.errors import handle_result
 from vijil_dome.controls.models import Control, Step
 
 logger = logging.getLogger(__name__)
@@ -88,13 +88,13 @@ def control(
                 )
 
                 pre_result = await _engine.evaluate(step, stage="pre")
-                _handle_result(pre_result, enforce, "pre")
+                handle_result(pre_result, enforce, "pre")
 
                 output = await fn(*args, **kwargs)
 
                 step.output = output_mapper(output) if output_mapper else output
                 post_result = await _engine.evaluate(step, stage="post")
-                _handle_result(post_result, enforce, "post")
+                handle_result(post_result, enforce, "post")
 
                 return output
 
@@ -112,13 +112,13 @@ def control(
                 )
 
                 pre_result = _engine.evaluate_sync(step, stage="pre")
-                _handle_result(pre_result, enforce, "pre")
+                handle_result(pre_result, enforce, "pre")
 
                 output = fn(*args, **kwargs)
 
                 step.output = output_mapper(output) if output_mapper else output
                 post_result = _engine.evaluate_sync(step, stage="post")
-                _handle_result(post_result, enforce, "post")
+                handle_result(post_result, enforce, "post")
 
                 return output
 
@@ -262,42 +262,3 @@ def _resolve_engine(
     return eng
 
 
-# ------------------------------------------------------------------
-# Result handling
-# ------------------------------------------------------------------
-
-
-def _handle_result(result: Any, enforce: bool, stage: str) -> None:
-    if result.action == "deny":
-        triggered = next(
-            (m for m in result.matches if m.triggered and m.action and m.action.decision == "deny"),
-            None,
-        )
-        name = triggered.control_name if triggered else "unknown"
-        msg = result.matches[0].message if result.matches else "Denied by control"
-        if enforce:
-            raise ControlViolationError(
-                msg, control_name=name, result=result
-            )
-        logger.warning(
-            "[shadow] Control %s would deny at %s stage: %s",
-            name, stage, msg,
-        )
-
-    if result.action == "steer" and result.steering_context:
-        triggered = next(
-            (m for m in result.matches if m.triggered and m.action and m.action.decision == "steer"),
-            None,
-        )
-        name = triggered.control_name if triggered else "unknown"
-        if enforce:
-            raise ControlSteerError(
-                result.steering_context.message,
-                control_name=name,
-                steering_context=result.steering_context,
-                result=result,
-            )
-        logger.warning(
-            "[shadow] Control %s would steer at %s stage: %s",
-            name, stage, result.steering_context.message,
-        )

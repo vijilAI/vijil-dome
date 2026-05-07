@@ -2,7 +2,7 @@
 
 from vijil_dome.controls.decorator import control
 from vijil_dome.controls.engine import ControlEngine
-from vijil_dome.controls.errors import ControlSteerError, ControlViolationError
+from vijil_dome.controls.errors import ControlError, ControlSteerError, ControlViolationError
 from vijil_dome.controls.evaluators import (
     list_evaluators,
     register_evaluator,
@@ -28,6 +28,7 @@ __all__ = [
     "Control",
     "ControlAction",
     "ControlEngine",
+    "ControlError",
     "ControlMatch",
     "ControlScope",
     "ControlSteerError",

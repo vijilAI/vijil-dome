@@ -1,5 +1,8 @@
 """Tests for control data models."""
 
+import pytest
+from pydantic import ValidationError
+
 from vijil_dome.controls.models import (
     ConditionNode,
     Control,
@@ -89,6 +92,27 @@ class TestConditionNode:
         assert node.is_composite()
         assert node.not_ is not None
 
+    def test_mutual_exclusivity_rejects_leaf_and_composite(self):
+        with pytest.raises(ValidationError, match="cannot have both"):
+            ConditionNode(
+                selector="input",
+                evaluator=EvaluatorRef(name="regex", config={"pattern": ".*"}),
+                and_=[
+                    ConditionNode(
+                        selector="input",
+                        evaluator=EvaluatorRef(name="regex", config={"pattern": "x"}),
+                    )
+                ],
+            )
+
+    def test_empty_and_rejected(self):
+        with pytest.raises(ValidationError, match="at least one"):
+            ConditionNode.model_validate({"and": []})
+
+    def test_empty_or_rejected(self):
+        with pytest.raises(ValidationError, match="at least one"):
+            ConditionNode.model_validate({"or": []})
+
     def test_from_dict_with_aliases(self):
         data = {
             "and": [
@@ -150,7 +174,6 @@ class TestEvaluationResult:
 
     def test_denied(self):
         r = EvaluationResult(
-            permitted=False,
             action="deny",
             matches=[
                 ControlMatch(
@@ -162,3 +185,8 @@ class TestEvaluationResult:
         )
         assert r.permitted is False
         assert r.action == "deny"
+
+    def test_permitted_computed_from_action(self):
+        assert EvaluationResult(action="allow").permitted is True
+        assert EvaluationResult(action="steer").permitted is True
+        assert EvaluationResult(action="deny").permitted is False

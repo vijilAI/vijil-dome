@@ -16,7 +16,7 @@ from typing import Any, Callable, Literal
 
 from vijil_dome.controls.decorator import control as control_decorator
 from vijil_dome.controls.engine import ControlEngine
-from vijil_dome.controls.errors import ControlSteerError, ControlViolationError
+from vijil_dome.controls.errors import handle_result
 from vijil_dome.controls.models import Control, EvaluationResult, Step
 
 logger = logging.getLogger(__name__)
@@ -95,7 +95,7 @@ class VijilDome:
             context=context or {},
         )
         result = self._engine.evaluate_sync(step, stage="pre")
-        self._maybe_raise(result, "pre")
+        handle_result(result, self._enforce, "pre")
         return result
 
     async def async_guard_input(
@@ -113,7 +113,7 @@ class VijilDome:
             context=context or {},
         )
         result = await self._engine.evaluate(step, stage="pre")
-        self._maybe_raise(result, "pre")
+        handle_result(result, self._enforce, "pre")
         return result
 
     def guard_output(
@@ -131,7 +131,7 @@ class VijilDome:
             context=context or {},
         )
         result = self._engine.evaluate_sync(step, stage="post")
-        self._maybe_raise(result, "post")
+        handle_result(result, self._enforce, "post")
         return result
 
     async def async_guard_output(
@@ -149,7 +149,7 @@ class VijilDome:
             context=context or {},
         )
         result = await self._engine.evaluate(step, stage="post")
-        self._maybe_raise(result, "post")
+        handle_result(result, self._enforce, "post")
         return result
 
     def guard_tool_call(
@@ -167,7 +167,7 @@ class VijilDome:
             context=context or {},
         )
         result = self._engine.evaluate_sync(step, stage="pre")
-        self._maybe_raise(result, "pre")
+        handle_result(result, self._enforce, "pre")
         return result
 
     async def async_guard_tool_call(
@@ -185,7 +185,7 @@ class VijilDome:
             context=context or {},
         )
         result = await self._engine.evaluate(step, stage="pre")
-        self._maybe_raise(result, "pre")
+        handle_result(result, self._enforce, "pre")
         return result
 
     # ------------------------------------------------------------------
@@ -212,41 +212,3 @@ class VijilDome:
             context_mapper=context_mapper,
         )
 
-    # ------------------------------------------------------------------
-    # Internal
-    # ------------------------------------------------------------------
-
-    def _maybe_raise(self, result: EvaluationResult, stage: str) -> None:
-        if result.action == "deny":
-            triggered = next(
-                (m for m in result.matches if m.triggered and m.action and m.action.decision == "deny"),
-                None,
-            )
-            name = triggered.control_name if triggered else "unknown"
-            msg = triggered.message if triggered else "Denied by control"
-            if self._enforce:
-                raise ControlViolationError(
-                    msg, control_name=name, result=result
-                )
-            logger.warning(
-                "[shadow] Control %s would deny at %s stage: %s",
-                name, stage, msg,
-            )
-
-        if result.action == "steer" and result.steering_context:
-            triggered = next(
-                (m for m in result.matches if m.triggered and m.action and m.action.decision == "steer"),
-                None,
-            )
-            name = triggered.control_name if triggered else "unknown"
-            if self._enforce:
-                raise ControlSteerError(
-                    result.steering_context.message,
-                    control_name=name,
-                    steering_context=result.steering_context,
-                    result=result,
-                )
-            logger.warning(
-                "[shadow] Control %s would steer at %s stage: %s",
-                name, stage, result.steering_context.message,
-            )

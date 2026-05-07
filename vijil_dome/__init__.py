@@ -32,6 +32,7 @@ def __getattr__(name: str):
         "register_evaluator": ("vijil_dome.controls.evaluators", "register_evaluator"),
         "Evaluator": ("vijil_dome.controls.evaluators.base", "Evaluator"),
         "EvaluatorResult": ("vijil_dome.controls.evaluators.base", "EvaluatorResult"),
+        "ControlError": ("vijil_dome.controls.errors", "ControlError"),
         "ControlViolationError": ("vijil_dome.controls.errors", "ControlViolationError"),
         "ControlSteerError": ("vijil_dome.controls.errors", "ControlSteerError"),
         # Adapter registry
@@ -62,6 +63,7 @@ __all__ = [
     "register_evaluator",
     "Evaluator",
     "EvaluatorResult",
+    "ControlError",
     "ControlViolationError",
     "ControlSteerError",
     # Adapter registry

@@ -8,7 +8,7 @@ import logging
 import re
 import time
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from vijil_dome.controls.models import (
     ConditionNode,
@@ -77,7 +77,7 @@ class ControlEngine:
     # ------------------------------------------------------------------
 
     async def evaluate(
-        self, step: Step, stage: str = "pre"
+        self, step: Step, stage: Literal["pre", "post"] = "pre"
     ) -> EvaluationResult:
         start = time.monotonic()
         applicable = [
@@ -105,7 +105,6 @@ class ControlEngine:
             for m in deny_matches:
                 if m.triggered and m.action and m.action.decision == "deny":
                     return EvaluationResult(
-                        permitted=False,
                         action="deny",
                         confidence=m.confidence,
                         matches=matches,
@@ -130,7 +129,6 @@ class ControlEngine:
         )
         if steer_match and steer_match.action:
             return EvaluationResult(
-                permitted=True,
                 action="steer",
                 confidence=steer_match.confidence,
                 matches=matches,
@@ -139,14 +137,13 @@ class ControlEngine:
             )
 
         return EvaluationResult(
-            permitted=True,
             action="allow",
             matches=matches,
             exec_time_ms=_elapsed_ms(start),
         )
 
     def evaluate_sync(
-        self, step: Step, stage: str = "pre"
+        self, step: Step, stage: Literal["pre", "post"] = "pre"
     ) -> EvaluationResult:
         try:
             asyncio.get_running_loop()
@@ -164,7 +161,7 @@ class ControlEngine:
     # ------------------------------------------------------------------
 
     def _scope_matches(
-        self, control: Control, step: Step, stage: str
+        self, control: Control, step: Step, stage: Literal["pre", "post"]
     ) -> bool:
         scope = control.scope
 

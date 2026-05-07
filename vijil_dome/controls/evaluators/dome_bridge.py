@@ -67,7 +67,7 @@ class DomeBridgeEvaluator(Evaluator):
         data: dict[str, Any] = dict(result[1])
         score = data.get("detection_score", 1.0 if hit else 0.0)
 
-        matched = score >= threshold if not hit else hit
+        matched = score >= threshold
 
         return EvaluatorResult(
             matched=matched,

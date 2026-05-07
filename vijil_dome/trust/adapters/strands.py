@@ -292,5 +292,4 @@ class StrandsAdapter(BaseAdapter):
 
     @classmethod
     def wrap(cls, agent: Any, **kwargs: Any) -> Any:
-        kwargs.pop("policy", None)
         return secure_agent(agent, **kwargs)

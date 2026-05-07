@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, computed_field, model_validator
 
 
 class Step(BaseModel):
@@ -54,12 +54,35 @@ class ConditionNode(BaseModel):
 
     @model_validator(mode="before")
     @classmethod
-    def _normalize_selector(cls, data: Any) -> Any:
-        """Accept AgentControl's ``{"path": "output"}`` selector format."""
+    def _normalize_and_validate(cls, data: Any) -> Any:
+        """Normalize AC selector format and validate mutual exclusivity."""
         if isinstance(data, dict):
             sel = data.get("selector")
             if isinstance(sel, dict) and "path" in sel:
                 data = {**data, "selector": sel["path"]}
+
+            has_leaf = data.get("selector") is not None or data.get("evaluator") is not None
+            has_composite = (
+                data.get("and") is not None
+                or data.get("and_") is not None
+                or data.get("or") is not None
+                or data.get("or_") is not None
+                or data.get("not") is not None
+                or data.get("not_") is not None
+            )
+            if has_leaf and has_composite:
+                raise ValueError(
+                    "ConditionNode cannot have both leaf fields (selector/evaluator) "
+                    "and composite fields (and/or/not)"
+                )
+
+            for key in ("and", "and_"):
+                if isinstance(data.get(key), list) and len(data[key]) == 0:
+                    raise ValueError("'and' must contain at least one condition")
+            for key in ("or", "or_"):
+                if isinstance(data.get(key), list) and len(data[key]) == 0:
+                    raise ValueError("'or' must contain at least one condition")
+
         return data
 
     def is_leaf(self) -> bool:
@@ -119,9 +142,13 @@ class ControlMatch(BaseModel):
 class EvaluationResult(BaseModel):
     """Aggregated result of evaluating all applicable controls."""
 
-    permitted: bool = True
     action: Literal["allow", "deny", "steer"] = "allow"
     confidence: float = 1.0
     matches: list[ControlMatch] = Field(default_factory=list)
     steering_context: SteeringContext | None = None
     exec_time_ms: float = 0.0
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def permitted(self) -> bool:
+        return self.action != "deny"

@@ -36,7 +36,6 @@ def secure_agent(
     constraints: AgentConstraints | dict[str, Any] | None = None,
     manifest: Any = None,
     mode: str = "warn",
-    policy: Any = None,
     **kwargs: Any,
 ) -> Any:
     """Add trust enforcement to any supported agent framework.
@@ -123,7 +122,6 @@ def secure_agent(
             constraints=constraints,
             manifest=manifest,
             mode=mode,
-            policy=policy,
             **kwargs,
         )
 

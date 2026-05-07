@@ -49,7 +49,6 @@ class BaseAdapter(ABC):
         constraints: Any = None,
         manifest: Any = None,
         mode: str = "warn",
-        policy: Any = None,
         **kwargs: Any,
     ) -> Any:
         """Wrap the agent with trust enforcement and return it."""
