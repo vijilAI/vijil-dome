@@ -337,6 +337,35 @@ class TestCancelOnDeny:
         triggered = [m for m in result.matches if m.triggered]
         assert len(triggered) >= 1
 
+    @pytest.mark.asyncio
+    async def test_slow_evaluator_cancelled(self):
+        """Verify a slow deny control is actually cancelled by a fast one."""
+        import asyncio
+        from vijil_dome.controls.evaluators import register_evaluator
+        from vijil_dome.controls.evaluators.base import Evaluator, EvaluatorResult
+
+        slow_completed = False
+
+        @register_evaluator("_test_slow")
+        class SlowEvaluator(Evaluator):
+            async def evaluate(self, value, config):
+                nonlocal slow_completed
+                await asyncio.sleep(5)
+                slow_completed = True
+                return EvaluatorResult(matched=True)
+
+        fast = _deny_control(name="fast", priority=1)
+        slow = _deny_control(
+            name="slow", priority=2,
+            evaluator_name="_test_slow",
+            evaluator_config={},
+        )
+        engine = ControlEngine([fast, slow])
+
+        result = await engine.evaluate(_step(input_="x"), stage="pre")
+        assert result.permitted is False
+        assert not slow_completed
+
 
 # ------------------------------------------------------------------
 # on_error

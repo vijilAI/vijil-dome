@@ -1,5 +1,7 @@
 """Tests for the VijilDome class."""
 
+import logging
+
 import pytest
 
 from vijil_dome.controls.errors import ControlSteerError, ControlViolationError
@@ -210,3 +212,144 @@ class TestPolicyFromControlObjects:
         dome = VijilDome(policy=controls)
         with pytest.raises(ControlViolationError):
             dome.guard_input("test")
+
+
+class TestShadowModeLogging:
+    def test_deny_shadow_logs_warning(self, caplog):
+        dome = VijilDome(policy=_ssn_deny_policy(), enforce=False)
+        with caplog.at_level(logging.WARNING, logger="vijil_dome.controls.errors"):
+            result = dome.guard_input("SSN: 123-45-6789")
+        assert result.action == "deny"
+        assert any("[shadow]" in r.message for r in caplog.records)
+        assert any("deny" in r.message.lower() for r in caplog.records)
+
+    def test_steer_shadow_logs_warning(self, caplog):
+        policy = [
+            {
+                "name": "steer-test",
+                "condition": {
+                    "selector": "input",
+                    "evaluator": {"name": "regex", "config": {"pattern": ".*"}},
+                },
+                "action": {
+                    "decision": "steer",
+                    "steering_context": {"message": "Please rephrase"},
+                },
+            }
+        ]
+        dome = VijilDome(policy=policy, enforce=False)
+        with caplog.at_level(logging.WARNING, logger="vijil_dome.controls.errors"):
+            result = dome.guard_input("anything")
+        assert result.action == "steer"
+        assert any("[shadow]" in r.message for r in caplog.records)
+        assert any("steer" in r.message.lower() for r in caplog.records)
+
+    def test_allow_shadow_no_warning(self, caplog):
+        dome = VijilDome(policy=_ssn_deny_policy(), enforce=False)
+        with caplog.at_level(logging.WARNING, logger="vijil_dome.controls.errors"):
+            result = dome.guard_input("no PII here")
+        assert result.action == "allow"
+        assert not any("[shadow]" in r.message for r in caplog.records)
+
+
+class TestEdgeCaseInputs:
+    def test_empty_string_input(self):
+        dome = VijilDome(policy=_ssn_deny_policy())
+        result = dome.guard_input("")
+        assert result.permitted is True
+
+    def test_whitespace_input(self):
+        dome = VijilDome(policy=_ssn_deny_policy())
+        result = dome.guard_input("   ")
+        assert result.permitted is True
+
+    def test_dict_input(self):
+        dome = VijilDome(policy=_ssn_deny_policy())
+        result = dome.guard_input({"message": "no PII"})
+        assert result.permitted is True
+
+    def test_no_controls_allows_everything(self):
+        dome = VijilDome()
+        result = dome.guard_input("")
+        assert result.permitted is True
+
+    def test_empty_output(self):
+        dome = VijilDome(policy=_output_ssn_deny_policy())
+        result = dome.guard_output("")
+        assert result.permitted is True
+
+    def test_falsy_selector_zero(self):
+        """A selector resolving to 0 should still be evaluated, not skipped."""
+        policy = [
+            {
+                "name": "check-amount",
+                "condition": {
+                    "selector": "input.amount",
+                    "evaluator": {
+                        "name": "regex",
+                        "config": {"pattern": "^0$"},
+                    },
+                },
+                "action": {"decision": "deny", "message": "Zero amount"},
+            }
+        ]
+        dome = VijilDome(policy=policy)
+        with pytest.raises(ControlViolationError):
+            dome.guard_input({"amount": 0})
+
+    def test_falsy_selector_empty_string(self):
+        """A selector resolving to '' should still be evaluated."""
+        policy = [
+            {
+                "name": "check-name",
+                "condition": {
+                    "selector": "input.name",
+                    "evaluator": {
+                        "name": "regex",
+                        "config": {"pattern": "^$"},
+                    },
+                },
+                "action": {"decision": "deny", "message": "Empty name"},
+            }
+        ]
+        dome = VijilDome(policy=policy)
+        with pytest.raises(ControlViolationError):
+            dome.guard_input({"name": ""})
+
+    def test_falsy_selector_false(self):
+        """A selector resolving to False should still be evaluated."""
+        policy = [
+            {
+                "name": "check-verified",
+                "condition": {
+                    "selector": "input.verified",
+                    "evaluator": {
+                        "name": "regex",
+                        "config": {"pattern": "^False$"},
+                    },
+                },
+                "action": {"decision": "deny", "message": "Not verified"},
+            }
+        ]
+        dome = VijilDome(policy=policy)
+        with pytest.raises(ControlViolationError):
+            dome.guard_input({"verified": False})
+
+    def test_falsy_selector_empty_list(self):
+        """A selector resolving to [] should still be evaluated."""
+        policy = [
+            {
+                "name": "check-items",
+                "condition": {
+                    "selector": "input.items",
+                    "evaluator": {
+                        "name": "regex",
+                        "config": {"pattern": r"^\[\]$"},
+                    },
+                },
+                "action": {"decision": "deny", "message": "Empty items"},
+            }
+        ]
+        dome = VijilDome(policy=policy)
+        with pytest.raises(ControlViolationError):
+            dome.guard_input({"items": []})
