@@ -243,8 +243,8 @@ def main() -> None:
     print(f"  • {BOLD}Zero static secrets{RESET} — credential proxy fetches keys per-request")
     print(f"  • {BOLD}Policy from Console{RESET} — security team controls, developer ships")
     print()
-    print(f"  {BOLD}pip install vijil-sdk[trust]{RESET}")
-    print(f"  {DIM}from vijil import secure_agent{RESET}")
+    print(f"  {BOLD}pip install vijil-dome{RESET}")
+    print(f"  {DIM}from vijil_dome import secure_agent{RESET}")
     print()
 
 
