@@ -213,7 +213,7 @@ def main() -> None:
     print("  Guards checked inputs and outputs. MAC enforced tool permissions.")
     print("  Payment and credential tools were blocked before execution.")
     print()
-    print(f"  {BOLD}pip install vijil-dome{RESET}")
+    print(f"  {BOLD}pip install 'vijil-dome[trust-adapters]'{RESET}")
     print(f"  {DIM}from vijil_dome import secure_agent{RESET}")
     print()
 
