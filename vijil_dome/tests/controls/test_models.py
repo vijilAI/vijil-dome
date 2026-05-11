@@ -105,6 +105,16 @@ class TestConditionNode:
                 ],
             )
 
+    def test_partial_leaf_selector_only_rejected(self):
+        with pytest.raises(ValidationError, match="'evaluator' is missing"):
+            ConditionNode(selector="input")
+
+    def test_partial_leaf_evaluator_only_rejected(self):
+        with pytest.raises(ValidationError, match="'selector' is missing"):
+            ConditionNode(
+                evaluator=EvaluatorRef(name="regex", config={"pattern": ".*"})
+            )
+
     def test_empty_and_rejected(self):
         with pytest.raises(ValidationError, match="at least one"):
             ConditionNode.model_validate({"and": []})
@@ -227,6 +237,31 @@ class TestControlAnnotations:
         }
         ctrl = Control.model_validate(data)
         assert ctrl.model_extra.get("custom_vendor_field") == "some-value"
+
+
+class TestEvaluatorResultBounds:
+    def test_confidence_above_one_rejected(self):
+        from vijil_dome.controls.evaluators.base import EvaluatorResult as ER
+
+        with pytest.raises(ValidationError):
+            ER(matched=True, confidence=1.5)
+
+    def test_confidence_negative_rejected(self):
+        from vijil_dome.controls.evaluators.base import EvaluatorResult as ER
+
+        with pytest.raises(ValidationError):
+            ER(matched=True, confidence=-0.1)
+
+    def test_confidence_boundary_values_accepted(self):
+        from vijil_dome.controls.evaluators.base import EvaluatorResult as ER
+
+        assert ER(matched=True, confidence=0.0).confidence == 0.0
+        assert ER(matched=True, confidence=1.0).confidence == 1.0
+
+
+class TestImportSmoke:
+    def test_trust_import_no_recursion(self):
+        import vijil_dome.trust  # noqa: F401
 
 
 class TestEvaluationResult:

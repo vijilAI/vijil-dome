@@ -12,7 +12,7 @@ class EvaluatorResult(BaseModel):
     """Result of a single evaluator check."""
 
     matched: bool
-    confidence: float = 1.0
+    confidence: float = Field(1.0, ge=0.0, le=1.0)
     message: str = ""
     metadata: dict[str, Any] = Field(default_factory=dict)
 

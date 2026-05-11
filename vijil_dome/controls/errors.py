@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal
 
 if TYPE_CHECKING:
     from vijil_dome.controls.models import EvaluationResult, SteeringContext
@@ -46,7 +46,7 @@ class ControlSteerError(ControlError):
 
 
 def handle_result(
-    result: EvaluationResult, enforce: bool, stage: str
+    result: EvaluationResult, enforce: bool, stage: Literal["pre", "post"]
 ) -> None:
     """Raise or log based on evaluation outcome.
 

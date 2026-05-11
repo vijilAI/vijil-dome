@@ -22,7 +22,6 @@ from .types import DomePayload
 def __getattr__(name: str):
     _lazy = {
         # Trust runtime
-        "trust": ("vijil_dome", "trust"),
         "TrustRuntime": ("vijil_dome.trust.runtime", "TrustRuntime"),
         "secure_agent": ("vijil_dome.trust.adapters.auto", "secure_agent"),
         # Controls

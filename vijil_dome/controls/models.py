@@ -76,6 +76,16 @@ class ConditionNode(BaseModel):
                     "and composite fields (and/or/not)"
                 )
 
+            if has_leaf:
+                has_selector = data.get("selector") is not None
+                has_evaluator = data.get("evaluator") is not None
+                if has_selector != has_evaluator:
+                    missing = "evaluator" if has_selector else "selector"
+                    raise ValueError(
+                        f"Leaf ConditionNode requires both 'selector' and "
+                        f"'evaluator', but '{missing}' is missing"
+                    )
+
             for key in ("and", "and_"):
                 if isinstance(data.get(key), list) and len(data[key]) == 0:
                     raise ValueError("'and' must contain at least one condition")
