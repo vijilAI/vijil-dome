@@ -52,6 +52,16 @@ class ConditionNode(BaseModel):
     or_: list[ConditionNode] | None = Field(None, alias="or")
     not_: ConditionNode | None = Field(None, alias="not")
 
+    early_exit: bool = Field(
+        False,
+        alias="early_exit",
+        description=(
+            "When True, and/or children are evaluated sequentially and "
+            "short-circuit on the first decisive result. When False "
+            "(default), all children run in parallel."
+        ),
+    )
+
     @model_validator(mode="before")
     @classmethod
     def _normalize_and_validate(cls, data: Any) -> Any:

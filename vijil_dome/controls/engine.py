@@ -351,6 +351,11 @@ class ControlEngine:
             return await self._evaluate_leaf(node, step, step_data)
 
         if node.and_ is not None:
+            if node.early_exit:
+                for child in node.and_:
+                    if not await self._evaluate_condition(child, step, step_data):
+                        return False
+                return True
             results = await asyncio.gather(
                 *(self._evaluate_condition(child, step, step_data)
                   for child in node.and_)
@@ -358,6 +363,11 @@ class ControlEngine:
             return all(results)
 
         if node.or_ is not None:
+            if node.early_exit:
+                for child in node.or_:
+                    if await self._evaluate_condition(child, step, step_data):
+                        return True
+                return False
             results = await asyncio.gather(
                 *(self._evaluate_condition(child, step, step_data)
                   for child in node.or_)

@@ -368,6 +368,108 @@ class TestCancelOnDeny:
 
 
 # ------------------------------------------------------------------
+# Early exit (short-circuit)
+# ------------------------------------------------------------------
+
+
+class TestEarlyExit:
+    @pytest.mark.asyncio
+    async def test_and_early_exit_stops_on_first_false(self):
+        """With early_exit, and_ should not evaluate remaining children after False."""
+        import asyncio
+        from vijil_dome.controls.evaluators import register_evaluator
+        from vijil_dome.controls.evaluators.base import Evaluator, EvaluatorResult
+
+        second_called = False
+
+        @register_evaluator("_test_track_call")
+        class TrackCallEvaluator(Evaluator):
+            async def evaluate(self, value, config):
+                nonlocal second_called
+                second_called = True
+                return EvaluatorResult(matched=True)
+
+        ctrl = Control(
+            name="and-early",
+            condition=ConditionNode.model_validate({
+                "and": [
+                    {"selector": "input", "evaluator": {"name": "regex", "config": {"pattern": "NOMATCH"}}},
+                    {"selector": "input", "evaluator": {"name": "_test_track_call", "config": {}}},
+                ],
+                "early_exit": True,
+            }),
+            action=ControlAction(decision="deny"),
+        )
+        engine = ControlEngine([ctrl])
+        result = await engine.evaluate(_step(input_="hello"), stage="pre")
+        assert result.action == "allow"
+        assert not second_called
+
+    @pytest.mark.asyncio
+    async def test_or_early_exit_stops_on_first_true(self):
+        """With early_exit, or_ should not evaluate remaining children after True."""
+        from vijil_dome.controls.evaluators import register_evaluator
+        from vijil_dome.controls.evaluators.base import Evaluator, EvaluatorResult
+
+        second_called = False
+
+        @register_evaluator("_test_track_call_2")
+        class TrackCallEvaluator2(Evaluator):
+            async def evaluate(self, value, config):
+                nonlocal second_called
+                second_called = True
+                return EvaluatorResult(matched=True)
+
+        ctrl = Control(
+            name="or-early",
+            condition=ConditionNode.model_validate({
+                "or": [
+                    {"selector": "input", "evaluator": {"name": "regex", "config": {"pattern": ".*"}}},
+                    {"selector": "input", "evaluator": {"name": "_test_track_call_2", "config": {}}},
+                ],
+                "early_exit": True,
+            }),
+            action=ControlAction(decision="deny"),
+        )
+        engine = ControlEngine([ctrl])
+        result = await engine.evaluate(_step(input_="hello"), stage="pre")
+        assert result.action == "deny"
+        assert not second_called
+
+    @pytest.mark.asyncio
+    async def test_and_without_early_exit_runs_all(self):
+        """Default (no early_exit) evaluates all children in parallel."""
+        ctrl = Control(
+            name="and-parallel",
+            condition=ConditionNode.model_validate({
+                "and": [
+                    {"selector": "input", "evaluator": {"name": "regex", "config": {"pattern": "hello"}}},
+                    {"selector": "input", "evaluator": {"name": "regex", "config": {"pattern": "hello"}}},
+                ],
+            }),
+            action=ControlAction(decision="deny"),
+        )
+        engine = ControlEngine([ctrl])
+        result = await engine.evaluate(_step(input_="hello"), stage="pre")
+        assert result.action == "deny"
+
+    @pytest.mark.asyncio
+    async def test_early_exit_from_yaml_style_dict(self):
+        """early_exit can be set in a policy dict (YAML/JSON friendly)."""
+        ctrl = Control.model_validate({
+            "name": "policy-early",
+            "condition": {
+                "and": [
+                    {"selector": "input", "evaluator": {"name": "regex", "config": {"pattern": ".*"}}},
+                ],
+                "early_exit": True,
+            },
+            "action": {"decision": "deny"},
+        })
+        assert ctrl.condition.early_exit is True
+
+
+# ------------------------------------------------------------------
 # on_error
 # ------------------------------------------------------------------
 
