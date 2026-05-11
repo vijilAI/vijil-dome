@@ -207,6 +207,19 @@ methods = ["moderation-deberta"]
         with pytest.raises(ValueError, match="must contain either"):
             engine.load_controls_from_file(str(path))
 
+    def test_toml_string_guard_list_raises(self, tmp_path):
+        """String instead of list for input-guards gives helpful error."""
+        toml_text = """\
+[guardrail]
+input-guards = "prompt-injection"
+"""
+        path = tmp_path / "bad.toml"
+        path.write_text(toml_text)
+
+        engine = ControlEngine()
+        with pytest.raises(ValueError, match="must be a list, not a string"):
+            engine.load_controls_from_file(str(path))
+
 
 class TestLoadFromUnsupportedFile:
     def test_txt_rejected(self, tmp_path):

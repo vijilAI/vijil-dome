@@ -274,6 +274,7 @@ class ControlEngine:
                     if ctrl.action.on_error == "fail_closed":
                         for p in pending:
                             p.cancel()
+                        await asyncio.gather(*pending, return_exceptions=True)
                         return results
                     continue
 
@@ -282,6 +283,7 @@ class ControlEngine:
                 if match.triggered:
                     for p in pending:
                         p.cancel()
+                    await asyncio.gather(*pending, return_exceptions=True)
                     return results
 
         return results
@@ -428,6 +430,16 @@ def _translate_dome_toml(data: dict[str, Any]) -> list[dict[str, Any]]:
 
     for guard_list_key, stage in _STAGE_MAP.items():
         guard_names = guardrail.get(guard_list_key, [])
+        if isinstance(guard_names, str):
+            raise ValueError(
+                f"'{guard_list_key}' in [guardrail] must be a list, "
+                f"not a string. Use ['{guard_names}'] instead."
+            )
+        if not isinstance(guard_names, list):
+            raise TypeError(
+                f"'{guard_list_key}' in [guardrail] must be a list, "
+                f"got {type(guard_names).__name__}"
+            )
         for guard_name in guard_names:
             guard_cfg = data.get(guard_name, {})
             category = guard_cfg.get("type", "generic")

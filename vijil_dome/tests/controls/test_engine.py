@@ -456,3 +456,55 @@ class TestEdgeCases:
         engine = ControlEngine([_deny_control()])
         result = engine.evaluate_sync(_step(input_="x"), stage="pre")
         assert result.permitted is False
+
+
+# ------------------------------------------------------------------
+# ReDoS protection (step_name_regex)
+# ------------------------------------------------------------------
+
+
+class TestReDoSProtection:
+    @pytest.mark.asyncio
+    async def test_step_name_regex_matching(self):
+        ctrl = Control(
+            name="regex-scope",
+            scope=ControlScope(step_name_regex=r"^chat_.*"),
+            condition=ConditionNode(
+                selector="input",
+                evaluator=EvaluatorRef(name="regex", config={"pattern": ".*"}),
+            ),
+            action=ControlAction(decision="deny"),
+        )
+        engine = ControlEngine([ctrl])
+
+        result = await engine.evaluate(_step(name="chat_v2", input_="x"), stage="pre")
+        assert result.action == "deny"
+
+        result = await engine.evaluate(_step(name="search", input_="x"), stage="pre")
+        assert result.action == "allow"
+
+    @pytest.mark.asyncio
+    async def test_re2_fallback_warning(self, caplog, monkeypatch):
+        import vijil_dome.controls.engine as eng_mod
+
+        monkeypatch.setattr(eng_mod, "_SCOPE_HAS_RE2", False)
+
+        ctrl = Control(
+            name="regex-scope",
+            scope=ControlScope(step_name_regex=r"^chat_.*"),
+            condition=ConditionNode(
+                selector="input",
+                evaluator=EvaluatorRef(name="regex", config={"pattern": ".*"}),
+            ),
+            action=ControlAction(decision="deny"),
+        )
+        engine = ControlEngine([ctrl])
+
+        import logging
+        with caplog.at_level(logging.WARNING, logger="vijil_dome.controls.engine"):
+            result = await engine.evaluate(
+                _step(name="chat_v2", input_="x"), stage="pre"
+            )
+
+        assert result.action == "deny"
+        assert any("re2 not installed" in msg for msg in caplog.messages)
