@@ -376,7 +376,6 @@ class TestEarlyExit:
     @pytest.mark.asyncio
     async def test_and_early_exit_stops_on_first_false(self):
         """With early_exit, and_ should not evaluate remaining children after False."""
-        import asyncio
         from vijil_dome.controls.evaluators import register_evaluator
         from vijil_dome.controls.evaluators.base import Evaluator, EvaluatorResult
 
