@@ -103,3 +103,11 @@ class TestCelEvaluator:
         evaluator = CelEvaluator()
         result = await evaluator.evaluate(3.14, {"expression": "value > 3.0"})
         assert result.matched is True
+
+    @pytest.mark.asyncio
+    async def test_malformed_expression_returns_not_matched(self):
+        evaluator = CelEvaluator()
+        result = await evaluator.evaluate("hello", {"expression": "value +++ invalid %%"})
+        assert result.matched is False
+        assert result.confidence == 0.0
+        assert "error" in result.metadata

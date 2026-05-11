@@ -97,7 +97,10 @@ def detect_adapter(agent: Any) -> Type[BaseAdapter] | None:
         try:
             if adapter_cls.detect(agent):
                 return adapter_cls
-        except Exception:
+        except Exception as exc:
+            logger.warning(
+                "Adapter %s.detect() failed: %s", adapter_cls.__name__, exc
+            )
             continue
     return None
 

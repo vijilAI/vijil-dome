@@ -80,6 +80,15 @@ class JsonSchemaEvaluator(Evaluator):
         except _jsonschema.ValidationError as exc:
             valid = False
             errors = [exc.message]
+        except (_jsonschema.SchemaError, _jsonschema.exceptions.UnknownType) as exc:
+            msg = exc.message if hasattr(exc, "message") else str(exc)
+            logger.warning("Invalid JSON Schema: %s", msg)
+            return EvaluatorResult(
+                matched=False,
+                confidence=0.0,
+                message=f"Invalid schema: {msg}",
+                metadata={"schema_error": str(exc)},
+            )
 
         raw_matched = valid
         matched = (not raw_matched) if negate else raw_matched

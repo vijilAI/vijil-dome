@@ -73,19 +73,28 @@ class CelEvaluator(Evaluator):
         if not expression:
             return EvaluatorResult(matched=False, message="No expression provided")
 
-        env = celpy.Environment()
-        ast = env.compile(expression)
-        prog = env.program(ast)
+        try:
+            env = celpy.Environment()
+            ast = env.compile(expression)
+            prog = env.program(ast)
 
-        activation: dict[str, Any] = {}
-        if isinstance(value, dict):
-            for k, v in value.items():
-                if isinstance(k, str) and k != "value":
-                    activation[k] = _to_cel_value(v)
-        activation["value"] = _to_cel_value(value)
+            activation: dict[str, Any] = {}
+            if isinstance(value, dict):
+                for k, v in value.items():
+                    if isinstance(k, str) and k != "value":
+                        activation[k] = _to_cel_value(v)
+            activation["value"] = _to_cel_value(value)
 
-        result = prog.evaluate(activation)
-        matched = bool(result)
+            result = prog.evaluate(activation)
+            matched = bool(result)
+        except Exception as exc:
+            logger.warning("CEL evaluation failed for %r: %s", expression, exc)
+            return EvaluatorResult(
+                matched=False,
+                confidence=0.0,
+                message=f"CEL error: {exc}",
+                metadata={"expression": expression, "error": str(exc)},
+            )
 
         return EvaluatorResult(
             matched=matched,

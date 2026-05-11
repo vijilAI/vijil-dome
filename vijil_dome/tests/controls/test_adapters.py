@@ -80,3 +80,25 @@ class TestAdapterRegistry:
 
         result = detect_adapter(UnknownAgent())
         assert result is None
+
+    def test_detect_adapter_logs_on_exception(self, caplog):
+        import logging
+
+        @register_adapter("test_buggy_adapter_999")
+        class BuggyAdapter(BaseAdapter):
+            @classmethod
+            def detect(cls, agent):
+                raise RuntimeError("bug in detect")
+
+            @classmethod
+            def wrap(cls, agent, **kwargs):
+                return agent
+
+        with caplog.at_level(logging.WARNING, logger="vijil_dome.trust.adapters.base"):
+            result = detect_adapter(object())
+
+        assert result is None
+        assert any("BuggyAdapter.detect() failed" in msg for msg in caplog.messages)
+
+        # Clean up
+        del _adapter_registry["test_buggy_adapter_999"]

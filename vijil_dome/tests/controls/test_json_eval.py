@@ -65,3 +65,11 @@ class TestJsonSchemaEvaluator:
         assert result.matched is False
         result = await evaluator.evaluate("abc", {"schema": schema})
         assert result.matched is True
+
+    @pytest.mark.asyncio
+    async def test_invalid_schema_returns_not_matched(self, evaluator):
+        schema = {"type": "not-a-real-type"}
+        result = await evaluator.evaluate("test", {"schema": schema})
+        assert result.matched is False
+        assert result.confidence == 0.0
+        assert "schema_error" in result.metadata
