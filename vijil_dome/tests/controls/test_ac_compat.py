@@ -422,9 +422,10 @@ class TestACPolicyEvaluation:
             input={"recipient": "Unknown Corp", "amount": 500},
         )
         result = await engine.evaluate(step, stage="pre")
-        assert result.action == "observe" or (
-            result.action == "allow"
-            and any(m.triggered for m in result.matches)
+        assert result.action == "allow"
+        assert any(
+            m.triggered and m.action and m.action.decision == "observe"
+            for m in result.matches
         )
 
     @pytest.mark.asyncio

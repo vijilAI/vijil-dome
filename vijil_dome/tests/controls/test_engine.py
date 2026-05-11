@@ -335,7 +335,7 @@ class TestCancelOnDeny:
         result = await engine.evaluate(_step(input_="x"), stage="pre")
         assert result.permitted is False
         triggered = [m for m in result.matches if m.triggered]
-        assert len(triggered) >= 1
+        assert len(triggered) == 1
 
     @pytest.mark.asyncio
     async def test_slow_evaluator_cancelled(self):
