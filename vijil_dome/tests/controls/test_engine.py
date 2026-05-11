@@ -508,3 +508,44 @@ class TestReDoSProtection:
 
         assert result.action == "deny"
         assert any("re2 not installed" in msg for msg in caplog.messages)
+
+
+# ------------------------------------------------------------------
+# Thread safety
+# ------------------------------------------------------------------
+
+
+class TestThreadSafety:
+    def test_concurrent_add_and_evaluate(self):
+        import asyncio
+        import threading
+
+        engine = ControlEngine([_deny_control(name="initial")])
+        errors: list[Exception] = []
+
+        def add_controls():
+            try:
+                for i in range(50):
+                    engine.add_control(_deny_control(name=f"added-{i}"))
+            except Exception as exc:
+                errors.append(exc)
+
+        def run_evaluates():
+            try:
+                loop = asyncio.new_event_loop()
+                for _ in range(50):
+                    loop.run_until_complete(
+                        engine.evaluate(_step(input_="x"), stage="pre")
+                    )
+                loop.close()
+            except Exception as exc:
+                errors.append(exc)
+
+        t1 = threading.Thread(target=add_controls)
+        t2 = threading.Thread(target=run_evaluates)
+        t1.start()
+        t2.start()
+        t1.join()
+        t2.join()
+
+        assert errors == []

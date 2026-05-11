@@ -214,9 +214,7 @@ class LangGraphAdapter(BaseAdapter):
     @classmethod
     def detect(cls, agent: Any) -> bool:
         module = type(agent).__module__ or ""
-        if module.startswith("langgraph"):
-            return True
-        return hasattr(agent, "compile") or hasattr(agent, "get_graph")
+        return module.startswith("langgraph")
 
     @classmethod
     def wrap(cls, agent: Any, **kwargs: Any) -> Any:

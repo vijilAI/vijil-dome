@@ -102,3 +102,13 @@ class TestAdapterRegistry:
 
         # Clean up
         del _adapter_registry["test_buggy_adapter_999"]
+
+    def test_langgraph_detect_no_false_positive(self):
+        """Objects with .compile() that aren't LangGraph should not match."""
+        from vijil_dome.trust.adapters.langgraph import LangGraphAdapter
+
+        class HasCompile:
+            def compile(self):
+                pass
+
+        assert LangGraphAdapter.detect(HasCompile()) is False

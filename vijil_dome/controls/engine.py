@@ -6,6 +6,7 @@ import asyncio
 import json
 import logging
 import re
+import threading
 import time
 from pathlib import Path
 from typing import Any, Literal
@@ -29,6 +30,8 @@ from vijil_dome.controls.selectors import MISSING, resolve
 
 logger = logging.getLogger(__name__)
 
+_nest_asyncio_applied = False
+
 
 class ControlEngine:
     """Evaluates a set of controls against a :class:`Step`.
@@ -48,15 +51,18 @@ class ControlEngine:
             controls or [],
             key=lambda c: c.priority,
         )
+        self._lock = threading.Lock()
         self._evaluator_cache: dict[str, Any] = {}
 
     @property
     def controls(self) -> list[Control]:
-        return list(self._controls)
+        with self._lock:
+            return list(self._controls)
 
     def add_control(self, control: Control) -> None:
-        self._controls.append(control)
-        self._controls.sort(key=lambda c: c.priority)
+        with self._lock:
+            self._controls.append(control)
+            self._controls.sort(key=lambda c: c.priority)
 
     def load_controls(self, definitions: list[dict[str, Any]]) -> None:
         for defn in definitions:
@@ -132,9 +138,11 @@ class ControlEngine:
         self, step: Step, stage: Literal["pre", "post"] = "pre"
     ) -> EvaluationResult:
         start = time.monotonic()
+        with self._lock:
+            controls_snapshot = list(self._controls)
         applicable = [
             c
-            for c in self._controls
+            for c in controls_snapshot
             if c.enabled and self._scope_matches(c, step, stage)
         ]
 
@@ -204,9 +212,12 @@ class ControlEngine:
         except RuntimeError:
             return asyncio.run(self.evaluate(step, stage))
         # Inside an existing event loop — use nest_asyncio
-        import nest_asyncio
+        global _nest_asyncio_applied
+        if not _nest_asyncio_applied:
+            import nest_asyncio
 
-        nest_asyncio.apply()
+            nest_asyncio.apply()
+            _nest_asyncio_applied = True
         loop = asyncio.get_event_loop()
         return loop.run_until_complete(self.evaluate(step, stage))
 
