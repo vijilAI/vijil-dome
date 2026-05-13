@@ -23,7 +23,7 @@ from vijil_dome.types import Sentences
 embeddings_executor = None
 
 # Cache for instantiated embedding models to ensure they are used as singletons.
-_embedding_model_cache = {}
+_embedding_model_cache: dict[str, "AbstractEmbeddingsModel"] = {}
 
 
 class AbstractEmbeddingsModel(ABC):

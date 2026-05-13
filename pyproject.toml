@@ -73,6 +73,10 @@ typer = {version = ">=0.9.0", optional = true}
 langgraph = {version = ">=0.2.0", optional = true}
 google-adk = {version = ">=1.0.0", optional = true}
 httpx = {version = ">=0.27.0", optional = true}
+pyyaml = {version = ">=6.0", optional = true}
+jsonschema = {version = ">=4.0", optional = true}
+cel-python = {version = ">=0.1.0", optional = true}
+google-re2 = {version = ">=1.0", optional = true}
 
 [tool.poetry.extras]
 opentelemetry = [
@@ -103,6 +107,8 @@ s3 = [ "boto3", ]
 trust = [ "cryptography", "httpx", ]
 trust-cli = [ "cryptography", "httpx", "typer", ]
 trust-adapters = [ "cryptography", "httpx", "langgraph", "google-adk", "strands-agents", ]
+controls = [ "pyyaml", ]
+controls-full = [ "pyyaml", "jsonschema", "cel-python", "google-re2", ]
 test = [
     "pytest",
     "pytest-asyncio"
