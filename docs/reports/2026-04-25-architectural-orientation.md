@@ -5,6 +5,8 @@
 **Commit examined:** `a4d4f08` on `vin/dome-trust-runtime`
 **Time spent reading:** Equivalent of a deep ~6-hour pass: 4 parallel exploration agents covering structure, tests/infra, novelty, and concurrency/quality, followed by synthesis. Read directly: `README.md`, `CLAUDE.md`, `pyproject.toml`, `docs/AGENTS.md`, `vijil_dome/Dome.py`, `vijil_dome/trust/`, `vijil_dome/detectors/DETECTOR_INFO.md`, plus selected files in `vijil_dome/`.
 
+> **Snapshot-time note.** This orientation targets a specific snapshot — commit `a4d4f08` on the feature branch `vin/dome-trust-runtime`. If you read it from a different branch or a later checkout, some referenced paths and APIs (`vijil_dome/trust/`, `secure_agent()`, lazy imports in `__init__.py`, `cli/`, `deploy/`, the `trust` / `trust-adapters` extras) describe the state of *that* commit, not the tree you're currently on. PR #181 has since merged the trust runtime to main; PR #1 (commit `1d993b2`) later moved `deploy/` to `vijil-console`. The orientation is a dated artifact — treat it as a point-in-time architectural assessment, not a live spec.
+
 ---
 
 ## Calibration note
@@ -86,8 +88,10 @@ vijil_dome/
 │   └── examples/
 ├── instrumentation/       # OTel + structured logging
 ├── cli/                   # CLI tools (manifest signing)
-├── deploy/                # SPIRE Helm, Vault YAML (reference deployment)
-├── tests/                 # 43 test files (inside the package)
+├── deploy/                # SPIRE Helm, Vault YAML (reference deployment) — later moved to vijil-console
+├── embeds/                # Embedding utilities (used by some detectors)
+├── utils/                 # Shared helpers
+├── tests/                 # Test suite (inside the package)
 ├── examples/              # Excluded from wheel
 └── tutorials/             # Excluded from wheel
 ```
@@ -265,7 +269,7 @@ Configuration accepts three formats: **Python dict**, **TOML file path**, and **
 | Setting | Default | Effect |
 |---|---|---|
 | `enforce` | `True` | If False, scan and log but don't block (shadow mode) |
-| `asyncio_timeout_limit` | 5 (seconds) | Per-detector timeout |
+| `asyncio_timeout_limit` | 5 (seconds) — hardcoded in `guardrails/__init__.py` (`detector_wrapper`), not user-configurable in this commit | Per-detector timeout |
 | `early_exit` | True per guard | Stop on first hit; cancel pending parallel detectors |
 | `run_in_parallel` | False per guard | Sequential vs parallel detector execution within a guard |
 | `score_threshold` | varies per detector | Decision threshold for ML detectors |
