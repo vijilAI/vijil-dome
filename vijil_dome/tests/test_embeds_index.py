@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
-from unittest.mock import AsyncMock, MagicMock, patch
+import os
+import tempfile
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -68,7 +70,6 @@ def test_faiss_dimension_mismatch_raises() -> None:
         __import__("numpy").random.randn(5, 1536).astype("float32")
     )
 
-    import tempfile, os
     with tempfile.NamedTemporaryFile(suffix=".index", delete=False) as f:
         faiss.write_index(fake_faiss_index, f.name)
         tmp_path = f.name
