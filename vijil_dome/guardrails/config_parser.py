@@ -16,9 +16,16 @@
 
 from vijil_dome.guardrails import Guard, Guardrail
 from vijil_dome.detectors.methods import *  # noqa: F403
-from vijil_dome.detectors import DetectionCategory, DetectionFactory
+from vijil_dome.detectors import DetectionCategory, DetectionFactory, DetectionMethod
+from vijil_dome.detectors.methods.remote_method import RemoteDetectionMethod
+from vijil_dome.detectors.remote_dispatcher import RemoteDetectorDispatcher
+import os
 import toml
+import logging
+from enum import Enum
 from typing import Tuple, Dict, Any, Optional  # noqa: F401
+
+logger = logging.getLogger("vijil.dome")
 
 GUARDRAIL_CATEGORY_MAPPING = {
     "security": DetectionCategory.Security,
@@ -29,27 +36,194 @@ GUARDRAIL_CATEGORY_MAPPING = {
     "policy": DetectionCategory.Policy,
 }
 
+# Detectors that require model weights or LLM calls — routed to the
+# inference server (vijil-inference#30) when DOME_INFERENCE_URL is set.
+# Names match dome's canonical registry (vijil_dome/detectors/__init__.py)
+# and the @register_detector strings on the inference server. The
+# server-side contract test asserts both sides hold the same set.
+REMOTE_DETECTORS: set[str] = {
+    # Transformer classifiers
+    "prompt-injection-mbert",
+    "prompt-injection-deberta-v3-base",
+    "prompt-injection-deberta-finetuned-11122024",
+    "moderation-mbert",
+    "moderation-deberta",
+    "stereotype-eeoc-fast",
+    "prompt-harmfulness-fast",
+    # PII (presidio + spacy)
+    "privacy-presidio",
+    # LLM-based detectors
+    "security-llm",
+    "moderation-prompt-engineering",
+    "hallucination-llm",
+    "fact-check-llm",
+    "generic-llm",
+    "policy-gpt-oss-safeguard",
+}
+
 EARLY_EXIT = "early-exit"
 PARALLELIZED = "run-parallel"
 
 
+class _Route(str, Enum):
+    """Per-detector routing decision.
+
+    AUTO   — remote when DOME_INFERENCE_URL is set, else local. The
+             default for any remote-capable detector.
+    LOCAL  — always local; ignores DOME_INFERENCE_URL. Use to keep one
+             detector in-process (e.g., privacy-presidio for compliance).
+    REMOTE — always remote; fails loud at config-parse time if URL is
+             unset or the detector isn't remote-capable. Use when a
+             deployment requires remote execution and silent fallback
+             to local would be a quiet downgrade.
+    """
+
+    AUTO = "auto"
+    LOCAL = "local"
+    REMOTE = "remote"
+
+
+def _env_forced_local_set() -> set[str]:
+    """Parse ``DOME_LOCAL_DETECTORS`` into a set, tolerating whitespace
+    and stray commas. Read on every call so test ``monkeypatch.setenv``
+    works and so an operator changing the env var between Dome
+    reconstructions sees the new value.
+    """
+    raw = os.environ.get("DOME_LOCAL_DETECTORS", "")
+    return {n.strip() for n in raw.split(",") if n.strip()}
+
+
+def _resolve_route(detector_name: str, detector_config: dict) -> Tuple[_Route, str]:
+    """Resolve the route for a single detector, highest priority first.
+
+    Priority:
+      1. YAML ``route`` key on the detector's config block.
+      2. ``DOME_LOCAL_DETECTORS`` env var (CSV of detector names) —
+         forces listed detectors to LOCAL. Useful for staging or
+         debugging without touching dome.yaml.
+      3. Default: ``AUTO``.
+
+    Returns:
+        Tuple of ``(route, source)`` where source is one of
+        ``"yaml"``, ``"env"``, or ``"default"``. Source is used by the
+        caller to emit a distinct log line per resolution path so
+        operators can confirm an env-var override actually took effect
+        — without source information, env-forced LOCAL routing is
+        invisible in the audit trail.
+
+    Raises:
+        ValueError: if the YAML route value isn't one of auto/local/remote.
+    """
+    yaml_route = detector_config.get("route")
+    if yaml_route is not None:
+        try:
+            return _Route(yaml_route), "yaml"
+        except ValueError:
+            valid = sorted(r.value for r in _Route)
+            raise ValueError(
+                f"Invalid route '{yaml_route}' for detector "
+                f"'{detector_name}'. Must be one of: {valid}"
+            )
+    if detector_name in _env_forced_local_set():
+        return _Route.LOCAL, "env"
+    return _Route.AUTO, "default"
+
+
+def _should_use_remote(detector_name: str, detector_config: Optional[dict] = None) -> bool:
+    """Decide whether to route a detector to the inference server.
+
+    Combines the resolved route (YAML > env > default) with a
+    capability check (URL set, detector remote-capable). REMOTE failures
+    raise; AUTO and LOCAL never raise — AUTO falls back to local
+    silently when no URL is configured (the documented graceful-
+    degradation contract).
+    """
+    config = detector_config or {}
+    route, _source = _resolve_route(detector_name, config)
+
+    if route is _Route.LOCAL:
+        return False
+
+    if route is _Route.REMOTE:
+        if detector_name not in REMOTE_DETECTORS:
+            raise ValueError(
+                f"Detector '{detector_name}' has route=remote but is not "
+                f"a remote-capable detector. Remote-capable detectors: "
+                f"{sorted(REMOTE_DETECTORS)}"
+            )
+        if not RemoteDetectorDispatcher().is_configured:
+            raise ValueError(
+                f"Detector '{detector_name}' has route=remote but "
+                f"DOME_INFERENCE_URL is not set. Set the env var or "
+                f"change to route=auto / route=local."
+            )
+        return True
+
+    # AUTO: remote when remote-capable AND URL is configured.
+    if detector_name not in REMOTE_DETECTORS:
+        return False
+    return RemoteDetectorDispatcher().is_configured
+
+
 def create_detector_for_guard(
     detector_name: str, detector_type: str, detector_config_dict: dict
-):
+) -> DetectionMethod:
     if detector_type not in GUARDRAIL_CATEGORY_MAPPING:
         raise ValueError(f"Invalid detector type encountered: {detector_type}")
     config = dict(detector_config_dict)
     max_batch_concurrency = config.pop("max_batch_concurrency", None)
-    try:
-        detector_instance = DetectionFactory.get_detector(
-            GUARDRAIL_CATEGORY_MAPPING[detector_type],
-            detector_name,
-            **config,
+
+    # Resolve once and reuse. _should_use_remote re-resolves internally
+    # but doesn't return source; we want both the boolean (for routing)
+    # and the source (for the audit log) without reading the env twice.
+    resolved_route, resolved_source = _resolve_route(detector_name, config)
+    use_remote = _should_use_remote(detector_name, config)
+    # 'route' is config metadata for this layer; downstream detector
+    # constructors don't accept it. Pop AFTER resolution so the resolver
+    # can read it.
+    config.pop("route", None)
+
+    detector_instance: DetectionMethod
+    if use_remote:
+        threshold = config.pop("threshold", 0.5)
+        logger.info(
+            "Using remote detector for %s (route=%s, source=%s, threshold=%.2f)",
+            detector_name, resolved_route.value, resolved_source, threshold,
         )
-    except Exception as e:
-        raise ValueError(
-            f"Something broke when creating the detector {detector_name}. You might have passed an invalid parameter. Exception:{e}"
+        detector_instance = RemoteDetectionMethod(
+            detector_name=detector_name,
+            threshold=threshold,
+            config=config,
         )
+    else:
+        # Always log the local branch so env-forced LOCAL (source=env)
+        # is visible in the audit trail. Without this an operator who
+        # set DOME_LOCAL_DETECTORS would have no log evidence the
+        # override took effect.
+        logger.info(
+            "Using local detector for %s (route=%s, source=%s)",
+            detector_name, resolved_route.value, resolved_source,
+        )
+        try:
+            detector_instance = DetectionFactory.get_detector(
+                GUARDRAIL_CATEGORY_MAPPING[detector_type],
+                detector_name,
+                **config,
+            )
+        except Exception as e:
+            # If this is a remote-capable detector that failed locally,
+            # give a clear message about missing deps or inference server
+            if detector_name in REMOTE_DETECTORS:
+                raise ValueError(
+                    f"Detector '{detector_name}' requires either: "
+                    f"(1) DOME_INFERENCE_URL set to route to inference server, or "
+                    f"(2) pip install vijil-dome[full] for local execution. "
+                    f"Original error: {e}"
+                )
+            raise ValueError(
+                f"Something broke when creating the detector {detector_name}. "
+                f"You might have passed an invalid parameter. Exception:{e}"
+            )
     if max_batch_concurrency is not None:
         detector_instance.max_batch_concurrency = max_batch_concurrency
     return detector_instance
