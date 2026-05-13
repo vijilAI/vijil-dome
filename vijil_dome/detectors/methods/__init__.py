@@ -19,28 +19,47 @@
 # are always importable. Torch-only modules are gated behind a check
 # so that ``pip install vijil-dome`` (without the ``local`` extra)
 # still loads the remote / API-only detectors.
+# --- Always available: pure Python detectors (no model deps) ---
 __all__ = [
     "flashtext_kw_banlist",
-    "llm_models",
-    "openai_models",
-    "pii_presidio",
     "secret_detector",
     "encoding_heuristics",
-    "gpt_oss_safeguard_policy",
     "policy_sections_detector",
-    # These three have lazy torch imports and work without torch
-    # (remote + safeguard modes stay available).
-    "pi_hf_mbert",
-    "toxicity_mbert",
-    "stereotype_eeoc",
-    "prompt_harmfulness",
+    # Remote detection method (httpx only, no models)
+    "remote_method",
 ]
 
-# Modules that require torch for all functionality.
+# --- Detectors that require litellm (LLM-based detection) ---
+try:
+    import litellm  # noqa: F401
+
+    __all__.extend([
+        "llm_models",
+        "openai_models",
+        "gpt_oss_safeguard_policy",
+    ])
+except ImportError:
+    pass
+
+# --- Detectors that require presidio (PII detection) ---
+try:
+    import presidio_analyzer  # noqa: F401
+
+    __all__.append("pii_presidio")
+except ImportError:
+    pass
+
+# --- Detectors that have lazy torch imports ---
+# These modules handle their own torch availability internally
+# (remote + safeguard modes stay available without torch).
 try:
     import torch  # noqa: F401
 
     __all__.extend([
+        "pi_hf_mbert",
+        "toxicity_mbert",
+        "stereotype_eeoc",
+        "prompt_harmfulness",
         "factcheck_roberta",
         "hhem_hallucination",
         "jb_perplexity_heuristics",
@@ -51,6 +70,7 @@ try:
 except ImportError:
     pass
 
+# --- Google Perspective API ---
 try:
     import googleapiclient  # noqa: F401
 
