@@ -66,6 +66,7 @@ class GuardResult(BaseModel):
     response: str
     detection_score: float = 0.0
     triggered_methods: List[str] = []
+    errored_methods: List[str] = []
 
     def __str__(self):
         result_dict = {
@@ -92,6 +93,7 @@ class GuardrailResult(BaseModel):
     guard_exec_details: Dict[str, GuardResult]
     detection_score: float = 0.0
     triggered_methods: List[str] = []
+    errored_methods: List[str] = []
 
     def __str__(self):
         result_dict = {
@@ -230,6 +232,12 @@ class Guard:
             default=0.0,
         )
         triggered_methods = [name for name, d in detector_results.items() if d.hit]
+        errored_methods = [
+            name for name, d in detector_results.items()
+            if not d.hit and isinstance(d.result, dict) and d.result.get("label") == "error"
+        ]
+        if errored_methods:
+            logger.warning("Detectors returned errors: %s", errored_methods)
         return GuardResult(
             triggered=flagged,
             details=detector_results,
@@ -237,6 +245,7 @@ class Guard:
             response=response_string,
             detection_score=detection_score,
             triggered_methods=triggered_methods,
+            errored_methods=errored_methods,
         )
 
     # Parallel Guard
@@ -362,6 +371,12 @@ class Guard:
             default=0.0,
         )
         triggered_methods = [name for name, d in detector_results.items() if d.hit]
+        errored_methods = [
+            name for name, d in detector_results.items()
+            if not d.hit and isinstance(d.result, dict) and d.result.get("label") == "error"
+        ]
+        if errored_methods:
+            logger.warning("Detectors returned errors: %s", errored_methods)
         return GuardResult(
             triggered=flagged,
             details=detector_results,
@@ -369,6 +384,7 @@ class Guard:
             response=response_string,
             detection_score=detection_score,
             triggered_methods=triggered_methods,
+            errored_methods=errored_methods,
         )
 
     # Sync method that runs the regular guard or parallel guard based on config
@@ -494,6 +510,10 @@ class Guard:
             triggered_methods = [
                 name for name, d in item_detector_results[i].items() if d.hit
             ]
+            errored_methods = [
+                name for name, d in item_detector_results[i].items()
+                if not d.hit and isinstance(d.result, dict) and d.result.get("label") == "error"
+            ]
             items.append(GuardResult(
                 triggered=item_flagged[i],
                 details=item_detector_results[i],
@@ -501,6 +521,7 @@ class Guard:
                 response=item_response[i],
                 detection_score=detection_score,
                 triggered_methods=triggered_methods,
+                errored_methods=errored_methods,
             ))
 
         exec_time = time.time() - st_time
@@ -625,6 +646,11 @@ class Guardrail:
             if gr.triggered
             for method in gr.triggered_methods
         ]
+        errored_methods = [
+            method
+            for gr in guard_results.values()
+            for method in gr.errored_methods
+        ]
         return GuardrailResult(
             flagged=flagged,
             guardrail_response_message=response_string,
@@ -632,6 +658,7 @@ class Guardrail:
             guard_exec_details=guard_results,
             detection_score=detection_score,
             triggered_methods=triggered_methods,
+            errored_methods=errored_methods,
         )
 
     # Parallel guard
@@ -709,6 +736,11 @@ class Guardrail:
             if gr.triggered
             for method in gr.triggered_methods
         ]
+        errored_methods = [
+            method
+            for gr in guard_results.values()
+            for method in gr.errored_methods
+        ]
         return GuardrailResult(
             flagged=flagged,
             guardrail_response_message=response_string,
@@ -716,6 +748,7 @@ class Guardrail:
             guard_exec_details=guard_results,
             detection_score=detection_score,
             triggered_methods=triggered_methods,
+            errored_methods=errored_methods,
         )
 
     # Sync method that runs the regular guard or parallel guard based on config

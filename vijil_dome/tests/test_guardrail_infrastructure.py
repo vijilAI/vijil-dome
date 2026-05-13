@@ -145,3 +145,75 @@ def test_guardrail_context_manager() -> None:
         executor = guardrail.executor
 
     assert executor._shutdown is True
+
+
+# ---------------------------------------------------------------------------
+# BC-1: Detector error visibility — errored_methods surfaced in results
+# ---------------------------------------------------------------------------
+
+
+class MockErrorDetector(DetectionMethod):
+    """Simulates a detector that errors internally and returns label='error'."""
+
+    async def detect(self, dome_input: DomePayload) -> DetectionResult:
+        return (False, {
+            "label": "error",
+            "error": "torch not available",
+            "response_string": dome_input.query_string,
+            "score": 0.0,
+        })
+
+
+class MockTriggeringDetector(DetectionMethod):
+    """Always triggers."""
+
+    async def detect(self, dome_input: DomePayload) -> DetectionResult:
+        return (True, {"response_string": "Blocked", "score": 0.95})
+
+
+@pytest.mark.asyncio
+async def test_errored_detector_surfaced_in_result() -> None:
+    guard = Guard(
+        guard_name="test_guard",
+        detector_list=[MockErrorDetector()],
+        run_in_parallel=False,
+    )
+    guardrail = Guardrail(level="input", guard_list=[guard], run_in_parallel=False)
+
+    result = await guardrail.async_scan("test input")
+
+    assert result.flagged is False
+    assert "MockErrorDetector" in result.errored_methods
+
+
+@pytest.mark.asyncio
+async def test_errored_and_triggered_coexist() -> None:
+    guard = Guard(
+        guard_name="test_guard",
+        detector_list=[MockErrorDetector(), MockTriggeringDetector()],
+        run_in_parallel=False,
+        early_exit=False,
+    )
+    guardrail = Guardrail(level="input", guard_list=[guard], run_in_parallel=False)
+
+    result = await guardrail.async_scan("test input")
+
+    assert result.flagged is True
+    assert "MockTriggeringDetector" in result.triggered_methods
+    assert "MockErrorDetector" in result.errored_methods
+
+
+@pytest.mark.asyncio
+async def test_clean_scan_has_empty_errored_methods() -> None:
+    guard = Guard(
+        guard_name="test_guard",
+        detector_list=[MockCleanDetector()],
+        run_in_parallel=False,
+    )
+    guardrail = Guardrail(level="input", guard_list=[guard], run_in_parallel=False)
+
+    result = await guardrail.async_scan("test input")
+
+    assert result.flagged is False
+    assert result.errored_methods == []
+    assert result.triggered_methods == []
