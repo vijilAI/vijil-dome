@@ -11,6 +11,7 @@ import logging
 from collections.abc import Iterator
 from typing import Any
 
+from vijil_dome.trust.adapters.base import BaseAdapter, register_adapter
 from vijil_dome.trust.runtime import TrustRuntime
 
 logger = logging.getLogger(__name__)
@@ -201,3 +202,20 @@ def secure_graph(
         logger.debug("Could not wrap graph tools — skipping tool-level enforcement.")
 
     return SecureGraph(graph=compiled, runtime=runtime)
+
+
+# ------------------------------------------------------------------
+# Adapter registry
+# ------------------------------------------------------------------
+
+
+@register_adapter("langgraph")
+class LangGraphAdapter(BaseAdapter):
+    @classmethod
+    def detect(cls, agent: Any) -> bool:
+        module = type(agent).__module__ or ""
+        return module.startswith("langgraph")
+
+    @classmethod
+    def wrap(cls, agent: Any, **kwargs: Any) -> Any:
+        return secure_graph(agent, **kwargs)

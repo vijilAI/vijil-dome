@@ -13,6 +13,8 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+from vijil_dome.trust.adapters.base import BaseAdapter, register_adapter
+
 from vijil_dome.trust.constraints import AgentConstraints
 from vijil_dome.trust.runtime import TrustRuntime
 
@@ -274,3 +276,20 @@ def _extract_response_text(message: dict[str, Any]) -> str | None:
         if isinstance(block, dict) and "text" in block
     ]
     return " ".join(texts) if texts else None
+
+
+# ------------------------------------------------------------------
+# Adapter registry
+# ------------------------------------------------------------------
+
+
+@register_adapter("strands")
+class StrandsAdapter(BaseAdapter):
+    @classmethod
+    def detect(cls, agent: Any) -> bool:
+        module = type(agent).__module__ or ""
+        return module.startswith("strands")
+
+    @classmethod
+    def wrap(cls, agent: Any, **kwargs: Any) -> Any:
+        return secure_agent(agent, **kwargs)
