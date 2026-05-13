@@ -83,6 +83,7 @@ class DomedMCPServer:
         server_name: Optional[str] = None,
         tool_call_input_block_message: Optional[str] = None,
         tool_call_output_block_message: Optional[str] = None,
+        enforce: bool = True,
     ):
         self.dome = dome
         self.mcp_server_config = mcp_server_config
@@ -93,6 +94,7 @@ class DomedMCPServer:
             tool_call_output_block_message or DEFAULT_TOOL_RESPONSE_BLOCKED_MESSAGE
         )
         self.server_name = server_name or "Domed MCP Server"
+        self.enforce = enforce
         self.server = None  # type: Optional[FastMCPProxy]
 
     async def initialize(self):
@@ -100,6 +102,7 @@ class DomedMCPServer:
 
     async def _create_guardrailed_server(self) -> FastMCPProxy:
         dome_instance = self.dome
+        dome_enforce = self.enforce
         tool_call_block_message = self.tool_call_input_block_message
         tool_response_block_message = self.tool_call_output_block_message
 
@@ -107,7 +110,7 @@ class DomedMCPServer:
             async def on_call_tool(self, context: MiddlewareContext, call_next):
                 original_input = str(context.message)
                 input_scan = await dome_instance.async_guard_input(original_input)
-                if input_scan.flagged:
+                if dome_enforce and input_scan.flagged:
                     # Dome is triggered. Create a minimal response object that satisfies output typecast
                     tool_in_ctx = await context.fastmcp_context.fastmcp.get_tool(
                         context.message.name
@@ -133,7 +136,7 @@ class DomedMCPServer:
                 output_scan = await dome_instance.async_guard_output(
                     DomePayload(prompt=original_input, response=str(result.structured_content))
                 )
-                if output_scan.flagged:
+                if dome_enforce and output_scan.flagged:
                     # Dome is triggered. Create a minimal response object that satisfies output typecast
                     tool_in_ctx = await context.fastmcp_context.fastmcp.get_tool(
                         context.message.name

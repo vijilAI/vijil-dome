@@ -36,9 +36,11 @@ except ImportError:
 class AbstractBaseEmbeddingsIndex(AbstractEmbeddingsIndex):
     _index: Optional[Union[pd.DataFrame, "AnnoyIndex"]] = None
     _embedder: Optional[AbstractEmbedder] = None
-    _items: List[EmbeddingsItem] = []
-    _embeddings: List[Embeddings] = []
     _embedding_size: int = 0
+
+    def __init__(self) -> None:
+        self._items: List[EmbeddingsItem] = []
+        self._embeddings: List[Embeddings] = []
 
     @abstractmethod
     async def build(self) -> None:
@@ -94,6 +96,7 @@ class AbstractBaseEmbeddingsIndex(AbstractEmbeddingsIndex):
 
 class InMemEmbeddingsIndex(AbstractBaseEmbeddingsIndex):
     def __init__(self, embedder):
+        super().__init__()
         self._embedder = embedder
 
     async def build(self) -> None:
@@ -160,6 +163,7 @@ class AnnoyEmbeddingsIndex(AbstractBaseEmbeddingsIndex):
     """
 
     def __init__(self, embedder):
+        super().__init__()
         if not _ANNOY_AVAILABLE:
             raise ValueError(
                 "Annoy is not installed. Only in-memory indexing is available. Use `pip install annoy` to intall it."

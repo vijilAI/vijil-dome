@@ -39,6 +39,9 @@ class TrustRuntime:
         mode: str = "warn",
         spire_socket: str = "/run/spire/sockets/agent.sock",
     ) -> None:
+        _valid_modes = ("warn", "enforce")
+        if mode not in _valid_modes:
+            raise ValueError(f"mode must be one of {_valid_modes}, got {mode!r}")
         self.mode = mode
         self._agent_id = agent_id
         self._guards_disabled: bool = False

@@ -251,3 +251,26 @@ def test_mtls_downgrade_logs_warning(caplog: pytest.LogCaptureFixture) -> None:
             pass
 
     assert any("mTLS downgrade" in r.message for r in caplog.records)
+
+
+# ---------------------------------------------------------------------------
+# BC-18: Mode validation
+# ---------------------------------------------------------------------------
+
+
+def test_invalid_mode_raises() -> None:
+    with pytest.raises(ValueError, match="mode must be one of"):
+        TrustRuntime(
+            client=_make_mock_client(),
+            agent_id="agent-123",
+            mode="enforced",
+        )
+
+
+def test_typo_mode_raises() -> None:
+    with pytest.raises(ValueError, match="mode must be one of"):
+        TrustRuntime(
+            client=_make_mock_client(),
+            agent_id="agent-123",
+            mode="Enforce",
+        )
