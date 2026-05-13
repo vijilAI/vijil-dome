@@ -41,6 +41,7 @@ class TrustRuntime:
     ) -> None:
         self.mode = mode
         self._agent_id = agent_id
+        self._guards_disabled: bool = False
 
         # 1. Resolve identity
         token: str | None = None
@@ -96,7 +97,12 @@ class TrustRuntime:
                     config.update(dome_cfg.guards)
                     self._dome = Dome(dome_config=config, enforce=(mode == "enforce"))
                 except Exception as exc:
+                    if mode == "enforce":
+                        raise RuntimeError(
+                            f"Dome initialization failed in enforce mode: {exc}"
+                        ) from exc
                     logger.warning("Dome initialization failed: %s. Guards disabled.", exc)
+                    self._guards_disabled = True
             else:
                 logger.info("No Dome guards configured; guard passes will be skipped.")
         else:
@@ -182,6 +188,7 @@ class TrustRuntime:
                 guarded_response=None,
                 exec_time_ms=0.0,
                 trace=[],
+                guards_disabled=self._guards_disabled,
             )
         scan = self._dome.guard_input(message, agent_id=self._agent_id)
         result = EnforcementResult.from_scan_result(scan)
@@ -203,6 +210,7 @@ class TrustRuntime:
                 guarded_response=None,
                 exec_time_ms=0.0,
                 trace=[],
+                guards_disabled=self._guards_disabled,
             )
         scan = self._dome.guard_output(response, agent_id=self._agent_id)
         result = EnforcementResult.from_scan_result(scan)
@@ -348,8 +356,13 @@ class TrustRuntime:
                     agent_ctx = self._identity.mtls_context()
                     ctx = agent_ctx
                     ctx.check_hostname = False
-                except RuntimeError:
-                    pass  # Fall back to server-only verification
+                except RuntimeError as exc:
+                    logger.warning("mTLS downgrade for %s: %s", tool.name, exc)
+                    self._audit._emit(
+                        "mtls_downgrade",
+                        tool_name=tool.name,
+                        error=str(exc),
+                    )
 
             # Connect and extract peer cert
             raw = socket.create_connection((host, port), timeout=5)

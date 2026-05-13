@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
-from unittest.mock import MagicMock
+import logging
+from unittest.mock import MagicMock, patch
+
+import pytest
 
 from vijil_dome.trust.guard import EnforcementResult
 from vijil_dome.trust.runtime import TrustRuntime
@@ -137,7 +140,8 @@ def test_warn_mode_does_not_enforce() -> None:
 
 
 def test_enforce_mode_enforces() -> None:
-    runtime = _make_runtime(mode="enforce")
+    with patch("vijil_dome.Dome"):
+        runtime = _make_runtime(mode="enforce")
     result = runtime.check_tool_call("delete_records", {})
 
     assert result.permitted is False
@@ -176,3 +180,74 @@ def test_wrapped_tool_calls_original() -> None:
     result = wrapped("Paris")
 
     assert result == "Booked to Paris"
+
+
+# ---------------------------------------------------------------------------
+# BC-5: Silent guards disabled on init error
+# ---------------------------------------------------------------------------
+
+
+def test_enforce_mode_raises_on_dome_init_failure() -> None:
+    with patch("vijil_dome.Dome", side_effect=RuntimeError("torch missing")):
+        with pytest.raises(RuntimeError, match="Dome initialization failed in enforce mode"):
+            TrustRuntime(
+                client=_make_mock_client(),
+                agent_id="agent-123",
+                mode="enforce",
+            )
+
+
+def test_warn_mode_degrades_on_dome_init_failure() -> None:
+    with patch("vijil_dome.Dome", side_effect=RuntimeError("torch missing")):
+        runtime = TrustRuntime(
+            client=_make_mock_client(),
+            agent_id="agent-123",
+            mode="warn",
+        )
+    assert runtime._guards_disabled is True
+    assert runtime._dome is None
+
+
+def test_guards_disabled_surfaced_in_result() -> None:
+    with patch("vijil_dome.Dome", side_effect=RuntimeError("torch missing")):
+        runtime = TrustRuntime(
+            client=_make_mock_client(),
+            agent_id="agent-123",
+            mode="warn",
+        )
+    result = runtime.guard_input("hello")
+    assert result.guards_disabled is True
+    assert result.flagged is False
+
+
+# ---------------------------------------------------------------------------
+# BC-7: Silent mTLS downgrade logging
+# ---------------------------------------------------------------------------
+
+
+def test_mtls_downgrade_logs_warning(caplog: pytest.LogCaptureFixture) -> None:
+    runtime = _make_runtime()
+    runtime._dome = None  # skip guard pass
+
+    mock_identity = MagicMock()
+    mock_identity.is_attested.return_value = True
+    mock_identity.mtls_context.side_effect = RuntimeError("no SVID")
+    mock_identity.spiffe_id = "spiffe://vijil.ai/agents/test/v1"
+    runtime._identity = mock_identity
+
+    mock_manifest = MagicMock()
+    mock_tool = MagicMock()
+    mock_tool.name = "search_flights"
+    mock_tool.identity = "spiffe://vijil.ai/tools/search_flights/v1"
+    mock_tool.endpoint = "mcp+tls://localhost:9999"
+    mock_manifest.tools = [mock_tool]
+    runtime._manifest = mock_manifest
+
+    with caplog.at_level(logging.WARNING):
+        # attest() may fail on socket connection — we only care about the mTLS log
+        try:
+            runtime.attest()
+        except Exception:
+            pass
+
+    assert any("mTLS downgrade" in r.message for r in caplog.records)

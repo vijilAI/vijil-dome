@@ -150,3 +150,92 @@ def test_get_permission_returns_none_for_unknown() -> None:
     perm = policy.get_permission("unknown_tool")
 
     assert perm is None
+
+
+# ---------------------------------------------------------------------------
+# 8. BC-6: Missing action denied when allowed_actions set (fail-closed)
+# ---------------------------------------------------------------------------
+
+
+def _make_constraints_with_allowed_actions(
+    allowed_actions: list[str],
+) -> AgentConstraints:
+    return AgentConstraints.model_validate(
+        {
+            "agent_id": "spiffe://vijil.ai/agents/travel-agent/v1",
+            "dome_config": {
+                "input_guards": [],
+                "output_guards": [],
+                "guards": {},
+            },
+            "tool_permissions": [
+                {
+                    "name": "file_tool",
+                    "identity": "spiffe://vijil.ai/tools/file_tool/v1",
+                    "endpoint": "mcp+tls://file_tool.internal:8443",
+                    "allowed_actions": allowed_actions,
+                },
+            ],
+            "organization": {
+                "required_input_guards": [],
+                "required_output_guards": [],
+                "denied_tools": [],
+            },
+            "enforcement_mode": "enforce",
+            "updated_at": "2026-04-03T12:00:00+00:00",
+        }
+    )
+
+
+def test_missing_action_denied_when_allowed_actions_set() -> None:
+    policy = ToolPolicy(_make_constraints_with_allowed_actions(["read"]))
+    result = policy.check("file_tool", args={})
+
+    assert result.permitted is False
+    assert "not in allowed_actions" in (result.error or "")
+
+
+def test_none_action_denied_when_allowed_actions_set() -> None:
+    policy = ToolPolicy(_make_constraints_with_allowed_actions(["read"]))
+    result = policy.check("file_tool", args={"action": None})
+
+    assert result.permitted is False
+    assert "not in allowed_actions" in (result.error or "")
+
+
+def test_valid_action_permitted() -> None:
+    policy = ToolPolicy(_make_constraints_with_allowed_actions(["read", "write"]))
+    result = policy.check("file_tool", args={"action": "read"})
+
+    assert result.permitted is True
+
+
+def test_no_args_permitted_when_no_allowed_actions() -> None:
+    constraints = AgentConstraints.model_validate(
+        {
+            "agent_id": "spiffe://vijil.ai/agents/travel-agent/v1",
+            "dome_config": {
+                "input_guards": [],
+                "output_guards": [],
+                "guards": {},
+            },
+            "tool_permissions": [
+                {
+                    "name": "file_tool",
+                    "identity": "spiffe://vijil.ai/tools/file_tool/v1",
+                    "endpoint": "mcp+tls://file_tool.internal:8443",
+                },
+            ],
+            "organization": {
+                "required_input_guards": [],
+                "required_output_guards": [],
+                "denied_tools": [],
+            },
+            "enforcement_mode": "enforce",
+            "updated_at": "2026-04-03T12:00:00+00:00",
+        }
+    )
+    policy = ToolPolicy(constraints)
+    result = policy.check("file_tool", args={})
+
+    assert result.permitted is True

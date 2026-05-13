@@ -48,6 +48,7 @@ class EnforcementResult(BaseModel):
     guarded_response: str | None
     exec_time_ms: float
     trace: list[GuardTrace]
+    guards_disabled: bool = False
 
     @classmethod
     def from_scan_result(cls, scan: Any) -> EnforcementResult:
