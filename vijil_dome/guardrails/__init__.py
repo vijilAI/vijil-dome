@@ -14,16 +14,19 @@
 #
 # vijil and vijil-dome are trademarks owned by Vijil Inc.
 
-from vijil_dome.detectors import DetectionMethod, DetectionTimingResult
+from vijil_dome.detectors import DetectionMethod, DetectionTimingResult, BatchDetectionTimingResult
 from vijil_dome.types import DomePayload
 import asyncio
 from asyncio import Task  # noqa: F401
 import concurrent.futures
+import os
 from typing import List, Dict, Tuple, Union, Any, Optional  # noqa: F401
 from abc import ABC, abstractmethod
 import time
 from pydantic import BaseModel
 import logging
+
+_LOG_PAYLOADS = os.environ.get("VIJIL_LOG_PAYLOADS", "").strip() == "1"
 
 
 # Patterns that Diamond's MitigationBypassART detector uses to identify refusals.
@@ -185,13 +188,23 @@ class Guard:
         flagged = False
         detector_results = {}
         response_string = qs
+        asyncio_timeout_limit = 5
         for detector in self.detector_list:
-            detector_scan_result = await detector.detect_with_time(
-                dome_input,
-                agent_id=agent_id,
-                team_id=team_id,
-                user_id=user_id,
-            )
+            try:
+                async with asyncio.timeout(asyncio_timeout_limit):
+                    detector_scan_result = await detector.detect_with_time(
+                        dome_input,
+                        agent_id=agent_id,
+                        team_id=team_id,
+                        user_id=user_id,
+                    )
+            except TimeoutError:
+                logger.warning("Detection method %s timed out.", type(detector).__name__)
+                detector_scan_result = DetectionTimingResult(
+                    hit=False,
+                    result={"error": "Detection method timed out", "response_string": qs},
+                    exec_time=asyncio_timeout_limit * 1000,
+                )
             detector_results[type(detector).__name__] = detector_scan_result
 
             if detector_scan_result.hit:
@@ -429,13 +442,29 @@ class Guard:
         item_response = list(query_strings)
         item_detector_results: List[Dict[str, DetectionTimingResult]] = [{} for _ in range(n)]
 
+        asyncio_timeout_limit = 5
         for detector in self.detector_list:
-            batch_timing = await detector.detect_batch_with_time(
-                dome_inputs,
-                agent_id=agent_id,
-                team_id=team_id,
-                user_id=user_id,
-            )
+            try:
+                async with asyncio.timeout(asyncio_timeout_limit):
+                    batch_timing = await detector.detect_batch_with_time(
+                        dome_inputs,
+                        agent_id=agent_id,
+                        team_id=team_id,
+                        user_id=user_id,
+                    )
+            except TimeoutError:
+                logger.warning("Detection method %s timed out during batch.", type(detector).__name__)
+                batch_timing = BatchDetectionTimingResult(
+                    results=[
+                        DetectionTimingResult(
+                            hit=False,
+                            result={"error": "Detection method timed out", "response_string": query_strings[i]},
+                            exec_time=asyncio_timeout_limit * 1000,
+                        )
+                        for i in range(n)
+                    ],
+                    exec_time=asyncio_timeout_limit * 1000,
+                )
             detector_name = type(detector).__name__
 
             for i, det_result in enumerate(batch_timing.results):
@@ -534,6 +563,24 @@ class Guardrail:
         else:
             self.blocked_response_string = DEFAULT_OUTPUT_BLOCKED_MESSAGE
         self.executor = concurrent.futures.ThreadPoolExecutor()
+
+    def close(self):
+        """Shut down the thread pool executor."""
+        if hasattr(self, "executor") and self.executor is not None:
+            self.executor.shutdown(wait=False, cancel_futures=True)
+
+    def __del__(self):
+        try:
+            self.close()
+        except Exception:
+            pass
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        self.close()
+        return False
 
     async def sequential_guard(
         self,
@@ -706,8 +753,12 @@ class Guardrail:
         team_id: Optional[str] = None,
         user_id: Optional[str] = None,
     ) -> GuardrailResult:
+        mode = "parallel" if self.run_in_parallel else "sequential"
+        qs_str = str(query_string)
+        logger.info("Scanning input through guards in %s mode (length=%d)", mode, len(qs_str))
+        if _LOG_PAYLOADS:
+            logger.debug("Scan payload: %s", qs_str)
         if self.run_in_parallel:
-            logger.info(f'Scanning "{query_string}" through guards in parallel.')
             return await self.parallel_guard(
                 query_string,
                 agent_id=agent_id,
@@ -715,7 +766,6 @@ class Guardrail:
                 user_id=user_id,
             )
         else:
-            logger.info(f'Scanning "{query_string}" through guards sequentially.')
             return await self.sequential_guard(
                 query_string,
                 agent_id=agent_id,
