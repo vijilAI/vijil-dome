@@ -58,7 +58,7 @@ async def test_info_log_does_not_contain_payload(caplog: pytest.LogCaptureFixtur
 
 
 @pytest.mark.asyncio
-async def test_debug_log_contains_payload_with_env_flag(
+async def test_debug_log_is_redacted_with_env_flag(
     caplog: pytest.LogCaptureFixture, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setenv("VIJIL_LOG_PAYLOADS", "1")
@@ -79,7 +79,8 @@ async def test_debug_log_contains_payload_with_env_flag(
         await guardrail.async_scan(secret)
 
     debug_messages = " ".join(r.getMessage() for r in caplog.records if r.levelno == logging.DEBUG)
-    assert secret in debug_messages
+    assert "Scan payload logging enabled (redacted)" in debug_messages
+    assert secret not in debug_messages
 
 
 # ---------------------------------------------------------------------------

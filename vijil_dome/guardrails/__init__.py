@@ -790,7 +790,11 @@ class Guardrail:
         qs_str = str(query_string)
         logger.info("Scanning input through guards in %s mode (length=%d)", mode, len(qs_str))
         if _LOG_PAYLOADS:
-            logger.debug("Scan payload: %s", qs_str)
+            logger.debug(
+                "Scan payload logging enabled (redacted): type=%s length=%d",
+                type(query_string).__name__,
+                len(qs_str),
+            )
         if self.run_in_parallel:
             return await self.parallel_guard(
                 query_string,
