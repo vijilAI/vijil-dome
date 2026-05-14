@@ -253,6 +253,38 @@ def test_mtls_downgrade_logs_warning(caplog: pytest.LogCaptureFixture) -> None:
     assert any("mTLS downgrade" in r.message for r in caplog.records)
 
 
+def test_mtls_downgrade_hard_fails_in_enforce_mode() -> None:
+    with patch("vijil_dome.Dome"):
+        runtime = _make_runtime(mode="enforce")
+    runtime._dome = None
+
+    mock_identity = MagicMock()
+    mock_identity.is_attested.return_value = True
+    mock_identity.mtls_context.side_effect = RuntimeError("no SVID")
+    mock_identity.spiffe_id = "spiffe://vijil.ai/agents/test/v1"
+    runtime._identity = mock_identity
+
+    mock_manifest = MagicMock()
+    mock_tool = MagicMock()
+    mock_tool.name = "search_flights"
+    mock_tool.identity = "spiffe://vijil.ai/tools/search_flights/v1"
+    mock_tool.endpoint = "mcp+tls://localhost:9999"
+    mock_manifest.tools = [mock_tool]
+    runtime._manifest = mock_manifest
+
+    try:
+        result = runtime.attest()
+    except Exception:
+        return
+
+    tool_status = next(
+        (t for t in result.tools if t.tool_name == "search_flights"), None
+    )
+    assert tool_status is not None
+    assert tool_status.verified is False
+    assert "enforce" in (tool_status.error or "").lower()
+
+
 # ---------------------------------------------------------------------------
 # BC-18: Mode validation
 # ---------------------------------------------------------------------------

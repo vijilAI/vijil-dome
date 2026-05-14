@@ -132,7 +132,8 @@ def test_guardrail_close_shuts_down_executor() -> None:
 
     assert guardrail.executor is not None
     guardrail.close()
-    assert guardrail.executor._shutdown is True
+    with pytest.raises(RuntimeError):
+        guardrail.executor.submit(lambda: None)
 
 
 def test_guardrail_context_manager() -> None:
@@ -141,7 +142,8 @@ def test_guardrail_context_manager() -> None:
         assert guardrail.executor is not None
         executor = guardrail.executor
 
-    assert executor._shutdown is True
+    with pytest.raises(RuntimeError):
+        executor.submit(lambda: None)
 
 
 # ---------------------------------------------------------------------------
@@ -159,6 +161,13 @@ class MockErrorDetector(DetectionMethod):
             "response_string": dome_input.query_string,
             "score": 0.0,
         })
+
+
+class MockExceptionDetector(DetectionMethod):
+    """Raises an unhandled exception during detection."""
+
+    async def detect(self, dome_input: DomePayload) -> DetectionResult:
+        raise RuntimeError("model failed to load")
 
 
 class MockTriggeringDetector(DetectionMethod):
@@ -214,3 +223,51 @@ async def test_clean_scan_has_empty_errored_methods() -> None:
     assert result.flagged is False
     assert result.errored_methods == []
     assert result.triggered_methods == []
+
+
+@pytest.mark.asyncio
+async def test_exception_detector_surfaced_in_errored_methods() -> None:
+    guard = Guard(
+        guard_name="test_guard",
+        detector_list=[MockExceptionDetector()],
+        run_in_parallel=False,
+    )
+    guardrail = Guardrail(level="input", guard_list=[guard], run_in_parallel=False)
+
+    result = await guardrail.async_scan("test input")
+
+    assert result.flagged is False
+    assert "MockExceptionDetector" in result.errored_methods
+
+
+@pytest.mark.asyncio
+async def test_timeout_detector_surfaced_in_errored_methods() -> None:
+    hanging = MockHangingDetector(delay=30.0)
+    guard = Guard(
+        guard_name="test_guard",
+        detector_list=[hanging],
+        run_in_parallel=False,
+    )
+    guardrail = Guardrail(level="input", guard_list=[guard], run_in_parallel=False)
+
+    result = await guardrail.async_scan("test input")
+
+    assert result.flagged is False
+    assert "MockHangingDetector" in result.errored_methods
+
+
+@pytest.mark.asyncio
+async def test_cancelled_detector_not_in_errored_methods() -> None:
+    """Cancelled tasks (e.g. from early_exit) should not appear as errored."""
+    guard = Guard(
+        guard_name="test_guard",
+        detector_list=[MockTriggeringDetector(), MockHangingDetector(delay=30.0)],
+        run_in_parallel=True,
+        early_exit=True,
+    )
+    guardrail = Guardrail(level="input", guard_list=[guard], run_in_parallel=False)
+
+    result = await guardrail.async_scan("test input")
+
+    assert result.flagged is True
+    assert "MockHangingDetector" not in result.errored_methods

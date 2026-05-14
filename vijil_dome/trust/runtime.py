@@ -360,6 +360,17 @@ class TrustRuntime:
                     ctx = agent_ctx
                     ctx.check_hostname = False
                 except RuntimeError as exc:
+                    if self.mode == "enforce":
+                        self._audit.emit_mtls_downgrade(
+                            tool.name,
+                            error=str(exc),
+                        )
+                        return ToolAttestationStatus(
+                            tool_name=tool.name,
+                            expected_identity=tool.identity,
+                            verified=False,
+                            error=f"mTLS failed in enforce mode: {exc}",
+                        )
                     logger.warning("mTLS downgrade for %s: %s", tool.name, exc)
                     self._audit.emit_mtls_downgrade(
                         tool.name,

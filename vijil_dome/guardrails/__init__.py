@@ -203,8 +203,15 @@ class Guard:
                 logger.warning("Detection method %s timed out.", type(detector).__name__)
                 detector_scan_result = DetectionTimingResult(
                     hit=False,
-                    result={"error": "Detection method timed out", "response_string": qs},
+                    result={"error": "Detection method timed out", "label": "error", "response_string": qs},
                     exec_time=DETECTOR_TIMEOUT_SECONDS * 1000,
+                )
+            except Exception as exc:
+                logger.warning("Detection method %s raised exception: %s", type(detector).__name__, exc)
+                detector_scan_result = DetectionTimingResult(
+                    hit=False,
+                    result={"error": str(exc), "label": "error", "response_string": qs},
+                    exec_time=0.0,
                 )
             detector_results[type(detector).__name__] = detector_scan_result
 
@@ -267,46 +274,56 @@ class Guard:
         async def detector_wrapper(
             detector: DetectionMethod, dome_input: DomePayload, executor
         ):
-            if hasattr(detector, "run_in_executor") and detector.run_in_executor:
-                if hasattr(detector, "sync_detect") and callable(detector.sync_detect):
+            try:
+                if hasattr(detector, "run_in_executor") and detector.run_in_executor:
+                    if hasattr(detector, "sync_detect") and callable(detector.sync_detect):
+                        try:
+                            async with asyncio.timeout(DETECTOR_TIMEOUT_SECONDS):
+                                result = await run_detector_via_executor(
+                                    executor,
+                                    detector,
+                                    dome_input,
+                                    agent_id=agent_id,
+                                    team_id=team_id,
+                                    user_id=user_id,
+                                )
+                        except TimeoutError:
+                            result = DetectionTimingResult(
+                                hit=False,
+                                result={"error": "Detection method timed out", "label": "error"},
+                                exec_time=DETECTOR_TIMEOUT_SECONDS * 1000,
+                            )
+                    else:
+                        raise ValueError(
+                            f"Attempting to use a detector of type {type(detector).__name__} in an executor without defining a sync detection method."
+                        )
+                else:
                     try:
                         async with asyncio.timeout(DETECTOR_TIMEOUT_SECONDS):
-                            result = await run_detector_via_executor(
-                                executor,
-                                detector,
+                            result = await detector.detect_with_time(
                                 dome_input,
                                 agent_id=agent_id,
                                 team_id=team_id,
                                 user_id=user_id,
                             )
                     except TimeoutError:
+                        logger.warning(
+                            f"Detection method {detector.__class__.__name__} timed out."
+                        )
                         result = DetectionTimingResult(
                             hit=False,
-                            result={"error": "Detection method timed out"},
+                            result={"error": "Detection method timed out", "label": "error"},
                             exec_time=DETECTOR_TIMEOUT_SECONDS * 1000,
                         )
-                else:
-                    raise ValueError(
-                        f"Attempting to use a detector of type {type(detector).__name__} in an executor without defining a sync detection method."
-                    )
-            else:
-                try:
-                    async with asyncio.timeout(DETECTOR_TIMEOUT_SECONDS):
-                        result = await detector.detect_with_time(
-                            dome_input,
-                            agent_id=agent_id,
-                            team_id=team_id,
-                            user_id=user_id,
-                        )
-                except TimeoutError:
-                    logger.warning(
-                        f"Detection method {detector.__class__.__name__} timed out."
-                    )
-                    result = DetectionTimingResult(
-                        hit=False,
-                        result={"error": "Detection method timed out"},
-                        exec_time=DETECTOR_TIMEOUT_SECONDS * 1000,
-                    )
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                logger.warning("Detection method %s raised exception: %s", type(detector).__name__, exc)
+                result = DetectionTimingResult(
+                    hit=False,
+                    result={"error": str(exc), "label": "error"},
+                    exec_time=0.0,
+                )
             return {"name": type(detector).__name__, "result": result}
 
         tasks = []  # type: Union[set[Task[Any]], list[Task[Any]]]
@@ -471,12 +488,25 @@ class Guard:
                     results=[
                         DetectionTimingResult(
                             hit=False,
-                            result={"error": "Detection method timed out", "response_string": query_strings[i]},
+                            result={"error": "Detection method timed out", "label": "error", "response_string": query_strings[i]},
                             exec_time=DETECTOR_TIMEOUT_SECONDS * 1000,
                         )
                         for i in range(n)
                     ],
                     exec_time=DETECTOR_TIMEOUT_SECONDS * 1000,
+                )
+            except Exception as exc:
+                logger.warning("Detection method %s raised exception during batch: %s", type(detector).__name__, exc)
+                batch_timing = BatchDetectionTimingResult(
+                    results=[
+                        DetectionTimingResult(
+                            hit=False,
+                            result={"error": str(exc), "label": "error", "response_string": query_strings[i]},
+                            exec_time=0.0,
+                        )
+                        for i in range(n)
+                    ],
+                    exec_time=0.0,
                 )
             detector_name = type(detector).__name__
 
@@ -588,12 +618,6 @@ class Guardrail:
         """Shut down the thread pool executor."""
         if hasattr(self, "executor") and self.executor is not None:
             self.executor.shutdown(wait=False, cancel_futures=True)
-
-    def __del__(self):
-        try:
-            self.close()
-        except Exception:
-            pass
 
     def __enter__(self):
         return self
