@@ -39,8 +39,12 @@ class TrustRuntime:
         mode: str = "warn",
         spire_socket: str = "/run/spire/sockets/agent.sock",
     ) -> None:
+        _valid_modes = ("warn", "enforce")
+        if mode not in _valid_modes:
+            raise ValueError(f"mode must be one of {_valid_modes}, got {mode!r}")
         self.mode = mode
         self._agent_id = agent_id
+        self._guards_disabled: bool = False
 
         # 1. Resolve identity
         token: str | None = None
@@ -74,7 +78,9 @@ class TrustRuntime:
                 "updated_at": datetime.now(tz=UTC).isoformat(),
             })
 
-        # 3. Create ToolPolicy — override enforcement_mode to match runtime mode
+        # 3. Create ToolPolicy — override enforcement_mode to match runtime mode.
+        # Safe: mode is already validated against _valid_modes above, which
+        # matches AgentConstraints.enforcement_mode's Literal["warn","enforce"].
         constraints_for_policy = self._constraints.model_copy(
             update={"enforcement_mode": mode}
         )
@@ -96,7 +102,13 @@ class TrustRuntime:
                     config.update(dome_cfg.guards)
                     self._dome = Dome(dome_config=config, enforce=(mode == "enforce"))
                 except Exception as exc:
+                    if mode == "enforce":
+                        raise RuntimeError(
+                            f"Dome initialization failed in enforce mode: {exc}"
+                        ) from exc
                     logger.warning("Dome initialization failed: %s. Guards disabled.", exc)
+                    self._guards_disabled = True
+                    self._guards_disabled_error = str(exc)
             else:
                 logger.info("No Dome guards configured; guard passes will be skipped.")
         else:
@@ -111,6 +123,14 @@ class TrustRuntime:
 
         # 6. Create audit emitter
         self._audit = AuditEmitter(agent_id=agent_id)
+
+        if self._guards_disabled:
+            self._audit.emit_guards_disabled(
+                error=getattr(self, "_guards_disabled_error", "unknown"),
+            )
+
+        if not self._identity.is_attested():
+            self._audit.emit_identity_unattested()
 
     # ------------------------------------------------------------------
     # Attestation
@@ -182,6 +202,7 @@ class TrustRuntime:
                 guarded_response=None,
                 exec_time_ms=0.0,
                 trace=[],
+                guards_disabled=self._guards_disabled,
             )
         scan = self._dome.guard_input(message, agent_id=self._agent_id)
         result = EnforcementResult.from_scan_result(scan)
@@ -203,6 +224,7 @@ class TrustRuntime:
                 guarded_response=None,
                 exec_time_ms=0.0,
                 trace=[],
+                guards_disabled=self._guards_disabled,
             )
         scan = self._dome.guard_output(response, agent_id=self._agent_id)
         result = EnforcementResult.from_scan_result(scan)
@@ -348,8 +370,23 @@ class TrustRuntime:
                     agent_ctx = self._identity.mtls_context()
                     ctx = agent_ctx
                     ctx.check_hostname = False
-                except RuntimeError:
-                    pass  # Fall back to server-only verification
+                except RuntimeError as exc:
+                    if self.mode == "enforce":
+                        self._audit.emit_mtls_downgrade(
+                            tool.name,
+                            error=str(exc),
+                        )
+                        return ToolAttestationStatus(
+                            tool_name=tool.name,
+                            expected_identity=tool.identity,
+                            verified=False,
+                            error=f"mTLS failed in enforce mode: {exc}",
+                        )
+                    logger.warning("mTLS downgrade for %s: %s", tool.name, exc)
+                    self._audit.emit_mtls_downgrade(
+                        tool.name,
+                        error=str(exc),
+                    )
 
             # Connect and extract peer cert
             raw = socket.create_connection((host, port), timeout=5)

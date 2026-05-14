@@ -86,6 +86,34 @@ class AuditEmitter:
             tool_count=tool_count,
         )
 
+    def emit_mtls_downgrade(
+        self,
+        tool_name: str,
+        *,
+        error: str,
+    ) -> None:
+        """Emit an mTLS downgrade event."""
+        self._emit(
+            "mtls_downgrade",
+            tool_name=tool_name,
+            error=error,
+        )
+
+    def emit_guards_disabled(
+        self,
+        *,
+        error: str,
+    ) -> None:
+        """Emit a guards-disabled event (Dome init failed in warn mode)."""
+        self._emit(
+            "guards_disabled",
+            error=error,
+        )
+
+    def emit_identity_unattested(self) -> None:
+        """Emit an event when the agent is running without SPIFFE attestation."""
+        self._emit("identity_unattested")
+
     # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------

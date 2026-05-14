@@ -64,10 +64,11 @@ class ToolPolicy:
         if perm is None:
             return self._deny(tool_name, "not in agent permissions", args)
 
-        # Check allowed_actions if the permission restricts them
+        # Check allowed_actions if the permission restricts them.
+        # Fail-closed: missing or None action is denied when allowed_actions is set.
         if perm.allowed_actions is not None and args is not None:
             action = args.get("action")
-            if action is not None and action not in perm.allowed_actions:
+            if action is None or action not in perm.allowed_actions:
                 return self._deny(
                     tool_name,
                     f"action {action!r} not in allowed_actions {perm.allowed_actions}",

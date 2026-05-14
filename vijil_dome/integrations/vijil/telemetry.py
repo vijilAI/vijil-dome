@@ -68,9 +68,21 @@ def _set_darwin_span_attributes(
     is_flagged = (
         result.flagged if isinstance(result, GuardrailResult) else result.triggered
     )
-    _safe_set_attribute(span, "detection.label", "flagged" if is_flagged else "clean")
+    has_errors = bool(result.errored_methods)
+
+    if has_errors and not is_flagged:
+        label = "errored"
+    elif is_flagged:
+        label = "flagged"
+    else:
+        label = "clean"
+
+    _safe_set_attribute(span, "detection.label", label)
     _safe_set_attribute(span, "detection.score", float(result.detection_score or 0.0))
 
     if result.triggered_methods:
         _safe_set_attribute(span, "detection.methods", result.triggered_methods)
         _safe_set_attribute(span, "detection.method", result.triggered_methods[0])
+
+    if result.errored_methods:
+        _safe_set_attribute(span, "detection.errored_methods", result.errored_methods)

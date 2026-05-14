@@ -122,10 +122,17 @@ class SecureGraph:
         if full_output:
             output_result = self._runtime.guard_output(full_output)
             if output_result.flagged:
-                logger.warning(
-                    "Output guard flagged streamed response (cannot retract): %s",
-                    output_result.guarded_response,
-                )
+                if self._runtime.mode == "enforce":
+                    logger.warning(
+                        "Output guard flagged streamed response in enforce mode "
+                        "(chunks already yielded, cannot retract): %s",
+                        output_result.guarded_response,
+                    )
+                else:
+                    logger.info(
+                        "Output guard flagged streamed response (shadow mode): %s",
+                        output_result.guarded_response,
+                    )
 
     # ------------------------------------------------------------------
     # async variants (thin wrappers for now)

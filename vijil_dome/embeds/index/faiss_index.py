@@ -130,6 +130,19 @@ class FaissEmbeddingsIndex(AbstractEmbeddingsIndex):
         except Exception as e:
             raise ValueError(f"Failed to load FAISS index from {file_path}: {e}")
 
+        if self._embedder is not None:
+            expected_dim = getattr(self._embedder, "embedding_size", None)
+            if expected_dim is not None and expected_dim != self._embedding_size:
+                index_dim = self._embedding_size
+                self._index = None
+                self._is_loaded = False
+                self._embedding_size = 0
+                raise ValueError(
+                    f"FAISS index dimension ({index_dim}) does not match "
+                    f"embedder dimension ({expected_dim}). The index may have been "
+                    f"built with a different embedding model."
+                )
+
     async def nearest_neighbor(
         self, query: str, k: int, with_distance: bool = False
     ) -> List[Tuple[EmbeddingsItem, Optional[float]]]:

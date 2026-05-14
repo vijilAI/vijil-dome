@@ -111,6 +111,7 @@ class ScanResult(BaseModel):
     exec_time: float
     detection_score: float = 0.0
     triggered_methods: List[str] = []
+    errored_methods: List[str] = []
 
     def is_safe(self):
         return not self.flagged
@@ -330,7 +331,8 @@ class Dome:
     def _empty_guardrail_result(query_string: Union[str, DomePayload]):
         qs = DomePayload.coerce(query_string).query_string
         return ScanResult(
-            flagged=False, response_string=qs, trace={}, exec_time=0.0
+            flagged=False, response_string=qs, trace={}, exec_time=0.0,
+            errored_methods=[],
         )
 
     def guard_input(
@@ -355,6 +357,7 @@ class Dome:
             exec_time=result.exec_time,
             detection_score=result.detection_score,
             triggered_methods=result.triggered_methods,
+            errored_methods=result.errored_methods,
         )
 
     async def async_guard_input(
@@ -379,6 +382,7 @@ class Dome:
             exec_time=result.exec_time,
             detection_score=result.detection_score,
             triggered_methods=result.triggered_methods,
+            errored_methods=result.errored_methods,
         )
 
     def guard_output(
@@ -403,6 +407,7 @@ class Dome:
             exec_time=result.exec_time,
             detection_score=result.detection_score,
             triggered_methods=result.triggered_methods,
+            errored_methods=result.errored_methods,
         )
 
     async def async_guard_output(
@@ -427,6 +432,7 @@ class Dome:
             exec_time=result.exec_time,
             detection_score=result.detection_score,
             triggered_methods=result.triggered_methods,
+            errored_methods=result.errored_methods,
         )
 
     @staticmethod
@@ -457,6 +463,7 @@ class Dome:
                 exec_time=gr.exec_time,
                 detection_score=gr.detection_score,
                 triggered_methods=gr.triggered_methods,
+                errored_methods=gr.errored_methods,
             ))
         return BatchScanResult(items=items, exec_time=batch_result.exec_time)
 

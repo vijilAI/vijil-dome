@@ -174,13 +174,29 @@ class DetectionMethod(ABC):
         """
         dome_input = DomePayload.coerce(query_string)
         start_time = time.time()
-        result = await self._call_with_supported_kwargs(
-            self.detect,
-            dome_input,
-            agent_id=agent_id,
-            team_id=team_id,
-            user_id=user_id,
-        )
+        try:
+            result = await self._call_with_supported_kwargs(
+                self.detect,
+                dome_input,
+                agent_id=agent_id,
+                team_id=team_id,
+                user_id=user_id,
+            )
+        except Exception as exc:
+            execution_time = round((time.time() - start_time) * 1000, 3)
+            logging.warning(
+                "Detector %s raised exception: %s", type(self).__name__, exc,
+            )
+            return DetectionTimingResult(
+                hit=False,
+                result={
+                    "label": "error",
+                    "error": str(exc),
+                    "response_string": dome_input.query_string,
+                    "score": 0.0,
+                },
+                exec_time=execution_time,
+            )
         execution_time = round((time.time() - start_time) * 1000, 3)
 
         result_payload = dict(result[1])
@@ -225,13 +241,36 @@ class DetectionMethod(ABC):
         each result in DetectionTimingResult.
         """
         start_time = time.time()
-        batch_results = await self._call_with_supported_kwargs(
-            self.detect_batch,
-            inputs,
-            agent_id=agent_id,
-            team_id=team_id,
-            user_id=user_id,
-        )
+        try:
+            batch_results = await self._call_with_supported_kwargs(
+                self.detect_batch,
+                inputs,
+                agent_id=agent_id,
+                team_id=team_id,
+                user_id=user_id,
+            )
+        except Exception as exc:
+            total_time = round((time.time() - start_time) * 1000, 3)
+            logging.warning(
+                "Detector %s raised exception during batch: %s",
+                type(self).__name__, exc,
+            )
+            error_results = [
+                DetectionTimingResult(
+                    hit=False,
+                    result={
+                        "label": "error",
+                        "error": str(exc),
+                        "response_string": DomePayload.coerce(inp).query_string,
+                        "score": 0.0,
+                    },
+                    exec_time=0.0,
+                )
+                for inp in inputs
+            ]
+            return BatchDetectionTimingResult(
+                results=error_results, exec_time=total_time
+            )
         total_time = round((time.time() - start_time) * 1000, 3)
 
         timing_results = []

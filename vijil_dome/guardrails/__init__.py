@@ -14,16 +14,19 @@
 #
 # vijil and vijil-dome are trademarks owned by Vijil Inc.
 
-from vijil_dome.detectors import DetectionMethod, DetectionTimingResult
+from vijil_dome.detectors import DetectionMethod, DetectionTimingResult, BatchDetectionTimingResult
 from vijil_dome.types import DomePayload
 import asyncio
 from asyncio import Task  # noqa: F401
 import concurrent.futures
+import os
 from typing import List, Dict, Tuple, Union, Any, Optional  # noqa: F401
 from abc import ABC, abstractmethod
 import time
 from pydantic import BaseModel
 import logging
+
+DETECTOR_TIMEOUT_SECONDS: float = 5.0
 
 
 # Patterns that Diamond's MitigationBypassART detector uses to identify refusals.
@@ -63,6 +66,7 @@ class GuardResult(BaseModel):
     response: str
     detection_score: float = 0.0
     triggered_methods: List[str] = []
+    errored_methods: List[str] = []
 
     def __str__(self):
         result_dict = {
@@ -89,6 +93,7 @@ class GuardrailResult(BaseModel):
     guard_exec_details: Dict[str, GuardResult]
     detection_score: float = 0.0
     triggered_methods: List[str] = []
+    errored_methods: List[str] = []
 
     def __str__(self):
         result_dict = {
@@ -186,12 +191,28 @@ class Guard:
         detector_results = {}
         response_string = qs
         for detector in self.detector_list:
-            detector_scan_result = await detector.detect_with_time(
-                dome_input,
-                agent_id=agent_id,
-                team_id=team_id,
-                user_id=user_id,
-            )
+            try:
+                async with asyncio.timeout(DETECTOR_TIMEOUT_SECONDS):
+                    detector_scan_result = await detector.detect_with_time(
+                        dome_input,
+                        agent_id=agent_id,
+                        team_id=team_id,
+                        user_id=user_id,
+                    )
+            except TimeoutError:
+                logger.warning("Detection method %s timed out.", type(detector).__name__)
+                detector_scan_result = DetectionTimingResult(
+                    hit=False,
+                    result={"error": "Detection method timed out", "label": "error", "response_string": qs},
+                    exec_time=DETECTOR_TIMEOUT_SECONDS * 1000,
+                )
+            except Exception as exc:
+                logger.warning("Detection method %s raised exception: %s", type(detector).__name__, exc)
+                detector_scan_result = DetectionTimingResult(
+                    hit=False,
+                    result={"error": str(exc), "label": "error", "response_string": qs},
+                    exec_time=0.0,
+                )
             detector_results[type(detector).__name__] = detector_scan_result
 
             if detector_scan_result.hit:
@@ -217,6 +238,12 @@ class Guard:
             default=0.0,
         )
         triggered_methods = [name for name, d in detector_results.items() if d.hit]
+        errored_methods = [
+            name for name, d in detector_results.items()
+            if not d.hit and isinstance(d.result, dict) and d.result.get("label") == "error"
+        ]
+        if errored_methods:
+            logger.warning("Detectors returned errors: %s", errored_methods)
         return GuardResult(
             triggered=flagged,
             details=detector_results,
@@ -224,6 +251,7 @@ class Guard:
             response=response_string,
             detection_score=detection_score,
             triggered_methods=triggered_methods,
+            errored_methods=errored_methods,
         )
 
     # Parallel Guard
@@ -246,47 +274,56 @@ class Guard:
         async def detector_wrapper(
             detector: DetectionMethod, dome_input: DomePayload, executor
         ):
-            asyncio_timeout_limit = 5  # Timeout limit for any detector - 5 seconds
-            if hasattr(detector, "run_in_executor") and detector.run_in_executor:
-                if hasattr(detector, "sync_detect") and callable(detector.sync_detect):
+            try:
+                if hasattr(detector, "run_in_executor") and detector.run_in_executor:
+                    if hasattr(detector, "sync_detect") and callable(detector.sync_detect):
+                        try:
+                            async with asyncio.timeout(DETECTOR_TIMEOUT_SECONDS):
+                                result = await run_detector_via_executor(
+                                    executor,
+                                    detector,
+                                    dome_input,
+                                    agent_id=agent_id,
+                                    team_id=team_id,
+                                    user_id=user_id,
+                                )
+                        except TimeoutError:
+                            result = DetectionTimingResult(
+                                hit=False,
+                                result={"error": "Detection method timed out", "label": "error"},
+                                exec_time=DETECTOR_TIMEOUT_SECONDS * 1000,
+                            )
+                    else:
+                        raise ValueError(
+                            f"Attempting to use a detector of type {type(detector).__name__} in an executor without defining a sync detection method."
+                        )
+                else:
                     try:
-                        async with asyncio.timeout(asyncio_timeout_limit):
-                            result = await run_detector_via_executor(
-                                executor,
-                                detector,
+                        async with asyncio.timeout(DETECTOR_TIMEOUT_SECONDS):
+                            result = await detector.detect_with_time(
                                 dome_input,
                                 agent_id=agent_id,
                                 team_id=team_id,
                                 user_id=user_id,
                             )
                     except TimeoutError:
+                        logger.warning(
+                            f"Detection method {detector.__class__.__name__} timed out."
+                        )
                         result = DetectionTimingResult(
                             hit=False,
-                            result={"error": "Detection method timed out"},
-                            exec_time=asyncio_timeout_limit,
+                            result={"error": "Detection method timed out", "label": "error"},
+                            exec_time=DETECTOR_TIMEOUT_SECONDS * 1000,
                         )
-                else:
-                    raise ValueError(
-                        f"Attempting to use a detector of type {type(detector).__name__} in an executor without defining a sync detection method."
-                    )
-            else:
-                try:
-                    async with asyncio.timeout(asyncio_timeout_limit):
-                        result = await detector.detect_with_time(
-                            dome_input,
-                            agent_id=agent_id,
-                            team_id=team_id,
-                            user_id=user_id,
-                        )
-                except TimeoutError:
-                    logger.warning(
-                        f"Detection method {detector.__class__.__name__} timed out."
-                    )
-                    result = DetectionTimingResult(
-                        hit=False,
-                        result={"error": "Detection method timed out"},
-                        exec_time=asyncio_timeout_limit,
-                    )
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                logger.warning("Detection method %s raised exception: %s", type(detector).__name__, exc)
+                result = DetectionTimingResult(
+                    hit=False,
+                    result={"error": str(exc), "label": "error"},
+                    exec_time=0.0,
+                )
             return {"name": type(detector).__name__, "result": result}
 
         tasks = []  # type: Union[set[Task[Any]], list[Task[Any]]]
@@ -349,6 +386,12 @@ class Guard:
             default=0.0,
         )
         triggered_methods = [name for name, d in detector_results.items() if d.hit]
+        errored_methods = [
+            name for name, d in detector_results.items()
+            if not d.hit and isinstance(d.result, dict) and d.result.get("label") == "error"
+        ]
+        if errored_methods:
+            logger.warning("Detectors returned errors: %s", errored_methods)
         return GuardResult(
             triggered=flagged,
             details=detector_results,
@@ -356,6 +399,7 @@ class Guard:
             response=response_string,
             detection_score=detection_score,
             triggered_methods=triggered_methods,
+            errored_methods=errored_methods,
         )
 
     # Sync method that runs the regular guard or parallel guard based on config
@@ -430,12 +474,40 @@ class Guard:
         item_detector_results: List[Dict[str, DetectionTimingResult]] = [{} for _ in range(n)]
 
         for detector in self.detector_list:
-            batch_timing = await detector.detect_batch_with_time(
-                dome_inputs,
-                agent_id=agent_id,
-                team_id=team_id,
-                user_id=user_id,
-            )
+            try:
+                async with asyncio.timeout(DETECTOR_TIMEOUT_SECONDS):
+                    batch_timing = await detector.detect_batch_with_time(
+                        dome_inputs,
+                        agent_id=agent_id,
+                        team_id=team_id,
+                        user_id=user_id,
+                    )
+            except TimeoutError:
+                logger.warning("Detection method %s timed out during batch.", type(detector).__name__)
+                batch_timing = BatchDetectionTimingResult(
+                    results=[
+                        DetectionTimingResult(
+                            hit=False,
+                            result={"error": "Detection method timed out", "label": "error", "response_string": query_strings[i]},
+                            exec_time=DETECTOR_TIMEOUT_SECONDS * 1000,
+                        )
+                        for i in range(n)
+                    ],
+                    exec_time=DETECTOR_TIMEOUT_SECONDS * 1000,
+                )
+            except Exception as exc:
+                logger.warning("Detection method %s raised exception during batch: %s", type(detector).__name__, exc)
+                batch_timing = BatchDetectionTimingResult(
+                    results=[
+                        DetectionTimingResult(
+                            hit=False,
+                            result={"error": str(exc), "label": "error", "response_string": query_strings[i]},
+                            exec_time=0.0,
+                        )
+                        for i in range(n)
+                    ],
+                    exec_time=0.0,
+                )
             detector_name = type(detector).__name__
 
             for i, det_result in enumerate(batch_timing.results):
@@ -465,6 +537,12 @@ class Guard:
             triggered_methods = [
                 name for name, d in item_detector_results[i].items() if d.hit
             ]
+            errored_methods = [
+                name for name, d in item_detector_results[i].items()
+                if not d.hit and isinstance(d.result, dict) and d.result.get("label") == "error"
+            ]
+            if errored_methods:
+                logger.warning("Detectors returned errors (batch item %d): %s", i, errored_methods)
             items.append(GuardResult(
                 triggered=item_flagged[i],
                 details=item_detector_results[i],
@@ -472,6 +550,7 @@ class Guard:
                 response=item_response[i],
                 detection_score=detection_score,
                 triggered_methods=triggered_methods,
+                errored_methods=errored_methods,
             ))
 
         exec_time = time.time() - st_time
@@ -535,6 +614,18 @@ class Guardrail:
             self.blocked_response_string = DEFAULT_OUTPUT_BLOCKED_MESSAGE
         self.executor = concurrent.futures.ThreadPoolExecutor()
 
+    def close(self):
+        """Shut down the thread pool executor."""
+        if hasattr(self, "executor") and self.executor is not None:
+            self.executor.shutdown(wait=False, cancel_futures=True)
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        self.close()
+        return False
+
     async def sequential_guard(
         self,
         query_string: Union[str, DomePayload],
@@ -578,6 +669,11 @@ class Guardrail:
             if gr.triggered
             for method in gr.triggered_methods
         ]
+        errored_methods = [
+            f"{guard_name}:{method}"
+            for guard_name, gr in guard_results.items()
+            for method in gr.errored_methods
+        ]
         return GuardrailResult(
             flagged=flagged,
             guardrail_response_message=response_string,
@@ -585,6 +681,7 @@ class Guardrail:
             guard_exec_details=guard_results,
             detection_score=detection_score,
             triggered_methods=triggered_methods,
+            errored_methods=errored_methods,
         )
 
     # Parallel guard
@@ -662,6 +759,11 @@ class Guardrail:
             if gr.triggered
             for method in gr.triggered_methods
         ]
+        errored_methods = [
+            f"{guard_name}:{method}"
+            for guard_name, gr in guard_results.items()
+            for method in gr.errored_methods
+        ]
         return GuardrailResult(
             flagged=flagged,
             guardrail_response_message=response_string,
@@ -669,6 +771,7 @@ class Guardrail:
             guard_exec_details=guard_results,
             detection_score=detection_score,
             triggered_methods=triggered_methods,
+            errored_methods=errored_methods,
         )
 
     # Sync method that runs the regular guard or parallel guard based on config
@@ -706,8 +809,16 @@ class Guardrail:
         team_id: Optional[str] = None,
         user_id: Optional[str] = None,
     ) -> GuardrailResult:
+        mode = "parallel" if self.run_in_parallel else "sequential"
+        qs_str = str(query_string)
+        logger.info("Scanning input through guards in %s mode (length=%d)", mode, len(qs_str))
+        if os.environ.get("VIJIL_LOG_PAYLOADS", "").strip() == "1":
+            logger.debug(
+                "Scan payload logging enabled (redacted): type=%s length=%d",
+                type(query_string).__name__,
+                len(qs_str),
+            )
         if self.run_in_parallel:
-            logger.info(f'Scanning "{query_string}" through guards in parallel.')
             return await self.parallel_guard(
                 query_string,
                 agent_id=agent_id,
@@ -715,7 +826,6 @@ class Guardrail:
                 user_id=user_id,
             )
         else:
-            logger.info(f'Scanning "{query_string}" through guards sequentially.')
             return await self.sequential_guard(
                 query_string,
                 agent_id=agent_id,
