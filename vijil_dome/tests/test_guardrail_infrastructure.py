@@ -63,10 +63,6 @@ async def test_debug_log_is_redacted_with_env_flag(
 ) -> None:
     monkeypatch.setenv("VIJIL_LOG_PAYLOADS", "1")
 
-    # Re-import to pick up the env var change
-    import vijil_dome.guardrails as guardrails_mod
-    monkeypatch.setattr(guardrails_mod, "_LOG_PAYLOADS", True)
-
     guard = Guard(
         guard_name="test_guard",
         detector_list=[MockCleanDetector()],

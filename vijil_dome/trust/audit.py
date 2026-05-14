@@ -86,6 +86,19 @@ class AuditEmitter:
             tool_count=tool_count,
         )
 
+    def emit_mtls_downgrade(
+        self,
+        tool_name: str,
+        *,
+        error: str,
+    ) -> None:
+        """Emit an mTLS downgrade event."""
+        self._emit(
+            "mtls_downgrade",
+            tool_name=tool_name,
+            error=error,
+        )
+
     # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------

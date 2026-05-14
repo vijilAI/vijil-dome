@@ -361,9 +361,8 @@ class TrustRuntime:
                     ctx.check_hostname = False
                 except RuntimeError as exc:
                     logger.warning("mTLS downgrade for %s: %s", tool.name, exc)
-                    self._audit._emit(
-                        "mtls_downgrade",
-                        tool_name=tool.name,
+                    self._audit.emit_mtls_downgrade(
+                        tool.name,
                         error=str(exc),
                     )
 
