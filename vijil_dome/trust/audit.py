@@ -99,6 +99,21 @@ class AuditEmitter:
             error=error,
         )
 
+    def emit_guards_disabled(
+        self,
+        *,
+        error: str,
+    ) -> None:
+        """Emit a guards-disabled event (Dome init failed in warn mode)."""
+        self._emit(
+            "guards_disabled",
+            error=error,
+        )
+
+    def emit_identity_unattested(self) -> None:
+        """Emit an event when the agent is running without SPIFFE attestation."""
+        self._emit("identity_unattested")
+
     # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------

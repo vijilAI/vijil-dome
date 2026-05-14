@@ -170,6 +170,36 @@ class MockExceptionDetector(DetectionMethod):
         raise RuntimeError("model failed to load")
 
 
+# ---------------------------------------------------------------------------
+# Detector contract: detect_with_time catches exceptions from detect()
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_detect_with_time_returns_error_label_on_exception() -> None:
+    """Base class detect_with_time must return label='error' when detect() raises."""
+    detector = MockExceptionDetector()
+    result = await detector.detect_with_time("test input")
+
+    assert result.hit is False
+    assert result.result["label"] == "error"
+    assert "model failed to load" in result.result["error"]
+    assert result.result["response_string"] == "test input"
+
+
+@pytest.mark.asyncio
+async def test_detect_batch_with_time_returns_error_labels_on_exception() -> None:
+    """Base class detect_batch_with_time must return label='error' for all items."""
+    detector = MockExceptionDetector()
+    result = await detector.detect_batch_with_time(["input one", "input two"])
+
+    assert len(result.results) == 2
+    for r in result.results:
+        assert r.hit is False
+        assert r.result["label"] == "error"
+        assert "model failed to load" in r.result["error"]
+
+
 class MockTriggeringDetector(DetectionMethod):
     """Always triggers."""
 
@@ -189,7 +219,7 @@ async def test_errored_detector_surfaced_in_result() -> None:
     result = await guardrail.async_scan("test input")
 
     assert result.flagged is False
-    assert "MockErrorDetector" in result.errored_methods
+    assert "test_guard:MockErrorDetector" in result.errored_methods
 
 
 @pytest.mark.asyncio
@@ -206,7 +236,7 @@ async def test_errored_and_triggered_coexist() -> None:
 
     assert result.flagged is True
     assert "MockTriggeringDetector" in result.triggered_methods
-    assert "MockErrorDetector" in result.errored_methods
+    assert "test_guard:MockErrorDetector" in result.errored_methods
 
 
 @pytest.mark.asyncio
@@ -237,7 +267,7 @@ async def test_exception_detector_surfaced_in_errored_methods() -> None:
     result = await guardrail.async_scan("test input")
 
     assert result.flagged is False
-    assert "MockExceptionDetector" in result.errored_methods
+    assert "test_guard:MockExceptionDetector" in result.errored_methods
 
 
 @pytest.mark.asyncio
@@ -253,7 +283,7 @@ async def test_timeout_detector_surfaced_in_errored_methods() -> None:
     result = await guardrail.async_scan("test input")
 
     assert result.flagged is False
-    assert "MockHangingDetector" in result.errored_methods
+    assert "test_guard:MockHangingDetector" in result.errored_methods
 
 
 @pytest.mark.asyncio

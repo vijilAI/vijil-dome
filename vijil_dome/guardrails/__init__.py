@@ -670,8 +670,8 @@ class Guardrail:
             for method in gr.triggered_methods
         ]
         errored_methods = [
-            method
-            for gr in guard_results.values()
+            f"{guard_name}:{method}"
+            for guard_name, gr in guard_results.items()
             for method in gr.errored_methods
         ]
         return GuardrailResult(
@@ -760,8 +760,8 @@ class Guardrail:
             for method in gr.triggered_methods
         ]
         errored_methods = [
-            method
-            for gr in guard_results.values()
+            f"{guard_name}:{method}"
+            for guard_name, gr in guard_results.items()
             for method in gr.errored_methods
         ]
         return GuardrailResult(

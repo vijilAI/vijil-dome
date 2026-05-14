@@ -244,10 +244,10 @@ def test_mtls_downgrade_logs_warning(caplog: pytest.LogCaptureFixture) -> None:
     runtime._manifest = mock_manifest
 
     with caplog.at_level(logging.WARNING):
-        # attest() may fail on socket connection — we only care about the mTLS log
+        # attest() will fail on socket connection after the mTLS downgrade path
         try:
             runtime.attest()
-        except Exception:
+        except (ConnectionRefusedError, OSError):
             pass
 
     assert any("mTLS downgrade" in r.message for r in caplog.records)
@@ -306,3 +306,20 @@ def test_typo_mode_raises() -> None:
             agent_id="agent-123",
             mode="Enforce",
         )
+
+
+# ---------------------------------------------------------------------------
+# BC-7: Unattested identity emits structured audit event
+# ---------------------------------------------------------------------------
+
+
+def test_unattested_identity_emits_audit_event() -> None:
+    captured: list = []
+    with patch(
+        "vijil_dome.trust.audit.AuditEmitter._log_sink",
+        side_effect=captured.append,
+    ):
+        _make_runtime()
+
+    unattested = [e for e in captured if e.event_type == "identity_unattested"]
+    assert len(unattested) == 1

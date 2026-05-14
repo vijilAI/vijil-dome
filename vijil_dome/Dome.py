@@ -331,7 +331,8 @@ class Dome:
     def _empty_guardrail_result(query_string: Union[str, DomePayload]):
         qs = DomePayload.coerce(query_string).query_string
         return ScanResult(
-            flagged=False, response_string=qs, trace={}, exec_time=0.0
+            flagged=False, response_string=qs, trace={}, exec_time=0.0,
+            errored_methods=[],
         )
 
     def guard_input(
