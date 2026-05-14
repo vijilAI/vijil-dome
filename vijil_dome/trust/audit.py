@@ -5,9 +5,12 @@ from __future__ import annotations
 import logging
 from collections.abc import Callable
 from datetime import UTC, datetime
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from pydantic import BaseModel
+
+if TYPE_CHECKING:
+    from vijil_dome.trust.delta import TrustDelta, TrustVector
 
 logger = logging.getLogger(__name__)
 
@@ -113,6 +116,30 @@ class AuditEmitter:
     def emit_identity_unattested(self) -> None:
         """Emit an event when the agent is running without SPIFFE attestation."""
         self._emit("identity_unattested")
+
+    def emit_trust_delta(
+        self,
+        *,
+        control_name: str,
+        delta: TrustDelta,
+        before: TrustVector,
+        after: TrustVector,
+    ) -> None:
+        """Emit a trust-delta application event.
+
+        Emitted exactly once per applied delta. Pre-seed deltas are
+        queued in ``TrustRuntime._pending_deltas`` and audited at
+        ``seed_trust_vector`` replay time, so ``before`` and ``after``
+        always carry concrete measured ``TrustVector`` values.
+        """
+        self._emit(
+            "trust_delta",
+            control_name=control_name,
+            delta=delta.model_dump(),
+            before=before.model_dump(),
+            after=after.model_dump(),
+        )
+
 
     # ------------------------------------------------------------------
     # Internal helpers
