@@ -4,8 +4,6 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock, patch
 
-import pytest
-
 
 class TestIdempotentInstrumentDome:
     """instrument_dome must be callable multiple times without double-wrapping."""
