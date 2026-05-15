@@ -176,7 +176,7 @@ def test_load_policy_sections_from_file_invalid_json():
         temp_file = f.name
 
     try:
-        with pytest.raises(json.JSONDecodeError):
+        with pytest.raises(ValueError, match="Invalid JSON in policy file"):
             load_policy_sections_from_file(temp_file)
     finally:
         os.unlink(temp_file)

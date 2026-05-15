@@ -288,3 +288,145 @@ class TestScoreClamping:
         result_dict: dict = {"response_string": "test"}
         score = float(result_dict.get("score", 0.0))
         assert score == 0.0
+
+
+# ---------------------------------------------------------------------------
+# BC-10: External boundary JSON parsing
+# ---------------------------------------------------------------------------
+
+
+class TestExternalBoundaryParsing:
+    """External API responses must be guarded against malformed JSON."""
+
+    def test_evaluate_catches_json_decode_error(self) -> None:
+        """BC-10: evaluate.py must catch JSONDecodeError, not just HTTPError."""
+        from vijil_dome.integrations.vijil.evaluate import get_config_from_vijil_agent
+
+        mock_response = MagicMock()
+        mock_response.raise_for_status = MagicMock()
+        mock_response.json.side_effect = ValueError("not json")
+
+        with patch("httpx.get", return_value=mock_response):
+            with pytest.raises(ValueError, match="Invalid response"):
+                get_config_from_vijil_agent("token", "agent-1")
+
+    def test_evaluate_preserves_exception_chain(self) -> None:
+        """BC-11: evaluate.py must use 'from e' to preserve traceback."""
+        import httpx
+        from vijil_dome.integrations.vijil.evaluate import (
+            get_config_from_vijil_evaluation,
+        )
+
+        mock_response = MagicMock()
+        mock_response.raise_for_status.side_effect = httpx.HTTPStatusError(
+            "404", request=MagicMock(), response=MagicMock()
+        )
+
+        with patch("httpx.post", return_value=mock_response):
+            with pytest.raises(ConnectionError) as exc_info:
+                get_config_from_vijil_evaluation("token", "eval-1")
+            assert exc_info.value.__cause__ is not None
+
+    def test_safeguard_parse_no_regex_fallback_violation(self) -> None:
+        """BC-10: Unparseable output should NOT match via regex fallback."""
+        from vijil_dome.detectors.methods.gpt_oss_safeguard_policy import (
+            parse_json_output,
+        )
+
+        is_violation, data, error = parse_json_output(
+            'some garbage with "violation": 1 in it'
+        )
+        assert is_violation is False
+        assert error is not None
+
+
+# ---------------------------------------------------------------------------
+# BC-11: Narrow except Exception
+# ---------------------------------------------------------------------------
+
+
+class TestNarrowExceptions:
+    """Bare except: and broad Exception catches should be narrowed."""
+
+    def test_metrics_catches_exception_not_bare(self) -> None:
+        """BC-11: metrics.py must not use bare except:."""
+        import ast
+
+        from vijil_dome.guardrails.instrumentation import metrics
+
+        source = Path(metrics.__file__).read_text()
+        tree = ast.parse(source)
+        for node in ast.walk(tree):
+            if isinstance(node, ast.ExceptHandler) and node.type is None:
+                pytest.fail(f"Bare 'except:' at line {node.lineno} in metrics.py")
+
+    def test_config_parser_chains_exceptions(self) -> None:
+        """BC-11: config_parser.py must use 'raise ... from e'."""
+        source = Path(
+            "/home/anuj/Work/Vijil/vijil-dome/vijil_dome/guardrails/config_parser.py"
+        ).read_text()
+        assert "from e" in source
+
+
+# ---------------------------------------------------------------------------
+# BC-12: Centralized constants
+# ---------------------------------------------------------------------------
+
+
+class TestCentralizedConstants:
+    """Model/hub defaults should be centralized and overridable."""
+
+    def test_defaults_module_has_constants(self) -> None:
+        from vijil_dome.defaults import (
+            DEFAULT_LLM_HUB,
+            DEFAULT_LLM_MODEL,
+            DEFAULT_SAFEGUARD_MODEL,
+        )
+
+        assert DEFAULT_LLM_MODEL == "gpt-4-turbo"
+        assert DEFAULT_LLM_HUB == "openai"
+        assert "safeguard" in DEFAULT_SAFEGUARD_MODEL
+
+    def test_llm_detectors_use_default_constant(self) -> None:
+        """LLM detector __init__ defaults should reference centralized constants."""
+        import inspect
+        from vijil_dome.defaults import DEFAULT_LLM_MODEL
+        from vijil_dome.detectors.methods.llm_models import LlmSecurity
+
+        sig = inspect.signature(LlmSecurity.__init__)
+        default = sig.parameters["model_name"].default
+        assert default == DEFAULT_LLM_MODEL
+
+    def test_env_var_overrides_default(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """VIJIL_LLM_MODEL env var should override the default."""
+        monkeypatch.setenv("VIJIL_LLM_MODEL", "claude-3-opus")
+        import importlib
+        import vijil_dome.defaults
+        importlib.reload(vijil_dome.defaults)
+        assert vijil_dome.defaults.DEFAULT_LLM_MODEL == "claude-3-opus"
+        monkeypatch.delenv("VIJIL_LLM_MODEL")
+        importlib.reload(vijil_dome.defaults)
+
+
+# ---------------------------------------------------------------------------
+# BC-13: Lazy import surfacing
+# ---------------------------------------------------------------------------
+
+
+class TestLazyImportSurfacing:
+    """Import errors should surface at construction, not at scan time."""
+
+    def test_perspective_soft_gate(self) -> None:
+        """BC-13: perspective.py should not raise at import time."""
+        import vijil_dome.detectors.methods.perspective as mod
+        assert hasattr(mod, "_PERSPECTIVE_AVAILABLE")
+
+    def test_faiss_stub_raises_import_error(self) -> None:
+        """BC-13: FaissEmbeddingsIndex stub should raise ImportError, not TypeError."""
+        from vijil_dome.embeds.index import _FAISS_AVAILABLE
+
+        if not _FAISS_AVAILABLE:
+            from vijil_dome.embeds.index import FaissEmbeddingsIndex
+
+            with pytest.raises(ImportError, match="faiss-cpu"):
+                FaissEmbeddingsIndex(embedder=MagicMock())

@@ -37,7 +37,11 @@ def register_manifest(app: typer.Typer) -> None:
         import httpx
 
         input_file = Path(input_path)
-        manifest_data: dict[str, object] = json.loads(input_file.read_text())
+        try:
+            manifest_data: dict[str, object] = json.loads(input_file.read_text())
+        except json.JSONDecodeError as exc:
+            typer.echo(f"Invalid JSON in {input_file}: {exc}", err=True)
+            raise typer.Exit(code=1) from exc
 
         resp = httpx.post(
             f"{console_url.rstrip('/')}/manifests/sign",
@@ -45,7 +49,11 @@ def register_manifest(app: typer.Typer) -> None:
             headers={"Authorization": f"Bearer {api_key}"},
         )
         resp.raise_for_status()
-        manifest_data["signature"] = resp.json()["signature"]
+        resp_data = resp.json()
+        if "signature" not in resp_data:
+            typer.echo("Console response missing 'signature' field.", err=True)
+            raise typer.Exit(code=1)
+        manifest_data["signature"] = resp_data["signature"]
 
         dest = Path(output) if output else input_file
         dest.write_text(json.dumps(manifest_data, indent=2))
@@ -74,7 +82,11 @@ def register_manifest(app: typer.Typer) -> None:
             headers={"Authorization": f"Bearer {api_key}"},
         )
         resp.raise_for_status()
-        pem_bytes = resp.json()["public_key"].encode()
+        resp_data = resp.json()
+        if "public_key" not in resp_data:
+            typer.echo("Console response missing 'public_key' field.", err=True)
+            raise typer.Exit(code=1)
+        pem_bytes = resp_data["public_key"].encode()
         public_key = load_pem_public_key(pem_bytes)
 
         if manifest.verify_signature(public_key):  # type: ignore[arg-type]

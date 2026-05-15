@@ -182,7 +182,7 @@ class TestSchemaDriftTripwire:
         # the field and inference silently drop it — image guardrails
         # bypass with no error. Pin the field set so additions become
         # an explicit cross-repo coordination point.
-        assert set(DomePayload.model_fields.keys()) == {"text", "prompt", "response"}, (
+        assert set(DomePayload.model_fields.keys()) == {"text", "prompt", "response", "context"}, (
             "DomePayload field set drifted. If adding a field, also add it "
             "to vijil-inference/detection-server/detection_api.py::DomePayload "
             "and update both pinned tests."

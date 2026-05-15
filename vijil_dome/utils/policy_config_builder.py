@@ -16,13 +16,15 @@
 
 from typing import Dict, Any, List, Optional
 
+from vijil_dome.defaults import DEFAULT_SAFEGUARD_MODEL
+
 # The registered detector method name for PolicyGptOssSafeguard
 POLICY_GPT_OSS_SAFEGUARD_METHOD = "policy-gpt-oss-safeguard"
 
 
 def build_dome_config_from_sections(
     policy_data: Dict[str, Any],
-    model_name: str = "openai/gpt-oss-safeguard-20b",
+    model_name: str = DEFAULT_SAFEGUARD_MODEL,
     reasoning_effort: str = "medium",
     hub_name: str = "groq",
     timeout: Optional[int] = 60,

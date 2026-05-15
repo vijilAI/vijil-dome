@@ -2,10 +2,18 @@
 Integrations with Vijil Evaluate
 """
 
+import json
+import logging
+import os
+
 import httpx
 from typing import Optional, Dict, Any # noqa: F401
 
-VIJIL_API_BASE_URL = "https://evaluate-api.vijil.ai/v1"
+logger = logging.getLogger(__name__)
+
+VIJIL_API_BASE_URL = os.environ.get(
+    "VIJIL_EVALUATE_BASE_URL", "https://evaluate-api.vijil.ai/v1"
+)
 
 
 def get_config_from_vijil_agent(
@@ -37,15 +45,14 @@ def get_config_from_vijil_agent(
         response_json = response.json()
         dome_configs = response_json.get("dome_configs")
         if dome_configs is None:
-            raise Exception("Dome configuration not found in the response.")
-        else:
-            if len(dome_configs) == 0:
-                return None
-            else:
-                config = dome_configs[0].get("config_body", None)
-                return config
+            raise ValueError("Dome configuration not found in the response.")
+        if len(dome_configs) == 0:
+            return None
+        return dome_configs[0].get("config_body", None)
+    except (json.JSONDecodeError, ValueError) as e:
+        raise ValueError(f"Invalid response from Vijil API: {e}") from e
     except httpx.HTTPError as e:
-        raise Exception(f"Failed to fetch Dome config: {e}")
+        raise ConnectionError(f"Failed to fetch Dome config: {e}") from e
 
 
 def get_config_from_vijil_evaluation(
@@ -83,8 +90,9 @@ def get_config_from_vijil_evaluation(
         response.raise_for_status()
         dome_config = response.json()
         if dome_config is None:
-            raise Exception("Dome configuration not found in the response.")
-        else:
-            return dome_config
+            raise ValueError("Dome configuration not found in the response.")
+        return dome_config
+    except (json.JSONDecodeError, ValueError) as e:
+        raise ValueError(f"Invalid response from Vijil API: {e}") from e
     except httpx.HTTPError as e:
-        raise Exception(f"Failed to fetch Dome config: {e}")
+        raise ConnectionError(f"Failed to fetch Dome config: {e}") from e

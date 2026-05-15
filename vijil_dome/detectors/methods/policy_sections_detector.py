@@ -27,6 +27,7 @@ from vijil_dome.detectors import (
     POLICY_SECTIONS,
 )
 from vijil_dome.types import DomePayload
+from vijil_dome.defaults import DEFAULT_SAFEGUARD_MODEL
 from vijil_dome.detectors.methods.gpt_oss_safeguard_policy import PolicyGptOssSafeguard
 from vijil_dome.utils.policy_loader import (
     load_policy_sections_from_s3,
@@ -90,7 +91,7 @@ class PolicySectionsDetector(DetectionMethod):
         # Rate limiting
         max_parallel_sections: Optional[int] = 10,
         # PolicyGptOssSafeguard params
-        model_name: str = "openai/gpt-oss-safeguard-20b",
+        model_name: str = DEFAULT_SAFEGUARD_MODEL,
         reasoning_effort: str = "medium",
         hub_name: str = "groq",
         timeout: Optional[int] = 60,

@@ -14,6 +14,8 @@
 #
 # vijil and vijil-dome are trademarks owned by Vijil Inc.
 
+import os
+
 from vijil_dome.detectors import (
     ENCODING_HEURISTICS,
     PI_MBERT,
@@ -50,3 +52,10 @@ class DefaultDomeConfig:
 
 def get_default_config():
     return DefaultDomeConfig().default_guardrail_config
+
+
+DEFAULT_LLM_MODEL: str = os.environ.get("VIJIL_LLM_MODEL", "gpt-4-turbo")
+DEFAULT_LLM_HUB: str = os.environ.get("VIJIL_LLM_HUB", "openai")
+DEFAULT_SAFEGUARD_MODEL: str = os.environ.get(
+    "VIJIL_SAFEGUARD_MODEL", "openai/gpt-oss-safeguard-20b"
+)

@@ -23,7 +23,14 @@ try:
     _FAISS_AVAILABLE = True
 except ImportError:
     _FAISS_AVAILABLE = False
-    FaissEmbeddingsIndex = None  # type: ignore
+
+    class FaissEmbeddingsIndex:  # type: ignore[no-redef]
+        """Stub raised when faiss-cpu is not installed."""
+        def __init__(self, *args, **kwargs):
+            raise ImportError(
+                "faiss-cpu is required for FaissEmbeddingsIndex. "
+                "Install it with: pip install faiss-cpu"
+            )
 
 
 class AbstractEmbeddingsIndex(ABC):

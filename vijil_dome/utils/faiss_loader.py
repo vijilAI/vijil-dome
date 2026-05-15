@@ -81,13 +81,19 @@ def _is_cache_valid(
                 # Update cache timestamp
                 file_path.touch()
                 return True
-        except Exception as e:
-            logger.warning(f"Failed to validate cache, will re-download: {e}")
+        except (json.JSONDecodeError, KeyError) as e:
+            logger.warning("Cache metadata corrupt, will re-download: %s", e)
             return False
-    except Exception as e:
-        logger.warning(f"Failed to validate cache, will re-download: {e}")
+        except Exception as e:
+            logger.warning("S3 cache validation failed, will re-download: %s", e)
+            return False
+    except (OSError, json.JSONDecodeError) as e:
+        logger.warning("Local cache file error, will re-download: %s", e)
         return False
-    
+    except Exception as e:
+        logger.warning("Cache validation failed, will re-download: %s", e)
+        return False
+
     return False
 
 
@@ -398,10 +404,14 @@ def load_section_ids_from_s3(
                             cache_valid = False
                         elif cache_valid:
                             return cached_data
+            except (json.JSONDecodeError, KeyError) as e:
+                logger.warning("Section IDs cache metadata corrupt, will re-download: %s", e)
             except Exception as e:
-                logger.warning(f"Failed to validate cache, will re-download: {e}")
+                logger.warning("S3 section IDs cache validation failed, will re-download: %s", e)
+        except (OSError, json.JSONDecodeError) as e:
+            logger.warning("Local section IDs cache error, will re-download: %s", e)
         except Exception as e:
-            logger.warning(f"Failed to validate cache, will re-download: {e}")
+            logger.warning("Section IDs cache validation failed, will re-download: %s", e)
     
     # Download from S3 if cache invalid
     if not cache_valid:
@@ -552,10 +562,14 @@ def load_extraction_metadata_from_s3(
                     json_file_path.touch()
                     with open(json_file_path, 'r', encoding='utf-8') as f:
                         return json.load(f)
+            except (json.JSONDecodeError, KeyError) as e:
+                logger.warning("Extraction metadata cache corrupt, will re-download: %s", e)
             except Exception as e:
-                logger.warning(f"Failed to validate cache, will re-download: {e}")
+                logger.warning("S3 extraction metadata validation failed, will re-download: %s", e)
+        except (OSError, json.JSONDecodeError) as e:
+            logger.warning("Local extraction metadata cache error, will re-download: %s", e)
         except Exception as e:
-            logger.warning(f"Failed to validate cache, will re-download: {e}")
+            logger.warning("Extraction metadata cache validation failed, will re-download: %s", e)
     
     # Download from S3 if cache invalid
     if not cache_valid:

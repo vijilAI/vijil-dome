@@ -70,8 +70,8 @@ class TestDomeBridgeEvaluator:
         assert result.matched is True
 
     @pytest.mark.asyncio
-    async def test_score_defaults_from_hit(self):
-        """When detection_score is missing, it defaults based on hit flag."""
+    async def test_score_defaults_zero_when_missing(self):
+        """BC-9: When score key is missing, default is 0.0 — no fabrication from hit flag."""
         detector = AsyncMock()
         detector.detect.return_value = (True, {"response_string": "detected"})
 
@@ -79,8 +79,8 @@ class TestDomeBridgeEvaluator:
         evaluator._detector_instance = detector
 
         result = await evaluator.evaluate("text", {"threshold": 0.5})
-        assert result.matched is True
-        assert result.confidence == 1.0
+        assert result.matched is False
+        assert result.confidence == 0.0
 
     @pytest.mark.asyncio
     async def test_score_defaults_zero_on_miss(self):

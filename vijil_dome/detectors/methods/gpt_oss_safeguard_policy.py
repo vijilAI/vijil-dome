@@ -33,6 +33,8 @@ from typing import Any, Dict, List, Literal, Optional, Union
 
 from litellm import acompletion
 
+from vijil_dome.defaults import DEFAULT_SAFEGUARD_MODEL
+
 from vijil_dome.detectors import DetectionCategory, DetectionResult, register_method
 from vijil_dome.detectors.utils.llm_api_base import LlmBaseDetector
 from vijil_dome.types import DomePayload
@@ -167,8 +169,7 @@ def parse_json_output(output: str) -> tuple[bool, Dict[str, Any], Optional[str]]
                     return _json_violation_to_bool(parsed.get("violation", 0)), parsed, None
             except json.JSONDecodeError:
                 pass
-        is_violation = bool(re.search(r'"violation"\s*:\s*1', output))
-        return is_violation, {"raw_output": output}, "Failed to parse JSON output"
+        return False, {"raw_output": output}, "Failed to parse JSON output"
 
 
 def _to_binary_violation(value: Any) -> int:
@@ -409,7 +410,7 @@ class PolicyGptOssSafeguard(LlmBaseDetector):
         policy_file: Optional[str] = None,
         policy_content: Optional[str] = None,
         hub_name: str = "groq",
-        model_name: str = "openai/gpt-oss-safeguard-20b",
+        model_name: str = DEFAULT_SAFEGUARD_MODEL,
         output_format: OutputFormat = "policy_ref",
         reasoning_effort: ReasoningEffort = "medium",
         api_key: Optional[str] = None,

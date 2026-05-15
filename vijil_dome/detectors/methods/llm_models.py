@@ -16,6 +16,7 @@
 
 from litellm import acompletion as litellm_acompletion
 
+from vijil_dome.defaults import DEFAULT_LLM_HUB, DEFAULT_LLM_MODEL
 from vijil_dome.detectors import (
     MODERATION_LLM,
     SECURITY_LLM,
@@ -48,8 +49,8 @@ class GenericLLMDetector(LlmBaseDetector):
         self,
         sys_prompt_template: str,
         trigger_word_list: list[str],
-        hub_name: str = "openai",
-        model_name: str = "gpt-4-turbo",
+        hub_name: str = DEFAULT_LLM_HUB,
+        model_name: str = DEFAULT_LLM_MODEL,
         api_key: Optional[str] = None,
         max_input_chars: Optional[int] = None,
     ):
@@ -98,8 +99,8 @@ class GenericLLMDetector(LlmBaseDetector):
 class LlmModerations(LlmBaseDetector):
     def __init__(
         self,
-        hub_name: str = "openai",
-        model_name: str = "gpt-4-turbo",
+        hub_name: str = DEFAULT_LLM_HUB,
+        model_name: str = DEFAULT_LLM_MODEL,
         api_key: Optional[str] = None,
         max_input_chars: Optional[int] = None,
     ):
@@ -150,8 +151,8 @@ class LlmSecurity(LlmBaseDetector):
 
     def __init__(
         self,
-        hub_name: str = "openai",
-        model_name: str = "gpt-4-turbo",
+        hub_name: str = DEFAULT_LLM_HUB,
+        model_name: str = DEFAULT_LLM_MODEL,
         api_key: Optional[str] = None,
         max_input_chars: Optional[int] = None,
     ):
@@ -199,8 +200,8 @@ class LlmSecurity(LlmBaseDetector):
 class LlmHallucination(LlmBaseDetectorWithContext):
     def __init__(
         self,
-        hub_name: str = "openai",
-        model_name: str = "gpt-4-turbo",
+        hub_name: str = DEFAULT_LLM_HUB,
+        model_name: str = DEFAULT_LLM_MODEL,
         api_key: Optional[str] = None,
         max_input_chars: Optional[int] = None,
         context: Optional[str] = None,
@@ -249,8 +250,8 @@ class LlmHallucination(LlmBaseDetectorWithContext):
 class LlmFactcheck(LlmBaseDetectorWithContext):
     def __init__(
         self,
-        hub_name: str = "openai",
-        model_name: str = "gpt-4-turbo",
+        hub_name: str = DEFAULT_LLM_HUB,
+        model_name: str = DEFAULT_LLM_MODEL,
         api_key: Optional[str] = None,
         max_input_chars: Optional[int] = None,
         context: Optional[str] = None,
