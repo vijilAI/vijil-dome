@@ -41,6 +41,19 @@ class TestDetectFramework:
     def test_unknown_raises(self):
         assert _detect_framework("not an agent") == "unknown"
 
+    def test_object_with_compile_not_misdetected(self):
+        """BC-4: Objects with .compile() should not be duck-typed as LangGraph."""
+        import re
+        pattern = re.compile(r".*")
+        assert _detect_framework(pattern) == "unknown"
+
+    def test_object_with_callbacks_not_misdetected(self):
+        """BC-4: Objects with callback attrs should not be duck-typed as ADK."""
+        class FakeAgent:
+            before_model_callback = None
+            before_tool_callback = None
+        assert _detect_framework(FakeAgent()) == "unknown"
+
 
 class TestSecureAgentDispatch:
     def test_dispatches_langgraph(self):

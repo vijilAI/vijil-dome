@@ -88,7 +88,7 @@ class PolicySectionsDetector(DetectionMethod):
         # Filtering
         applies_to: Union[str, List[str]] = "input",
         # Rate limiting
-        max_parallel_sections: Optional[int] = None,
+        max_parallel_sections: Optional[int] = 10,
         # PolicyGptOssSafeguard params
         model_name: str = "openai/gpt-oss-safeguard-20b",
         reasoning_effort: str = "medium",
@@ -119,7 +119,7 @@ class PolicySectionsDetector(DetectionMethod):
             policy_s3_key: S3 object key (required if policy_sections not provided)
             policy_sections: Direct list of section dicts (required if S3 params not provided)
             applies_to: Filter sections by applies_to - "input", "output", or ["input", "output"] (default: "input")
-            max_parallel_sections: Maximum number of sections to run in parallel (default: None = no limit)
+            max_parallel_sections: Maximum number of sections to run in parallel (default: 10)
             model_name: LLM model identifier (default: "openai/gpt-oss-safeguard-20b")
             reasoning_effort: Reasoning depth - "low", "medium", "high" (default: "medium")
             hub_name: LLM hub to use (default: "groq")
@@ -668,6 +668,8 @@ class PolicySectionsDetector(DetectionMethod):
         violation_detected = False
         all_results = []
         violation_result = None
+        error_count = 0
+        completed_count = 0
 
         # Process in batches
         for batch_start in range(0, len(detectors), batch_size):
@@ -706,6 +708,7 @@ class PolicySectionsDetector(DetectionMethod):
                         )
                         section_meta = batch_metadata[task_idx]
 
+                        completed_count += 1
                         batch_results.append({
                             "section_id": section_meta["section_id"],
                             "header": section_meta["header"],
@@ -724,6 +727,8 @@ class PolicySectionsDetector(DetectionMethod):
                             await asyncio.gather(*pending, return_exceptions=True)
                             break
                     except Exception as e:
+                        error_count += 1
+                        completed_count += 1
                         logger.warning(
                             "Detector task raised exception",
                             extra={
@@ -748,11 +753,19 @@ class PolicySectionsDetector(DetectionMethod):
                 violation_detected = True
                 break  # Fast fail - don't process remaining batches
 
+        if error_count > 0 and completed_count > 0 and error_count == completed_count:
+            logger.warning(
+                "All %d detector tasks errored — result is inconclusive",
+                error_count,
+            )
+
         result_dict: Dict[str, Any] = {
             "violation": violation_detected,
             "sections": all_results,
+            "error_count": error_count,
+            "completed_count": completed_count,
         }
-        
+
         if violation_detected and violation_result:
             result_dict.update({
                 "violating_section": next(

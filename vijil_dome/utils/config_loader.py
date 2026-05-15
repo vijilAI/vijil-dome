@@ -154,8 +154,12 @@ def load_dome_config_from_s3(
                 logger.warning("Cache validation failed, will re-download: %s", e)
 
     if cache_valid:
-        with open(config_json_path, "r", encoding="utf-8") as f:
-            return json.load(f)
+        try:
+            with open(config_json_path, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except (json.JSONDecodeError, ValueError) as e:
+            logger.warning("Corrupt cache file %s, will re-download: %s", config_json_path, e)
+            config_json_path.unlink(missing_ok=True)
 
     # Download from S3
     logger.info("Downloading config from s3://%s/%s", bucket, s3_key)

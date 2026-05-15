@@ -52,10 +52,11 @@ class RobertaFactCheckModel(HFBaseModelWithContext):
     async def detect(self, dome_input: DomePayload) -> DetectionResult:
         dome_input = DomePayload.coerce(dome_input)
         query_string = dome_input.query_string
-        if self.context is None:
+        context = dome_input.context if dome_input.context is not None else self.context
+        if context is None:
             raise ValueError("No context is available for roberta fact-check!")
         encoded_dict = self.tokenizer.encode_plus(
-            query_string, self.context, return_tensors="pt"
+            query_string, context, return_tensors="pt"
         )
         with torch.no_grad():
             prediction = self.model(**encoded_dict)

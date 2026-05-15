@@ -57,9 +57,10 @@ class HhemHallucinationModel(HFBaseModelWithContext):
     async def detect(self, dome_input: DomePayload) -> DetectionResult:
         dome_input = DomePayload.coerce(dome_input)
         query_string = dome_input.query_string
+        context = dome_input.context if dome_input.context is not None else self.context
         with torch.no_grad():
             prediction = self.model.predict(
-                [(self.context if self.context else "", query_string)]
+                [(context if context else "", query_string)]
             )
         scores = prediction.cpu().detach().numpy().flatten()
         flagged = scores[0] < self.score_threshold

@@ -218,11 +218,12 @@ class LlmHallucination(LlmBaseDetectorWithContext):
         dome_input = DomePayload.coerce(dome_input)
         query_string = dome_input.query_string
         query_string = self._truncate_if_needed(query_string)
-        if self.context is None:
+        context = dome_input.context if dome_input.context is not None else self.context
+        if context is None:
             raise ValueError(
                 "No context provided for LLM-Based Hallucination detection!"
             )
-        content = format_llm_hallucination_prompt(self.context, query_string)
+        content = format_llm_hallucination_prompt(context, query_string)
         llm_response = await litellm_acompletion(
             model=self.model_name,
             messages=[{"role": "system", "content": content}],
@@ -267,9 +268,10 @@ class LlmFactcheck(LlmBaseDetectorWithContext):
         dome_input = DomePayload.coerce(dome_input)
         query_string = dome_input.query_string
         query_string = self._truncate_if_needed(query_string)
-        if self.context is None:
+        context = dome_input.context if dome_input.context is not None else self.context
+        if context is None:
             raise ValueError("No context provided for LLM-Based fact-check")
-        content = format_llm_factcheck_prompt(self.context, query_string)
+        content = format_llm_factcheck_prompt(context, query_string)
         llm_response = await litellm_acompletion(
             model=self.model_name,
             messages=[{"role": "system", "content": content}],

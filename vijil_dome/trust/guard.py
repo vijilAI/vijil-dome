@@ -80,7 +80,7 @@ class EnforcementResult(BaseModel):
                             hit = getattr(timing, "hit", False)
                             result_data = getattr(timing, "result", {})
                             result_dict = result_data if isinstance(result_data, dict) else {}
-                            score = float(result_dict.get("score", 1.0 if hit else 0.0))
+                            score = float(result_dict.get("score", 0.0))
                             exec_time = float(getattr(timing, "exec_time", 0.0))
                             detector_traces.append(
                                 DetectorTrace(

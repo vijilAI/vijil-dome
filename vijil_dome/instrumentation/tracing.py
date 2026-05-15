@@ -25,6 +25,8 @@ from opentelemetry.trace.span import Span
 # OTEL AttributeValue — the union of types span.set_attribute accepts.
 _AttributeValue = Union[str, bool, int, float, list]
 
+_MAX_ATTR_LENGTH = 2048
+
 
 def _safe_set_attribute(span: Span, key: str, value: _AttributeValue | None) -> None:
     """Set a span attribute only when the value is not None.
@@ -38,9 +40,15 @@ def _safe_set_attribute(span: Span, key: str, value: _AttributeValue | None) -> 
     span.set_attribute(key, value)
 
 
+def _truncate(value: str) -> str:
+    if len(value) <= _MAX_ATTR_LENGTH:
+        return value
+    return value[:_MAX_ATTR_LENGTH] + "...<truncated>"
+
+
 def _set_func_span_attributes(span: Span, *args, **kwargs):
-    _safe_set_attribute(span, "function.args", str(args))
-    _safe_set_attribute(span, "function.kwargs", str(kwargs))
+    _safe_set_attribute(span, "function.args", _truncate(str(args)))
+    _safe_set_attribute(span, "function.kwargs", _truncate(str(kwargs)))
 
     agent_id = kwargs.get("agent_id")
     if agent_id:
@@ -57,9 +65,9 @@ def _set_func_span_result_attributes(span: Span, result):
     if result is None:
         return
     if isinstance(result, BaseModel):
-        _safe_set_attribute(span, "function.result", str(result.model_dump()))
+        _safe_set_attribute(span, "function.result", _truncate(str(result.model_dump())))
     else:
-        _safe_set_attribute(span, "function.result", str(result))
+        _safe_set_attribute(span, "function.result", _truncate(str(result)))
 
 
 # Wrap any function with a Tracer to record Spans. Works with both sync and async functions

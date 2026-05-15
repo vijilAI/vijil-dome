@@ -444,17 +444,25 @@ def load_section_ids_from_s3(
         except Exception as e:
             if json_file_path.exists():
                 logger.warning(f"S3 download failed, using stale cache: {e}")
-                with open(json_file_path, 'r', encoding='utf-8') as f:
-                    cached_data = json.load(f)
-                    return _normalize_section_ids_data(cached_data, json_file_path)
+                try:
+                    with open(json_file_path, 'r', encoding='utf-8') as f:
+                        cached_data = json.load(f)
+                        return _normalize_section_ids_data(cached_data, json_file_path)
+                except (json.JSONDecodeError, ValueError) as cache_err:
+                    logger.warning("Stale cache also corrupt (%s), removing: %s", json_file_path, cache_err)
+                    json_file_path.unlink(missing_ok=True)
             raise
-    
+
     # Should not reach here, but return cached file if exists
     if json_file_path.exists():
-        with open(json_file_path, 'r', encoding='utf-8') as f:
-            cached_data = json.load(f)
-            return _normalize_section_ids_data(cached_data, json_file_path)
-    
+        try:
+            with open(json_file_path, 'r', encoding='utf-8') as f:
+                cached_data = json.load(f)
+                return _normalize_section_ids_data(cached_data, json_file_path)
+        except (json.JSONDecodeError, ValueError) as e:
+            logger.warning("Corrupt cache file %s, removing: %s", json_file_path, e)
+            json_file_path.unlink(missing_ok=True)
+
     raise FileNotFoundError("Could not load section_ids.json from S3 or cache")
 
 def load_extraction_metadata_from_s3(
@@ -597,13 +605,21 @@ def load_extraction_metadata_from_s3(
             # For other errors, check if we have stale cache
             if json_file_path.exists():
                 logger.warning(f"S3 download failed, using stale cache: {e}")
-                with open(json_file_path, 'r', encoding='utf-8') as f:
-                    return json.load(f)
+                try:
+                    with open(json_file_path, 'r', encoding='utf-8') as f:
+                        return json.load(f)
+                except (json.JSONDecodeError, ValueError) as cache_err:
+                    logger.warning("Stale cache also corrupt (%s), removing: %s", json_file_path, cache_err)
+                    json_file_path.unlink(missing_ok=True)
             raise
-    
+
     # Should not reach here, but return cached file if exists
     if json_file_path.exists():
-        with open(json_file_path, 'r', encoding='utf-8') as f:
-            return json.load(f)
-    
+        try:
+            with open(json_file_path, 'r', encoding='utf-8') as f:
+                return json.load(f)
+        except (json.JSONDecodeError, ValueError) as e:
+            logger.warning("Corrupt cache file %s, removing: %s", json_file_path, e)
+            json_file_path.unlink(missing_ok=True)
+
     return None
