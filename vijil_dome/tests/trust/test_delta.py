@@ -19,6 +19,7 @@ from vijil_dome.trust.audit import AuditEvent
 from vijil_dome.trust.delta import (
     TRUST_DELTA_ANNOTATION,
     TrustDelta,
+    TrustDeltaParseError,
     TrustVector,
     apply_trust_delta,
     extract_trust_deltas,
@@ -82,26 +83,30 @@ def _make_runtime(events: list[AuditEvent]) -> TrustRuntime:
 
 
 # ---------------------------------------------------------------------------
-# Adversarial — TrustDelta.from_annotation rejects malformed payloads
+# Adversarial — TrustDelta.from_annotation is fail-closed on malformed input
 # ---------------------------------------------------------------------------
 
 
-def test_from_annotation_rejects_non_dict() -> None:
-    """A list, string, scalar, or None returns None — not raises."""
-    assert TrustDelta.from_annotation([1, 2, 3]) is None
-    assert TrustDelta.from_annotation("0.5") is None
-    assert TrustDelta.from_annotation(0.5) is None
-    assert TrustDelta.from_annotation(None) is None
+def test_from_annotation_raises_on_non_dict() -> None:
+    """A list, string, scalar, or None is a misconfiguration — raises."""
+    for payload in [[1, 2, 3], "0.5", 0.5, None]:
+        with pytest.raises(TrustDeltaParseError) as exc:
+            TrustDelta.from_annotation(payload)
+        assert exc.value.raw is payload
 
 
-def test_from_annotation_rejects_unknown_keys() -> None:
-    """Keys outside {reliability, security, safety} return None (extra='forbid')."""
-    assert TrustDelta.from_annotation({"speed": 0.1}) is None
-    assert TrustDelta.from_annotation({"reliability": 0.1, "throughput": 0.1}) is None
+def test_from_annotation_raises_on_unknown_keys() -> None:
+    """Keys outside {reliability, security, safety} raise (extra='forbid')."""
+    with pytest.raises(TrustDeltaParseError):
+        TrustDelta.from_annotation({"speed": 0.1})
+    with pytest.raises(TrustDeltaParseError):
+        TrustDelta.from_annotation({"reliability": 0.1, "throughput": 0.1})
 
 
 def test_from_annotation_returns_none_on_all_zero() -> None:
-    """An all-zero annotation (including empty dict) contributes no audit signal."""
+    """An all-zero annotation (including empty dict) is a legitimate no-op,
+    not a misconfiguration — returns None, does not raise.
+    """
     assert TrustDelta.from_annotation({}) is None
     assert TrustDelta.from_annotation({"reliability": 0.0}) is None
     assert TrustDelta.from_annotation(
@@ -109,12 +114,19 @@ def test_from_annotation_returns_none_on_all_zero() -> None:
     ) is None
 
 
-def test_from_annotation_rejects_non_numeric_values() -> None:
-    """Non-numeric values — including bool, a subclass of int — return None."""
-    assert TrustDelta.from_annotation({"security": "high"}) is None
-    assert TrustDelta.from_annotation({"security": True}) is None
-    assert TrustDelta.from_annotation({"security": False}) is None
-    assert TrustDelta.from_annotation({"security": None}) is None
+def test_from_annotation_raises_on_non_numeric_values() -> None:
+    """Non-numeric values — including bool, a subclass of int — raise."""
+    for bad in ["high", True, False, None]:
+        with pytest.raises(TrustDeltaParseError):
+            TrustDelta.from_annotation({"security": bad})
+
+
+def test_parse_error_carries_payload_and_message() -> None:
+    """TrustDeltaParseError exposes the offending payload for audit/logging."""
+    with pytest.raises(TrustDeltaParseError) as exc:
+        TrustDelta.from_annotation({"reliability": "high"})
+    assert exc.value.raw == {"reliability": "high"}
+    assert "validation" in str(exc.value).lower()
 
 
 def test_from_annotation_accepts_partial_payload() -> None:
@@ -289,11 +301,17 @@ def test_extract_skips_controls_without_annotation() -> None:
     assert extract_trust_deltas(controls, result) == []
 
 
-def test_extract_silently_skips_malformed_annotation() -> None:
-    """A malformed annotation (unknown key) does not raise."""
+def test_extract_raises_on_malformed_annotation_with_control_name() -> None:
+    """A malformed annotation propagates as TrustDeltaParseError with the
+    originating control_name attached, so callers can identify which
+    Control's annotation is bad without parsing the message string.
+    """
     controls = [_make_control("deny-x", trust_delta={"throughput": -0.1})]
     result = _make_result(_make_match("deny-x"))
-    assert extract_trust_deltas(controls, result) == []
+    with pytest.raises(TrustDeltaParseError) as exc:
+        extract_trust_deltas(controls, result)
+    assert exc.value.control_name == "deny-x"
+    assert exc.value.raw == {"throughput": -0.1}
 
 
 def test_extract_silently_skips_all_zero_annotation() -> None:
@@ -447,3 +465,27 @@ def test_apply_with_no_triggered_deltas_returns_current_vector() -> None:
     assert out.reliability == 0.7
     assert out.security == 0.7
     assert out.safety == 0.7
+
+
+def test_apply_evaluation_propagates_parse_error() -> None:
+    """A malformed annotation on a triggered control propagates as
+    TrustDeltaParseError from apply_evaluation. The runtime does not
+    silently absorb the misconfiguration — the request handler decides
+    whether to fail the request (enforce mode) or absorb via the outer
+    guard (warn mode, same path as any other guard failure).
+    """
+    runtime = _make_runtime([])
+    runtime.seed_trust_vector(
+        TrustVector(reliability=0.5, security=0.5, safety=0.5)
+    )
+
+    controls = [_make_control("bad-anno", trust_delta={"throughput": -0.1})]
+    with pytest.raises(TrustDeltaParseError) as exc:
+        runtime.apply_evaluation(
+            controls=controls, result=_make_result(_make_match("bad-anno"))
+        )
+    assert exc.value.control_name == "bad-anno"
+    # Vector untouched on parse failure.
+    v = runtime.trust_vector
+    assert v is not None
+    assert v.security == 0.5
