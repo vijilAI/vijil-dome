@@ -9,9 +9,16 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from vijil_dome.controls.models import Control, EvaluationResult
 from vijil_dome.trust.attestation import AttestationResult, ToolAttestationStatus
-from vijil_dome.trust.audit import AuditEmitter
+from vijil_dome.trust.audit import AuditEmitter, AuditEvent
 from vijil_dome.trust.constraints import AgentConstraints
+from vijil_dome.trust.delta import (
+    TrustDelta,
+    TrustVector,
+    apply_trust_delta,
+    extract_trust_deltas,
+)
 from vijil_dome.trust.guard import EnforcementResult
 from vijil_dome.trust.identity import AgentIdentity
 from vijil_dome.trust.manifest import ToolManifest
@@ -38,6 +45,7 @@ class TrustRuntime:
         manifest: Path | ToolManifest | None = None,
         mode: str = "warn",
         spire_socket: str = "/run/spire/sockets/agent.sock",
+        audit_sink: Callable[[AuditEvent], None] | None = None,
     ) -> None:
         _valid_modes = ("warn", "enforce")
         if mode not in _valid_modes:
@@ -122,7 +130,104 @@ class TrustRuntime:
             self._manifest = manifest
 
         # 6. Create audit emitter
-        self._audit = AuditEmitter(agent_id=agent_id)
+        self._audit = AuditEmitter(agent_id=agent_id, sink=audit_sink)
+
+        if self._guards_disabled:
+            self._audit.emit_guards_disabled(
+                error=getattr(self, "_guards_disabled_error", "unknown"),
+            )
+
+        if not self._identity.is_attested():
+            self._audit.emit_identity_unattested()
+
+        # 7. Trust vector — seeded by a baseline evaluation, not defaulted.
+        # ``(control_name, delta)`` pairs arriving before seeding are
+        # held here and applied in arrival order when
+        # ``seed_trust_vector()`` is called.
+        self._trust_vector: TrustVector | None = None
+        self._pending_deltas: list[tuple[str, TrustDelta]] = []
+
+    # ------------------------------------------------------------------
+    # Trust vector
+    # ------------------------------------------------------------------
+
+    @property
+    def trust_vector(self) -> TrustVector | None:
+        """Current measured trust vector, or None if no baseline has been seeded."""
+        return self._trust_vector
+
+    def seed_trust_vector(self, vector: TrustVector) -> None:
+        """Seed the trust vector from a measured baseline.
+
+        Typically called with the result of a Diamond evaluation. Any
+        ``(control_name, delta)`` pairs accumulated before seeding
+        (held in ``_pending_deltas``) are applied in arrival order, and
+        the queue is cleared.
+
+        Raises ``RuntimeError`` if the trust vector has already been
+        seeded — a second seed would erase the runtime adjustments
+        accumulated so far, and the "every score point traceable"
+        invariant forbids that silently.
+        """
+        if self._trust_vector is not None:
+            raise RuntimeError(
+                "TrustRuntime is already seeded; re-seeding would discard "
+                "the accumulated trust vector. Create a new TrustRuntime "
+                "or expose an explicit reset() if a hard reset is intended."
+            )
+        seeded = vector
+        for control_name, delta in self._pending_deltas:
+            before = seeded
+            seeded = apply_trust_delta(seeded, delta)
+            self._audit.emit_trust_delta(
+                control_name=control_name,
+                delta=delta,
+                before=before,
+                after=seeded,
+            )
+        self._pending_deltas.clear()
+        self._trust_vector = seeded
+
+    def apply_evaluation(
+        self,
+        *,
+        controls: list[Control],
+        result: EvaluationResult,
+    ) -> TrustVector | None:
+        """Consume a VijilDome ``EvaluationResult`` for trust-delta side effects.
+
+        Extracts ``vijil.ai/trust-delta`` annotations from triggered
+        controls, audits each applied delta, and updates the trust
+        vector. Returns the updated vector, or ``None`` if no baseline
+        has been seeded yet (the pairs are queued in that case — audit
+        emission is deferred to seed-time replay so each logical delta
+        produces exactly one audit event).
+        """
+        pairs = extract_trust_deltas(controls, result)
+        if not pairs:
+            return self._trust_vector
+
+        if self._trust_vector is None:
+            # No baseline yet — queue pairs for application at seed time.
+            # Audit emission is deferred to seed_trust_vector's replay so
+            # each delta is audited exactly once, with concrete
+            # before/after values.
+            self._pending_deltas.extend(pairs)
+            return None
+
+        # Seeded — apply each delta in turn, auditing the measured before/after.
+        current = self._trust_vector
+        for control_name, delta in pairs:
+            before = current
+            current = apply_trust_delta(current, delta)
+            self._audit.emit_trust_delta(
+                control_name=control_name,
+                delta=delta,
+                before=before,
+                after=current,
+            )
+        self._trust_vector = current
+        return current
 
         if self._guards_disabled:
             self._audit.emit_guards_disabled(
