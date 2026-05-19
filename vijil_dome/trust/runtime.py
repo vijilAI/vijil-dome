@@ -604,6 +604,8 @@ class TrustRuntime:
             for uri in uris:
                 if uri.startswith("spiffe://"):
                     return uri
-        except Exception:
-            pass
+        except ImportError:
+            logger.debug("cryptography not installed, cannot extract SPIFFE ID")
+        except Exception as exc:
+            logger.debug("Failed to extract SPIFFE ID from cert: %s", exc)
         return None

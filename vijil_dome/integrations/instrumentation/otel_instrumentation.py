@@ -137,6 +137,8 @@ def instrument_dome(
     tracer: Optional[Tracer],
     meter: Optional[Meter],
 ):
+    if getattr(dome, "_instrumented", False):
+        return
     if not LoggingInstrumentor().is_instrumented_by_opentelemetry:
         LoggingInstrumentor().instrument()
 
@@ -170,3 +172,5 @@ def instrument_dome(
             _add_darwin_detection_spans(dome.input_guardrail, tracer, "dome-input", enforce=dome.enforce)
         if dome.output_guardrail is not None:
             _add_darwin_detection_spans(dome.output_guardrail, tracer, "dome-output", enforce=dome.enforce)
+
+    dome._instrumented = True  # type: ignore[attr-defined]

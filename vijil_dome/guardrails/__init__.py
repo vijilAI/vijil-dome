@@ -237,6 +237,7 @@ class Guard:
             ),
             default=0.0,
         )
+        detection_score = min(1.0, max(0.0, detection_score))
         triggered_methods = [name for name, d in detector_results.items() if d.hit]
         errored_methods = [
             name for name, d in detector_results.items()
@@ -385,6 +386,7 @@ class Guard:
             ),
             default=0.0,
         )
+        detection_score = min(1.0, max(0.0, detection_score))
         triggered_methods = [name for name, d in detector_results.items() if d.hit]
         errored_methods = [
             name for name, d in detector_results.items()
@@ -663,6 +665,7 @@ class Guardrail:
             (gr.detection_score for gr in guard_results.values() if gr.triggered),
             default=0.0,
         )
+        detection_score = min(1.0, max(0.0, detection_score))
         triggered_methods = [
             method
             for gr in guard_results.values()
@@ -753,6 +756,7 @@ class Guardrail:
             (gr.detection_score for gr in guard_results.values() if gr.triggered),
             default=0.0,
         )
+        detection_score = min(1.0, max(0.0, detection_score))
         triggered_methods = [
             method
             for gr in guard_results.values()

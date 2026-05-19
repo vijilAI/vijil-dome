@@ -301,3 +301,40 @@ async def test_cancelled_detector_not_in_errored_methods() -> None:
 
     assert result.flagged is True
     assert "MockHangingDetector" not in result.errored_methods
+
+
+# ---------------------------------------------------------------------------
+# BC-9: Score clamping
+# ---------------------------------------------------------------------------
+
+
+class OverScoreDetector(DetectionMethod):
+    async def detect(self, dome_input: DomePayload) -> DetectionResult:
+        return (True, {"response_string": "blocked", "score": 1.5})
+
+
+class NegativeScoreDetector(DetectionMethod):
+    async def detect(self, dome_input: DomePayload) -> DetectionResult:
+        return (True, {"response_string": "blocked", "score": -0.5})
+
+
+@pytest.mark.asyncio
+async def test_score_clamped_to_one() -> None:
+    guard = Guard(
+        guard_name="test",
+        detector_list=[OverScoreDetector()],
+        run_in_parallel=False,
+    )
+    result = await guard.sequential_guard("test input")
+    assert result.detection_score <= 1.0
+
+
+@pytest.mark.asyncio
+async def test_negative_score_clamped_to_zero() -> None:
+    guard = Guard(
+        guard_name="test",
+        detector_list=[NegativeScoreDetector()],
+        run_in_parallel=False,
+    )
+    result = await guard.sequential_guard("test input")
+    assert result.detection_score >= 0.0

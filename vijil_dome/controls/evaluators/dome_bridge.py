@@ -65,7 +65,7 @@ class DomeBridgeEvaluator(Evaluator):
         result = await detector.detect(payload)
         hit: bool = result[0]
         data: dict[str, Any] = dict(result[1])
-        score = data.get("detection_score", 1.0 if hit else 0.0)
+        score = data.get("score", data.get("detection_score", 0.0))
 
         matched = score >= threshold
 

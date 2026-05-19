@@ -288,3 +288,28 @@ class TestDomeEmptyGuardrail:
         result = dome.guard_input(DomePayload(prompt="q", response="a"))
         assert result.is_safe()
         assert "Input: q" in result.response_string
+
+
+# ---------------------------------------------------------------------------
+# BC-15: Thread-safe context via DomePayload.context
+# ---------------------------------------------------------------------------
+
+class TestDomePayloadContext:
+    """DomePayload.context enables per-call context without instance mutation."""
+
+    def test_payload_accepts_context(self):
+        payload = DomePayload(text="hello", context="some context")
+        assert payload.context == "some context"
+        assert payload.query_string == "hello"
+
+    def test_payload_context_defaults_to_none(self):
+        payload = DomePayload(text="hello")
+        assert payload.context is None
+
+    def test_coerce_string_has_no_context(self):
+        payload = DomePayload.coerce("hello")
+        assert payload.context is None
+
+    def test_context_alone_is_not_valid(self):
+        with pytest.raises(ValidationError):
+            DomePayload(context="just context, no content")

@@ -206,7 +206,7 @@ def _add_request_error_counter(request_error_counter: Counter):
             attributes = _build_attributes(kwargs)
             try:
                 result = func(*args, **kwargs)
-            except:
+            except Exception:
                 request_error_counter.add(1, attributes=attributes)
                 raise
             return result
@@ -216,7 +216,7 @@ def _add_request_error_counter(request_error_counter: Counter):
             attributes = _build_attributes(kwargs)
             try:
                 result = await func(*args, **kwargs)
-            except:
+            except Exception:
                 request_error_counter.add(1, attributes=attributes)
                 raise
             return result

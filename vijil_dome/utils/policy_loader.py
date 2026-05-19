@@ -53,7 +53,10 @@ def load_policy_sections_from_file(file_path: str) -> Dict[str, Any]:
         raise FileNotFoundError(f"Policy file not found: {file_path}")
 
     with open(policy_path, 'r', encoding='utf-8') as f:
-        policy_data = json.load(f)
+        try:
+            policy_data = json.load(f)
+        except json.JSONDecodeError as e:
+            raise ValueError(f"Invalid JSON in policy file {file_path}: {e}") from e
 
     validate_policy_json(policy_data)
     return policy_data
@@ -226,10 +229,14 @@ def load_policy_sections_from_s3(
 
     # Load from cache if valid
     if cache_valid:
-        with open(policy_json_path, 'r', encoding='utf-8') as f:
-            policy_data = json.load(f)
-        validate_policy_json(policy_data)
-        return policy_data
+        try:
+            with open(policy_json_path, 'r', encoding='utf-8') as f:
+                policy_data = json.load(f)
+            validate_policy_json(policy_data)
+            return policy_data
+        except (json.JSONDecodeError, ValueError) as e:
+            logger.warning("Corrupt cached policy %s, will re-download: %s", policy_json_path, e)
+            policy_json_path.unlink(missing_ok=True)
 
     # Download from S3 using existing client
     logger.info(f"Downloading policy from s3://{bucket}/{key}")

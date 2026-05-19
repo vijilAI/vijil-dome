@@ -196,7 +196,12 @@ class ObotClient:
                 f"Failed to create MCP server: {response.status_code} {response.text}"
             )
 
-        return response.json()
+        try:
+            return response.json()
+        except ValueError as exc:
+            raise RuntimeError(
+                f"Invalid JSON from OBOT ({response.status_code}): {response.text[:200]}"
+            ) from exc
 
     def get_connect_url(self, server_id: str) -> str:
         """

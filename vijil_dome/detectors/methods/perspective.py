@@ -16,13 +16,13 @@
 
 import os
 from typing import Optional, Dict
+
 try:
     from googleapiclient import discovery
-except ImportError as e:
-    raise ImportError(
-        "Google extra is required for PerspectiveAPI. "
-        "Please install it with 'pip install vijil-dome[google]'."
-    ) from e
+    _PERSPECTIVE_AVAILABLE = True
+except ImportError:
+    _PERSPECTIVE_AVAILABLE = False
+    discovery = None  # type: ignore[assignment]
 from vijil_dome.detectors import (
     DetectionMethod,
     register_method,
@@ -41,6 +41,11 @@ class PerspectiveAPI(DetectionMethod):
         attributes: Dict = {"TOXICITY": {}},
         score_threshold: Dict = {"TOXICITY": 0.5},
     ):
+        if not _PERSPECTIVE_AVAILABLE:
+            raise ImportError(
+                "Google extra is required for PerspectiveAPI. "
+                "Please install it with 'pip install vijil-dome[google]'."
+            )
         self.api_key = (
             api_key if api_key is not None else os.getenv("PERSPECTIVE_API_KEY")
         )

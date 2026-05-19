@@ -16,6 +16,7 @@
 
 from litellm import acompletion as litellm_acompletion
 
+from vijil_dome.defaults import DEFAULT_LLM_HUB, DEFAULT_LLM_MODEL
 from vijil_dome.detectors import (
     MODERATION_LLM,
     SECURITY_LLM,
@@ -48,8 +49,8 @@ class GenericLLMDetector(LlmBaseDetector):
         self,
         sys_prompt_template: str,
         trigger_word_list: list[str],
-        hub_name: str = "openai",
-        model_name: str = "gpt-4-turbo",
+        hub_name: str = DEFAULT_LLM_HUB,
+        model_name: str = DEFAULT_LLM_MODEL,
         api_key: Optional[str] = None,
         max_input_chars: Optional[int] = None,
     ):
@@ -98,8 +99,8 @@ class GenericLLMDetector(LlmBaseDetector):
 class LlmModerations(LlmBaseDetector):
     def __init__(
         self,
-        hub_name: str = "openai",
-        model_name: str = "gpt-4-turbo",
+        hub_name: str = DEFAULT_LLM_HUB,
+        model_name: str = DEFAULT_LLM_MODEL,
         api_key: Optional[str] = None,
         max_input_chars: Optional[int] = None,
     ):
@@ -150,8 +151,8 @@ class LlmSecurity(LlmBaseDetector):
 
     def __init__(
         self,
-        hub_name: str = "openai",
-        model_name: str = "gpt-4-turbo",
+        hub_name: str = DEFAULT_LLM_HUB,
+        model_name: str = DEFAULT_LLM_MODEL,
         api_key: Optional[str] = None,
         max_input_chars: Optional[int] = None,
     ):
@@ -199,8 +200,8 @@ class LlmSecurity(LlmBaseDetector):
 class LlmHallucination(LlmBaseDetectorWithContext):
     def __init__(
         self,
-        hub_name: str = "openai",
-        model_name: str = "gpt-4-turbo",
+        hub_name: str = DEFAULT_LLM_HUB,
+        model_name: str = DEFAULT_LLM_MODEL,
         api_key: Optional[str] = None,
         max_input_chars: Optional[int] = None,
         context: Optional[str] = None,
@@ -218,11 +219,12 @@ class LlmHallucination(LlmBaseDetectorWithContext):
         dome_input = DomePayload.coerce(dome_input)
         query_string = dome_input.query_string
         query_string = self._truncate_if_needed(query_string)
-        if self.context is None:
+        context = dome_input.context if dome_input.context is not None else self.context
+        if context is None:
             raise ValueError(
                 "No context provided for LLM-Based Hallucination detection!"
             )
-        content = format_llm_hallucination_prompt(self.context, query_string)
+        content = format_llm_hallucination_prompt(context, query_string)
         llm_response = await litellm_acompletion(
             model=self.model_name,
             messages=[{"role": "system", "content": content}],
@@ -248,8 +250,8 @@ class LlmHallucination(LlmBaseDetectorWithContext):
 class LlmFactcheck(LlmBaseDetectorWithContext):
     def __init__(
         self,
-        hub_name: str = "openai",
-        model_name: str = "gpt-4-turbo",
+        hub_name: str = DEFAULT_LLM_HUB,
+        model_name: str = DEFAULT_LLM_MODEL,
         api_key: Optional[str] = None,
         max_input_chars: Optional[int] = None,
         context: Optional[str] = None,
@@ -267,9 +269,10 @@ class LlmFactcheck(LlmBaseDetectorWithContext):
         dome_input = DomePayload.coerce(dome_input)
         query_string = dome_input.query_string
         query_string = self._truncate_if_needed(query_string)
-        if self.context is None:
+        context = dome_input.context if dome_input.context is not None else self.context
+        if context is None:
             raise ValueError("No context provided for LLM-Based fact-check")
-        content = format_llm_factcheck_prompt(self.context, query_string)
+        content = format_llm_factcheck_prompt(context, query_string)
         llm_response = await litellm_acompletion(
             model=self.model_name,
             messages=[{"role": "system", "content": content}],

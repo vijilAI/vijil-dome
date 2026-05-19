@@ -219,11 +219,11 @@ def create_detector_for_guard(
                     f"(1) DOME_INFERENCE_URL set to route to inference server, or "
                     f"(2) pip install vijil-dome[full] for local execution. "
                     f"Original error: {e}"
-                )
+                ) from e
             raise ValueError(
                 f"Something broke when creating the detector {detector_name}. "
                 f"You might have passed an invalid parameter. Exception:{e}"
-            )
+            ) from e
     if max_batch_concurrency is not None:
         detector_instance.max_batch_concurrency = max_batch_concurrency
     return detector_instance

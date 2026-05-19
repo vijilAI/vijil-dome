@@ -37,7 +37,7 @@ class DomePayload(BaseModel):
     text: Optional[str] = None
     prompt: Optional[str] = None
     response: Optional[str] = None
-    # This can be augmented with additional fields in the future, e.g. for multimodal content, reasoning etc. 
+    context: Optional[str] = None
 
     @model_validator(mode="after")
     def _validate_has_content(self) -> "DomePayload":

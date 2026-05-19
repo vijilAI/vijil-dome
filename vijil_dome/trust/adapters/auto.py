@@ -149,12 +149,20 @@ def _detect_framework(agent: Any) -> str:
     if module.startswith("langgraph"):
         return "langgraph"
 
-    # Duck typing fallback: LangGraph graphs have .compile() or .get_graph()
-    if hasattr(agent, "compile") or hasattr(agent, "get_graph"):
-        return "langgraph"
+    # isinstance fallback: verify against actual types when the library is installed
+    try:
+        from langgraph.graph.state import StateGraph
+        from langgraph.graph.graph import CompiledStateGraph
+        if isinstance(agent, (StateGraph, CompiledStateGraph)):
+            return "langgraph"
+    except ImportError:
+        pass
 
-    # Duck typing fallback: ADK agents have .before_model_callback
-    if hasattr(agent, "before_model_callback") and hasattr(agent, "before_tool_callback"):
-        return "adk"
+    try:
+        from google.adk.agents import Agent as AdkAgent
+        if isinstance(agent, AdkAgent):
+            return "adk"
+    except ImportError:
+        pass
 
     return "unknown"
