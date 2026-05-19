@@ -49,7 +49,11 @@ def register_manifest(app: typer.Typer) -> None:
             headers={"Authorization": f"Bearer {api_key}"},
         )
         resp.raise_for_status()
-        resp_data = resp.json()
+        try:
+            resp_data = resp.json()
+        except (ValueError, json.JSONDecodeError) as exc:
+            typer.echo(f"Console returned non-JSON response: {exc}", err=True)
+            raise typer.Exit(code=1) from exc
         if "signature" not in resp_data:
             typer.echo("Console response missing 'signature' field.", err=True)
             raise typer.Exit(code=1)
@@ -82,7 +86,11 @@ def register_manifest(app: typer.Typer) -> None:
             headers={"Authorization": f"Bearer {api_key}"},
         )
         resp.raise_for_status()
-        resp_data = resp.json()
+        try:
+            resp_data = resp.json()
+        except (ValueError, json.JSONDecodeError) as exc:
+            typer.echo(f"Console returned non-JSON response: {exc}", err=True)
+            raise typer.Exit(code=1) from exc
         if "public_key" not in resp_data:
             typer.echo("Console response missing 'public_key' field.", err=True)
             raise typer.Exit(code=1)

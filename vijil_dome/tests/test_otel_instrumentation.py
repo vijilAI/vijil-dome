@@ -65,7 +65,7 @@ class TestOtelAttributeTruncation:
 
         long = "x" * (_MAX_ATTR_LENGTH + 500)
         result = _truncate(long)
-        assert len(result) < len(long)
+        assert len(result) <= _MAX_ATTR_LENGTH
         assert result.endswith("...<truncated>")
         assert result.startswith("x" * 100)
 
@@ -82,7 +82,7 @@ class TestOtelAttributeTruncation:
         args_call = next(
             c for c in span.set_attribute.call_args_list if c[0][0] == "function.args"
         )
-        assert len(args_call[0][1]) <= _MAX_ATTR_LENGTH + 50  # room for truncation marker
+        assert len(args_call[0][1]) <= _MAX_ATTR_LENGTH  # room for truncation marker
 
     def test_func_span_result_truncated(self) -> None:
         from vijil_dome.instrumentation.tracing import (
@@ -99,4 +99,4 @@ class TestOtelAttributeTruncation:
             for c in span.set_attribute.call_args_list
             if c[0][0] == "function.result"
         )
-        assert len(result_call[0][1]) <= _MAX_ATTR_LENGTH + 50
+        assert len(result_call[0][1]) <= _MAX_ATTR_LENGTH

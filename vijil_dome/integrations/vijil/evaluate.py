@@ -3,13 +3,11 @@ Integrations with Vijil Evaluate
 """
 
 import json
-import logging
 import os
 
 import httpx
 from typing import Optional, Dict, Any # noqa: F401
 
-logger = logging.getLogger(__name__)
 
 VIJIL_API_BASE_URL = os.environ.get(
     "VIJIL_EVALUATE_BASE_URL", "https://evaluate-api.vijil.ai/v1"

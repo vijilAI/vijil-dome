@@ -43,7 +43,8 @@ def _safe_set_attribute(span: Span, key: str, value: _AttributeValue | None) -> 
 def _truncate(value: str) -> str:
     if len(value) <= _MAX_ATTR_LENGTH:
         return value
-    return value[:_MAX_ATTR_LENGTH] + "...<truncated>"
+    _MARKER = "...<truncated>"
+    return value[:_MAX_ATTR_LENGTH - len(_MARKER)] + _MARKER
 
 
 def _set_func_span_attributes(span: Span, *args, **kwargs):
