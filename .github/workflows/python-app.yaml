@@ -89,6 +89,7 @@ jobs:
         env:
           VIJIL_MODEL_DIR: /models
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          OPENAI_API_BASE: ${{ secrets.OPENAI_API_BASE }}
           TOGETHERAI_API_KEY: ${{ secrets.TOGETHER_API_KEY }}
           PERSPECTIVE_API_KEY: ${{ secrets.PERSPECTIVE_API_KEY }}
           HUGGINGFACE_TOKEN: ${{ secrets.HUGGINGFACE_TOKEN }}
