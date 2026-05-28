@@ -59,7 +59,7 @@ class LlmBaseDetector(DetectionMethod, ABC):
             if api_key is None:
                 api_key = os.getenv("GROQ_API_KEY")
         else:
-            self.base_url = ""
+            self.base_url = os.getenv("OPENAI_BASE_URL", "")
         self.api_key = api_key
         self.timeout = timeout
         self.max_retries = max_retries
