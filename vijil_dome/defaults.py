@@ -54,8 +54,8 @@ def get_default_config():
     return DefaultDomeConfig().default_guardrail_config
 
 
-DEFAULT_LLM_MODEL: str = os.environ.get("VIJIL_LLM_MODEL", "gpt-4-turbo")
-DEFAULT_LLM_HUB: str = os.environ.get("VIJIL_LLM_HUB", "openai")
-DEFAULT_SAFEGUARD_MODEL: str = os.environ.get(
-    "VIJIL_SAFEGUARD_MODEL", "openai/gpt-oss-safeguard-20b"
+DEFAULT_LLM_MODEL: str = os.environ.get("VIJIL_LLM_MODEL") or "gpt-4-turbo"
+DEFAULT_LLM_HUB: str = os.environ.get("VIJIL_LLM_HUB") or "openai"
+DEFAULT_SAFEGUARD_MODEL: str = (
+    os.environ.get("VIJIL_SAFEGUARD_MODEL") or "openai/gpt-oss-safeguard-20b"
 )
