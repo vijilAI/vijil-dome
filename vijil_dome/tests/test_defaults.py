@@ -9,15 +9,21 @@ class TestCentralizedConstants:
     """Model/hub defaults should be centralized and overridable."""
 
     def test_defaults_module_has_constants(self) -> None:
+        import os
         from vijil_dome.defaults import (
             DEFAULT_LLM_HUB,
             DEFAULT_LLM_MODEL,
             DEFAULT_SAFEGUARD_MODEL,
         )
 
-        assert DEFAULT_LLM_MODEL == "gpt-4-turbo"
-        assert DEFAULT_LLM_HUB == "openai"
-        assert "safeguard" in DEFAULT_SAFEGUARD_MODEL
+        expected_model = os.environ.get("VIJIL_LLM_MODEL") or "gpt-4-turbo"
+        expected_hub = os.environ.get("VIJIL_LLM_HUB") or "openai"
+        expected_safeguard = (
+            os.environ.get("VIJIL_SAFEGUARD_MODEL") or "openai/gpt-oss-safeguard-20b"
+        )
+        assert DEFAULT_LLM_MODEL == expected_model
+        assert DEFAULT_LLM_HUB == expected_hub
+        assert DEFAULT_SAFEGUARD_MODEL == expected_safeguard
 
     def test_llm_detectors_use_default_constant(self) -> None:
         """LLM detector __init__ defaults should reference centralized constants."""

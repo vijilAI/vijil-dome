@@ -109,6 +109,12 @@ async def test_moderation_detection():
     assert result.hit
 
 
+@pytest.mark.skipif(
+    bool(os.environ.get("OPENAI_BASE_URL")),
+    reason="OpenAI moderations endpoint is only available on OpenAI's own infrastructure; "
+    "OpenAI-compatible providers (e.g. DigitalOcean Inference used in Dependabot CI) "
+    "do not proxy /v1/moderations.",
+)
 @pytest.mark.asyncio
 async def test_moderation_detection_openai():
     # OpenAI Moderation
