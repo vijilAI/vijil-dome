@@ -270,15 +270,14 @@ files = [
 
 [[package]]
 name = "authlib"
-version = "1.6.9"
+version = "1.6.12"
 description = "The ultimate Python library in building OAuth and OpenID Connect servers and clients."
-optional = true
+optional = false
 python-versions = ">=3.9"
 groups = ["main"]
-markers = "extra == \"mcp\" or extra == \"trust-adapters\""
 files = [
-    {file = "authlib-1.6.9-py2.py3-none-any.whl", hash = "sha256:f08b4c14e08f0861dc18a32357b33fbcfd2ea86cfe3fe149484b4d764c4a0ac3"},
-    {file = "authlib-1.6.9.tar.gz", hash = "sha256:d8f2421e7e5980cc1ddb4e32d3f5fa659cfaf60d8eaf3281ebed192e4ab74f04"},
+    {file = "authlib-1.6.12-py2.py3-none-any.whl", hash = "sha256:e9229ad7fde610b139dd12f5edbe97eab9ee78bfb85691247e767727850b99ab"},
+    {file = "authlib-1.6.12.tar.gz", hash = "sha256:0656d8482f28fc8221929d5f35b2bde5d13e10555ebc06b4561b0d622e83b1bd"},
 ]
 
 [package.dependencies]
@@ -515,10 +514,10 @@ files = [
 name = "cffi"
 version = "2.0.0"
 description = "Foreign Function Interface for Python calling C code."
-optional = true
+optional = false
 python-versions = ">=3.9"
 groups = ["main"]
-markers = "platform_python_implementation != \"PyPy\" and (extra == \"mcp\" or extra == \"trust\" or extra == \"trust-adapters\" or extra == \"trust-cli\" or extra == \"strands\" or extra == \"google\" or extra == \"opentelemetry\" or extra == \"full\" or extra == \"pii\")"
+markers = "platform_python_implementation != \"PyPy\""
 files = [
     {file = "cffi-2.0.0-cp310-cp310-macosx_10_13_x86_64.whl", hash = "sha256:0cf2d91ecc3fcc0625c2c530fe004f82c110405f101548512cce44322fa8ac44"},
     {file = "cffi-2.0.0-cp310-cp310-macosx_11_0_arm64.whl", hash = "sha256:f73b96c41e3b2adedc34a7356e64c8eb96e03a3782b535e043a986276ce12a49"},
@@ -814,10 +813,9 @@ srsly = ">=2.4.0,<3.0.0"
 name = "cryptography"
 version = "46.0.5"
 description = "cryptography is a package which provides cryptographic recipes and primitives to Python developers."
-optional = true
+optional = false
 python-versions = "!=3.9.0,!=3.9.1,>=3.8"
 groups = ["main"]
-markers = "extra == \"mcp\" or extra == \"trust\" or extra == \"trust-adapters\" or extra == \"trust-cli\" or extra == \"strands\" or extra == \"google\" or extra == \"opentelemetry\" or extra == \"full\" or extra == \"pii\""
 files = [
     {file = "cryptography-46.0.5-cp311-abi3-macosx_10_9_universal2.whl", hash = "sha256:351695ada9ea9618b3500b490ad54c739860883df6c1f555e088eaf25b1bbaad"},
     {file = "cryptography-46.0.5-cp311-abi3-manylinux2014_aarch64.manylinux_2_17_aarch64.whl", hash = "sha256:c18ff11e86df2e28854939acde2d003f7984f721eba450b56a200ad90eeb0e6b"},
@@ -2892,9 +2890,10 @@ files = [
 name = "jsonpatch"
 version = "1.33"
 description = "Apply JSON-Patches (RFC 6902)"
-optional = false
+optional = true
 python-versions = ">=2.7, !=3.0.*, !=3.1.*, !=3.2.*, !=3.3.*, !=3.4.*, !=3.5.*, !=3.6.*"
 groups = ["main"]
+markers = "extra == \"trust-adapters\""
 files = [
     {file = "jsonpatch-1.33-py2.py3-none-any.whl", hash = "sha256:0ae28c0cd062bbd8b8ecc26d7d164fbbea9652a1a3693f3b956c1eae5145dade"},
     {file = "jsonpatch-1.33.tar.gz", hash = "sha256:9fcd4009c41e6d12348b4a0ff2563ba56a2923a7dfee731d004e212e1ee5030c"},
@@ -2907,9 +2906,10 @@ jsonpointer = ">=1.9"
 name = "jsonpointer"
 version = "3.1.1"
 description = "Identify specific nodes in a JSON document (RFC 6901) "
-optional = false
+optional = true
 python-versions = ">=3.10"
 groups = ["main"]
+markers = "extra == \"trust-adapters\""
 files = [
     {file = "jsonpointer-3.1.1-py3-none-any.whl", hash = "sha256:8ff8b95779d071ba472cf5bc913028df06031797532f08a7d5b602d8b2a488ca"},
     {file = "jsonpointer-3.1.1.tar.gz", hash = "sha256:0b801c7db33a904024f6004d526dcc53bbb8a4a0f4e32bfd10beadf60adf1900"},
@@ -3023,9 +3023,10 @@ type = ["pygobject-stubs", "pytest-mypy (>=1.0.1)", "shtab", "types-pywin32"]
 name = "langchain-core"
 version = "1.3.3"
 description = "Building applications with LLMs through composability"
-optional = false
+optional = true
 python-versions = "<4.0.0,>=3.10.0"
 groups = ["main"]
+markers = "extra == \"trust-adapters\""
 files = [
     {file = "langchain_core-1.3.3-py3-none-any.whl", hash = "sha256:18aae8506f37da7f74398492279a7d6efcee4f8e23c4c41c7af080eeb7ef7bd1"},
     {file = "langchain_core-1.3.3.tar.gz", hash = "sha256:fa510a5db8efdc0c6ff41c0939fb5c00a0183c11f6b84233e892e3227ff69182"},
@@ -3046,9 +3047,10 @@ uuid-utils = ">=0.12.0,<1.0"
 name = "langchain-protocol"
 version = "0.0.12"
 description = "Python bindings for the LangChain agent streaming protocol"
-optional = false
+optional = true
 python-versions = "<4.0.0,>=3.10.0"
 groups = ["main"]
+markers = "extra == \"trust-adapters\""
 files = [
     {file = "langchain_protocol-0.0.12-py3-none-any.whl", hash = "sha256:402b61f42d4139692528cf37226c367bb6efc8ff8165b29380accb0abfece7b2"},
     {file = "langchain_protocol-0.0.12.tar.gz", hash = "sha256:5e14c434290a705c9510fdb1a83ecf7561a5e6e0dfd053930ade80dba069269f"},
@@ -3133,9 +3135,10 @@ orjson = ">=3.11.5"
 name = "langsmith"
 version = "0.8.0"
 description = "Client library to connect to the LangSmith Observability and Evaluation Platform."
-optional = false
+optional = true
 python-versions = ">=3.10"
 groups = ["main"]
+markers = "extra == \"trust-adapters\""
 files = [
     {file = "langsmith-0.8.0-py3-none-any.whl", hash = "sha256:12cc4bc5622b835a6d841964d6034df3617bdb912dae0c1381fd0a68a9b3a3ef"},
     {file = "langsmith-0.8.0.tar.gz", hash = "sha256:59fe5b2a56bbbe14a08aa76691f84b49e8675dd21e11b57d80c6db8c08bac2e3"},
@@ -4354,10 +4357,10 @@ typing-extensions = ">=4.5.0"
 name = "orjson"
 version = "3.11.8"
 description = "Fast, correct Python JSON library supporting dataclasses, datetimes, and numpy"
-optional = false
+optional = true
 python-versions = ">=3.10"
 groups = ["main"]
-markers = "platform_python_implementation != \"PyPy\" or extra == \"trust-adapters\""
+markers = "extra == \"trust-adapters\""
 files = [
     {file = "orjson-3.11.8-cp310-cp310-macosx_10_15_x86_64.macosx_11_0_arm64.macosx_10_15_universal2.whl", hash = "sha256:e6693ff90018600c72fd18d3d22fa438be26076cd3c823da5f63f7bab28c11cb"},
     {file = "orjson-3.11.8-cp310-cp310-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:93de06bc920854552493c81f1f729fab7213b7db4b8195355db5fda02c7d1363"},
@@ -5118,10 +5121,10 @@ pyasn1 = ">=0.6.1,<0.7.0"
 name = "pycparser"
 version = "3.0"
 description = "C parser in Python"
-optional = true
+optional = false
 python-versions = ">=3.10"
 groups = ["main"]
-markers = "platform_python_implementation != \"PyPy\" and (extra == \"mcp\" or extra == \"trust\" or extra == \"trust-adapters\" or extra == \"trust-cli\" or extra == \"strands\" or extra == \"google\" or extra == \"opentelemetry\" or extra == \"full\" or extra == \"pii\") and implementation_name != \"PyPy\""
+markers = "platform_python_implementation != \"PyPy\" and implementation_name != \"PyPy\""
 files = [
     {file = "pycparser-3.0-py3-none-any.whl", hash = "sha256:b727414169a36b7d524c1c3e31839a521725078d7b2ff038656844266160a992"},
     {file = "pycparser-3.0.tar.gz", hash = "sha256:600f49d217304a5902ac3c37e1281c9fe94e4d0489de643a9504c5cdfdfc6b29"},
@@ -5454,9 +5457,10 @@ cli = ["click (>=5.0)"]
 name = "python-multipart"
 version = "0.0.27"
 description = "A streaming multipart parser for Python"
-optional = false
+optional = true
 python-versions = ">=3.10"
 groups = ["main"]
+markers = "extra == \"trust-adapters\" or extra == \"mcp\" or extra == \"strands\""
 files = [
     {file = "python_multipart-0.0.27-py3-none-any.whl", hash = "sha256:6fccfad17a27334bd0193681b369f476eda3409f17381a2d65aa7df3f7275645"},
     {file = "python_multipart-0.0.27.tar.gz", hash = "sha256:9870a6a8c5a20a5bf4f07c017bd1489006ff8836cff097b6933355ee2b49b602"},
@@ -5786,9 +5790,10 @@ requests = ">=1.0.0"
 name = "requests-toolbelt"
 version = "1.0.0"
 description = "A utility belt for advanced users of python-requests"
-optional = false
+optional = true
 python-versions = ">=2.7, !=3.0.*, !=3.1.*, !=3.2.*, !=3.3.*"
 groups = ["main"]
+markers = "extra == \"trust-adapters\""
 files = [
     {file = "requests-toolbelt-1.0.0.tar.gz", hash = "sha256:7681a0a3d047012b5bdc0ee37d7f8f07ebe76ab08caeccfc3921ce23c88d5bc6"},
     {file = "requests_toolbelt-1.0.0-py2.py3-none-any.whl", hash = "sha256:cccfdd665f0a24fcf4726e690f65639d272bb0637b9b92dfd91a5568ccf6bd06"},
@@ -6801,9 +6806,10 @@ dev = ["hypothesis (>=6.70.0)", "pytest (>=7.1.0)"]
 name = "tenacity"
 version = "9.1.4"
 description = "Retry code until it succeeds"
-optional = false
+optional = true
 python-versions = ">=3.10"
 groups = ["main"]
+markers = "extra == \"trust-adapters\""
 files = [
     {file = "tenacity-9.1.4-py3-none-any.whl", hash = "sha256:6095a360c919085f28c6527de529e76a06ad89b23659fa881ae0649b867a9d55"},
     {file = "tenacity-9.1.4.tar.gz", hash = "sha256:adb31d4c263f2bd041081ab33b498309a57c77f9acf2db65aadf0898179cf93a"},
@@ -7409,9 +7415,10 @@ zstd = ["backports-zstd (>=1.0.0) ; python_version < \"3.14\""]
 name = "uuid-utils"
 version = "0.14.1"
 description = "Fast, drop-in replacement for Python's uuid module, powered by Rust."
-optional = false
+optional = true
 python-versions = ">=3.9"
 groups = ["main"]
+markers = "extra == \"trust-adapters\""
 files = [
     {file = "uuid_utils-0.14.1-cp39-abi3-macosx_10_12_x86_64.macosx_11_0_arm64.macosx_10_12_universal2.whl", hash = "sha256:93a3b5dc798a54a1feb693f2d1cb4cf08258c32ff05ae4929b5f0a2ca624a4f0"},
     {file = "uuid_utils-0.14.1-cp39-abi3-macosx_10_12_x86_64.whl", hash = "sha256:ccd65a4b8e83af23eae5e56d88034b2fe7264f465d3e830845f10d1591b81741"},
@@ -7832,9 +7839,10 @@ files = [
 name = "xxhash"
 version = "3.7.0"
 description = "Python binding for xxHash"
-optional = false
+optional = true
 python-versions = ">=3.8"
 groups = ["main"]
+markers = "extra == \"trust-adapters\""
 files = [
     {file = "xxhash-3.7.0-cp310-cp310-macosx_10_9_x86_64.whl", hash = "sha256:cd8ab85c916a58d5c8656ea15e3ce9df836fe2f120a74c296e01d69fab2614b4"},
     {file = "xxhash-3.7.0-cp310-cp310-macosx_11_0_arm64.whl", hash = "sha256:85f5c0e26d945b5bb475e0a3d95193117498130baa7619357bdc7869c2391b5a"},
@@ -8193,9 +8201,10 @@ type = ["pytest-mypy"]
 name = "zstandard"
 version = "0.25.0"
 description = "Zstandard bindings for Python"
-optional = false
+optional = true
 python-versions = ">=3.9"
 groups = ["main"]
+markers = "extra == \"trust-adapters\""
 files = [
     {file = "zstandard-0.25.0-cp310-cp310-macosx_10_9_x86_64.whl", hash = "sha256:e59fdc271772f6686e01e1b3b74537259800f57e24280be3f29c8a0deb1904dd"},
     {file = "zstandard-0.25.0-cp310-cp310-macosx_11_0_arm64.whl", hash = "sha256:4d441506e9b372386a5271c64125f72d5df6d2a8e8a2a45a0ae09b03cb781ef7"},
