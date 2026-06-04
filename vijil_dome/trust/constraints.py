@@ -42,4 +42,9 @@ class AgentConstraints(BaseModel):
     tool_permissions: list[ToolPermission]
     organization: OrganizationConstraints
     enforcement_mode: Literal["warn", "enforce"]
+    # How to treat an UNATTESTED agent's tool calls. "warn" (default) preserves today's behavior
+    # (the normal tool check applies) so existing enforce-mode-but-unattested flows are not
+    # bricked; "deny" fails closed — an unattested agent is denied regardless of tool. The flag
+    # sets the DECISION; enforcement_mode decides whether that deny is enforced.
+    unattested_tool_policy: Literal["warn", "deny"] = "warn"
     updated_at: datetime

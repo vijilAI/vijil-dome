@@ -40,6 +40,7 @@ class ToolPolicy:
             constraints.organization.denied_tools
         )
         self._enforcement_mode: str = constraints.enforcement_mode
+        self._unattested_tool_policy: str = constraints.unattested_tool_policy
 
     # ------------------------------------------------------------------
     # Public API
@@ -67,8 +68,21 @@ class ToolPolicy:
                 when ``attested`` is False, so consumers MUST gate on
                 ``identity_verified`` before keying any decision on it.
             attested: Whether the agent's identity is attested. Recorded as
-                ``identity_verified``; does not change the outcome in this step.
+                ``identity_verified``. When ``unattested_tool_policy`` is "deny", an
+                unattested agent is denied here (fail-closed); enforcement_mode then
+                decides whether that deny is enforced or only logged.
         """
+        # A2: fail-closed on an unattested identity when the operator opted into "deny".
+        # An unattested agent is denied regardless of which tool it calls.
+        if not attested and self._unattested_tool_policy == "deny":
+            return self._deny(
+                tool_name,
+                "agent identity is not attested",
+                args,
+                spiffe_id=spiffe_id,
+                attested=attested,
+            )
+
         if tool_name in self._denied_tools:
             return self._deny(
                 tool_name, "denied by organization constraints", args,
