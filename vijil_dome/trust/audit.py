@@ -67,13 +67,20 @@ class AuditEmitter:
         *,
         permitted: bool,
         identity_verified: bool,
+        agent_spiffe_id: str | None = None,
     ) -> None:
-        """Emit a tool MAC enforcement event."""
+        """Emit a tool MAC enforcement event.
+
+        ``agent_spiffe_id`` records the attested principal the MAC decision was
+        made for, so the binding between the decision and the caller is auditable
+        downstream. It is meaningful only when ``identity_verified`` is True.
+        """
         self._emit(
             "tool_mac",
             tool_name=tool_name,
             permitted=permitted,
             identity_verified=identity_verified,
+            agent_spiffe_id=agent_spiffe_id,
         )
 
     def emit_attestation(
