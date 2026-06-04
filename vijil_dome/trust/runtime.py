@@ -114,7 +114,10 @@ class TrustRuntime:
                     config.update(dome_cfg.guards)
                     self._dome = Dome(dome_config=config, enforce=(effective_mode == "enforce"))
                 except Exception as exc:
-                    if mode == "enforce":
+                    # B5: gate on effective_mode, not the raw local mode — else a Dome-init
+                    # failure under a mandated-enforce-but-local-warn posture would silently
+                    # disable guards (the exact downgrade B5 prevents) instead of raising.
+                    if effective_mode == "enforce":
                         raise RuntimeError(
                             f"Dome initialization failed in enforce mode: {exc}"
                         ) from exc
@@ -237,14 +240,6 @@ class TrustRuntime:
             )
         self._trust_vector = current
         return current
-
-        if self._guards_disabled:
-            self._audit.emit_guards_disabled(
-                error=getattr(self, "_guards_disabled_error", "unknown"),
-            )
-
-        if not self._identity.is_attested():
-            self._audit.emit_identity_unattested()
 
     # ------------------------------------------------------------------
     # Attestation

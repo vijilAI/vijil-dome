@@ -58,10 +58,22 @@ def test_legacy_uuid_keyed_constraints_skip_binding() -> None:
     assert result.permitted is True
 
 
-def test_unattested_does_not_trigger_binding_check() -> None:
-    # An unattested agent is governed by A2's unattested policy, not the binding check; default
-    # unattested_tool_policy='warn' means the normal tool check applies.
+def test_unattested_svid_keyed_permitted_under_default_warn_policy() -> None:
+    # DOCUMENTED STAGED GAP: an unattested agent against an SVID-keyed policy is governed by A2's
+    # unattested_tool_policy. The default "warn" permits it (non-bricking — many agents run
+    # unattested today since X.509 attestation isn't reliably wired). To enforce binding for
+    # unattested agents, set unattested_tool_policy="deny" (next test). FOLLOW-UP: flip the
+    # default to fail-closed once attestation is the norm (paired with the A2 default-flip).
     result = ToolPolicy(_constraints(subject=_SPIFFE)).check(
         "book_flight", {}, spiffe_id=None, attested=False
     )
     assert result.permitted is True
+
+
+def test_unattested_svid_keyed_denied_when_policy_deny() -> None:
+    # The secure config closes the gap: deny-policy denies an unattested agent regardless of
+    # subject shape (A2), so an SVID-keyed policy with deny is fully identity-bound.
+    constraints = _constraints(subject=_SPIFFE).model_copy(update={"unattested_tool_policy": "deny"})
+    result = ToolPolicy(constraints).check("book_flight", {}, spiffe_id=None, attested=False)
+    assert result.permitted is False
+    assert "attest" in (result.error or "").lower()

@@ -57,3 +57,33 @@ def test_no_downgrade_event_when_not_downgrading() -> None:
     events: list[AuditEvent] = []
     _runtime(console_mode="warn", local_mode="enforce", sink=events.append)
     assert [e for e in events if e.event_type == "mode_downgrade"] == []
+
+
+def test_dome_init_failure_under_mandated_enforce_raises(monkeypatch: object) -> None:
+    """The Dome-init exception handler must gate on effective_mode, not the raw local mode.
+
+    Console mandates enforce, the caller passes warn → effective_mode is enforce. If Dome
+    construction fails, the runtime must RAISE (fail-closed) rather than silently disable guards
+    — the downgrade-via-error-path the enforcement-core review flagged as critical.
+    """
+    import pytest
+    import vijil_dome
+
+    def _boom(*_args: object, **_kwargs: object) -> object:
+        raise ValueError("bad guard config")
+
+    monkeypatch.setattr(vijil_dome, "Dome", _boom)  # type: ignore[attr-defined]
+    constraints = {
+        "agent_id": "agent-1",
+        "dome_config": {"input_guards": ["prompt_injection"], "output_guards": [],
+                        "guards": {"prompt_injection": {}}},
+        "tool_permissions": [],
+        "organization": {"required_input_guards": [], "required_output_guards": [], "denied_tools": []},
+        "enforcement_mode": "enforce",
+        "updated_at": "2026-04-03T12:00:00+00:00",
+    }
+    client = MagicMock()
+    client._http._token = "test-api-key"
+    client._http.get.return_value = constraints
+    with pytest.raises(RuntimeError, match="enforce"):
+        TrustRuntime(client=client, agent_id="agent-1", mode="warn")  # local warn, mandated enforce
