@@ -109,6 +109,23 @@ class AuditEmitter:
             error=error,
         )
 
+    def emit_mode_downgrade(
+        self,
+        *,
+        requested: str,
+        effective: str,
+    ) -> None:
+        """Emit an enforcement-mode downgrade event.
+
+        Records that a weaker local mode (``requested``) was overridden by a stronger
+        mandated mode (``effective``) — enforce is a floor that cannot be silently downgraded.
+        """
+        self._emit(
+            "mode_downgrade",
+            requested=requested,
+            effective=effective,
+        )
+
     def emit_guards_disabled(
         self,
         *,

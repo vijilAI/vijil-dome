@@ -86,11 +86,15 @@ class TrustRuntime:
                 "updated_at": datetime.now(tz=UTC).isoformat(),
             })
 
-        # 3. Create ToolPolicy — override enforcement_mode to match runtime mode.
-        # Safe: mode is already validated against _valid_modes above, which
-        # matches AgentConstraints.enforcement_mode's Literal["warn","enforce"].
+        # 3. B5: enforce is a FLOOR. A local mode='warn' must not silently downgrade a Console-
+        # (or constraint-) mandated 'enforce'. Take the stronger of the two; record any downgrade
+        # attempt so it is audited (below) rather than honored. mode is already validated above.
+        mandated_mode = self._constraints.enforcement_mode
+        effective_mode = "enforce" if "enforce" in (mandated_mode, mode) else "warn"
+        self._mode_downgrade_attempted: bool = mandated_mode == "enforce" and mode == "warn"
+        self.mode = effective_mode
         constraints_for_policy = self._constraints.model_copy(
-            update={"enforcement_mode": mode}
+            update={"enforcement_mode": effective_mode}
         )
         self._policy = ToolPolicy(constraints_for_policy)
 
@@ -108,7 +112,7 @@ class TrustRuntime:
                         "output-guards": dome_cfg.output_guards,
                     }
                     config.update(dome_cfg.guards)
-                    self._dome = Dome(dome_config=config, enforce=(mode == "enforce"))
+                    self._dome = Dome(dome_config=config, enforce=(effective_mode == "enforce"))
                 except Exception as exc:
                     if mode == "enforce":
                         raise RuntimeError(
@@ -131,6 +135,11 @@ class TrustRuntime:
 
         # 6. Create audit emitter
         self._audit = AuditEmitter(agent_id=agent_id, sink=audit_sink)
+        if self._mode_downgrade_attempted:
+            logger.warning(
+                "local mode='warn' cannot downgrade a mandated 'enforce'; using enforce"
+            )
+            self._audit.emit_mode_downgrade(requested=mode, effective=effective_mode)
 
         if self._guards_disabled:
             self._audit.emit_guards_disabled(
