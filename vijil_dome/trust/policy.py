@@ -25,10 +25,13 @@ class ToolPolicy:
     """Mandatory Access Control policy derived from AgentConstraints.
 
     Checks whether an agent is permitted to call a named tool by:
-    1. Rejecting tools denied at the organization level.
-    2. Rejecting tools absent from the agent's explicit permission list.
-    3. Checking allowed_actions if the permission restricts specific actions.
-    4. Honouring the enforcement mode — enforced=True only when the call
+    1. Denying an unattested agent when ``unattested_tool_policy`` is "deny" (A2).
+    2. Denying an attested agent whose SVID does not match an SVID-keyed
+       policy subject (A3 binding check).
+    3. Rejecting tools denied at the organization level.
+    4. Rejecting tools absent from the agent's explicit permission list.
+    5. Checking allowed_actions if the permission restricts specific actions.
+    6. Honouring the enforcement mode — enforced=True only when the call
        would be blocked AND the mode is "enforce".
     """
 
@@ -63,15 +66,16 @@ class ToolPolicy:
                 potential downstream audit/debugging (not emitted today); future
                 versions may enforce parameter-level constraints (e.g., allowed
                 parameter ranges, required fields).
-            spiffe_id: The calling agent's SPIFFE ID, recorded on the result for
-                audit. Threaded for downstream identity-keyed policy (A2/A3); the
-                permit/deny outcome is NOT keyed on it here. It is recorded even
-                when ``attested`` is False, so consumers MUST gate on
-                ``identity_verified`` before keying any decision on it.
+            spiffe_id: The calling agent's SPIFFE ID. For an SVID-keyed policy
+                subject, the A3 binding check denies an ATTESTED call whose
+                ``spiffe_id`` differs from the subject — so the permit/deny outcome
+                IS keyed on it for attested callers. It is also recorded on the
+                result for audit. An unattested caller has no verified SVID, so the
+                binding check applies only when ``attested`` is True.
             attested: Whether the agent's identity is attested. Recorded as
                 ``identity_verified``. When ``unattested_tool_policy`` is "deny", an
-                unattested agent is denied here (fail-closed); enforcement_mode then
-                decides whether that deny is enforced or only logged.
+                unattested agent is denied here (A2, fail-closed); enforcement_mode
+                then decides whether that deny is enforced or only logged.
         """
         # A2: fail-closed on an unattested identity when the operator opted into "deny".
         # An unattested agent is denied regardless of which tool it calls.
