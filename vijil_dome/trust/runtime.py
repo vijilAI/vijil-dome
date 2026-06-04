@@ -351,11 +351,17 @@ class TrustRuntime:
 
     def check_tool_call(self, tool_name: str, args: dict[str, Any]) -> ToolCallResult:
         """Check whether a tool call is permitted by policy."""
-        result = self._policy.check(tool_name, args=args)
+        result = self._policy.check(
+            tool_name,
+            args=args,
+            spiffe_id=self._identity.spiffe_id,
+            attested=self._identity.is_attested(),
+        )
         self._audit.emit_tool_mac(
             tool_name,
             permitted=result.permitted,
             identity_verified=result.identity_verified,
+            agent_spiffe_id=result.agent_spiffe_id,
         )
         return result
 

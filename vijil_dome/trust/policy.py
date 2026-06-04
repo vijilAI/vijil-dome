@@ -15,6 +15,7 @@ class ToolCallResult(BaseModel):
     tool_name: str
     args: dict[str, Any] | None = None
     identity_verified: bool = False
+    agent_spiffe_id: str | None = None
     policy_permitted: bool = False
     enforced: bool = False
     error: str | None = None
@@ -48,6 +49,9 @@ class ToolPolicy:
         self,
         tool_name: str,
         args: dict[str, Any] | None = None,
+        *,
+        spiffe_id: str | None = None,
+        attested: bool = False,
     ) -> ToolCallResult:
         """Return a ToolCallResult reflecting the MAC decision.
 
@@ -56,13 +60,26 @@ class ToolPolicy:
             args: The arguments passed to the tool. Currently logged for
                 audit; future versions may enforce parameter-level constraints
                 (e.g., allowed parameter ranges, required fields).
+            spiffe_id: The calling agent's SPIFFE ID, recorded on the result for
+                audit. Threaded for downstream identity-keyed policy (A2/A3); the
+                permit/deny outcome is NOT keyed on it here. It is recorded even
+                when ``attested`` is False, so consumers MUST gate on
+                ``identity_verified`` before keying any decision on it.
+            attested: Whether the agent's identity is attested. Recorded as
+                ``identity_verified``; does not change the outcome in this step.
         """
         if tool_name in self._denied_tools:
-            return self._deny(tool_name, "denied by organization constraints", args)
+            return self._deny(
+                tool_name, "denied by organization constraints", args,
+                spiffe_id=spiffe_id, attested=attested,
+            )
 
         perm = self._permissions.get(tool_name)
         if perm is None:
-            return self._deny(tool_name, "not in agent permissions", args)
+            return self._deny(
+                tool_name, "not in agent permissions", args,
+                spiffe_id=spiffe_id, attested=attested,
+            )
 
         # Check allowed_actions if the permission restricts them.
         # Fail-closed: missing or None action is denied when allowed_actions is set.
@@ -73,12 +90,16 @@ class ToolPolicy:
                     tool_name,
                     f"action {action!r} not in allowed_actions {perm.allowed_actions}",
                     args,
+                    spiffe_id=spiffe_id,
+                    attested=attested,
                 )
 
         return ToolCallResult(
             permitted=True,
             tool_name=tool_name,
             args=args,
+            identity_verified=attested,
+            agent_spiffe_id=spiffe_id,
             policy_permitted=True,
         )
 
@@ -91,13 +112,21 @@ class ToolPolicy:
     # ------------------------------------------------------------------
 
     def _deny(
-        self, tool_name: str, error: str, args: dict[str, Any] | None = None
+        self,
+        tool_name: str,
+        error: str,
+        args: dict[str, Any] | None = None,
+        *,
+        spiffe_id: str | None = None,
+        attested: bool = False,
     ) -> ToolCallResult:
         enforced = self._enforcement_mode == "enforce"
         return ToolCallResult(
             permitted=False,
             tool_name=tool_name,
             args=args,
+            identity_verified=attested,
+            agent_spiffe_id=spiffe_id,
             policy_permitted=False,
             enforced=enforced,
             error=error,
