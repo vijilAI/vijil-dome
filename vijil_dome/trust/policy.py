@@ -57,9 +57,10 @@ class ToolPolicy:
 
         Args:
             tool_name: The tool being called.
-            args: The arguments passed to the tool. Currently logged for
-                audit; future versions may enforce parameter-level constraints
-                (e.g., allowed parameter ranges, required fields).
+            args: The arguments passed to the tool. Carried on the result for
+                potential downstream audit/debugging (not emitted today); future
+                versions may enforce parameter-level constraints (e.g., allowed
+                parameter ranges, required fields).
             spiffe_id: The calling agent's SPIFFE ID, recorded on the result for
                 audit. Threaded for downstream identity-keyed policy (A2/A3); the
                 permit/deny outcome is NOT keyed on it here. It is recorded even
