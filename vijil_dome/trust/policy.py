@@ -41,6 +41,7 @@ class ToolPolicy:
         )
         self._enforcement_mode: str = constraints.enforcement_mode
         self._unattested_tool_policy: str = constraints.unattested_tool_policy
+        self._subject: str = constraints.agent_id
 
     # ------------------------------------------------------------------
     # Public API
@@ -78,6 +79,19 @@ class ToolPolicy:
             return self._deny(
                 tool_name,
                 "agent identity is not attested",
+                args,
+                spiffe_id=spiffe_id,
+                attested=attested,
+            )
+
+        # A3: an attested agent must match the SVID-keyed policy subject. A mismatch means the
+        # loaded constraints belong to a different identity (the "load any agent's constraints
+        # with an API token" priv-esc) -> fail closed. Applies only to SVID-keyed constraints
+        # (subject is a spiffe:// URI); legacy UUID-keyed constraints skip it (non-bricking).
+        if attested and self._subject.startswith("spiffe://") and spiffe_id != self._subject:
+            return self._deny(
+                tool_name,
+                "attested identity does not match the policy subject",
                 args,
                 spiffe_id=spiffe_id,
                 attested=attested,
