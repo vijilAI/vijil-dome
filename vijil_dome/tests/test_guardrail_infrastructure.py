@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import pathlib
 
 import pytest
 
@@ -338,3 +339,276 @@ async def test_negative_score_clamped_to_zero() -> None:
     )
     result = await guard.sequential_guard("test input")
     assert result.detection_score >= 0.0
+
+
+# ---------------------------------------------------------------------------
+# DOME-163 B1: Fail-CLOSED on detector-unreachable
+#
+# Today the legacy content-guard path fails OPEN: a detector that errors,
+# times out, or raises (e.g. the EKS inference server is unreachable)
+# synthesizes hit=False, so the guard treats the error as a clean pass.
+# The on_error="fail_closed" option must make an errored detector BLOCK
+# in enforce mode, while the default on_error="fail_open" preserves the
+# back-compatible silent-pass behavior.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_guard_fail_closed_sequential_blocks_on_error() -> None:
+    """A detector that errors must BLOCK when the guard is fail_closed."""
+    guard = Guard(
+        guard_name="test_guard",
+        detector_list=[MockErrorDetector()],
+        run_in_parallel=False,
+        on_error="fail_closed",
+    )
+
+    result = await guard.sequential_guard("test input")
+
+    assert result.triggered is True
+    assert "MockErrorDetector" in result.errored_methods
+
+
+@pytest.mark.asyncio
+async def test_guard_fail_closed_parallel_blocks_on_error() -> None:
+    """Same fail-closed semantics on the parallel guard path."""
+    guard = Guard(
+        guard_name="test_guard",
+        detector_list=[MockErrorDetector()],
+        run_in_parallel=True,
+        on_error="fail_closed",
+    )
+    guardrail = Guardrail(level="input", guard_list=[guard], run_in_parallel=False)
+
+    result = await guardrail.async_scan("test input")
+
+    assert result.flagged is True
+    assert "test_guard:MockErrorDetector" in result.errored_methods
+
+
+@pytest.mark.asyncio
+async def test_guard_fail_closed_blocks_on_timeout() -> None:
+    """A detector timeout (slow-loris the inference server) must BLOCK."""
+    guard = Guard(
+        guard_name="test_guard",
+        detector_list=[MockHangingDetector(delay=30.0)],
+        run_in_parallel=False,
+        on_error="fail_closed",
+    )
+
+    result = await guard.sequential_guard("test input")
+
+    assert result.triggered is True
+    assert "MockHangingDetector" in result.errored_methods
+
+
+@pytest.mark.asyncio
+async def test_guard_fail_closed_blocks_on_exception() -> None:
+    """A detector that raises (e.g. ConnectError) must BLOCK when fail_closed."""
+    guard = Guard(
+        guard_name="test_guard",
+        detector_list=[MockExceptionDetector()],
+        run_in_parallel=False,
+        on_error="fail_closed",
+    )
+
+    result = await guard.sequential_guard("test input")
+
+    assert result.triggered is True
+    assert "MockExceptionDetector" in result.errored_methods
+
+
+@pytest.mark.asyncio
+async def test_guard_fail_open_default_preserves_pass_on_error() -> None:
+    """Back-compat: the default (fail_open) still passes an errored detector."""
+    guard = Guard(
+        guard_name="test_guard",
+        detector_list=[MockErrorDetector()],
+        run_in_parallel=False,
+    )
+
+    result = await guard.sequential_guard("test input")
+
+    assert result.triggered is False
+    assert "MockErrorDetector" in result.errored_methods
+
+
+@pytest.mark.asyncio
+async def test_guard_fail_closed_clean_detector_passes() -> None:
+    """fail_closed must NOT block a clean (non-errored) detector."""
+    guard = Guard(
+        guard_name="test_guard",
+        detector_list=[MockCleanDetector()],
+        run_in_parallel=False,
+        on_error="fail_closed",
+    )
+
+    result = await guard.sequential_guard("test input")
+
+    assert result.triggered is False
+    assert result.errored_methods == []
+
+
+@pytest.mark.asyncio
+async def test_guard_fail_closed_real_hit_takes_precedence() -> None:
+    """A genuine hit alongside an error stays a hit (not laundered to error-only)."""
+    guard = Guard(
+        guard_name="test_guard",
+        detector_list=[MockTriggeringDetector(), MockErrorDetector()],
+        run_in_parallel=False,
+        early_exit=False,
+        on_error="fail_closed",
+    )
+
+    result = await guard.sequential_guard("test input")
+
+    assert result.triggered is True
+    assert "MockTriggeringDetector" in result.triggered_methods
+    assert "MockErrorDetector" in result.errored_methods
+
+
+@pytest.mark.asyncio
+async def test_guardrail_fail_closed_blocks_when_a_guard_errors() -> None:
+    """A clean guard plus an errored guard must BLOCK at the guardrail level."""
+    clean_guard = Guard(
+        guard_name="clean",
+        detector_list=[MockCleanDetector()],
+        run_in_parallel=False,
+        on_error="fail_closed",
+    )
+    error_guard = Guard(
+        guard_name="errored",
+        detector_list=[MockErrorDetector()],
+        run_in_parallel=False,
+        on_error="fail_closed",
+    )
+    guardrail = Guardrail(
+        level="input",
+        guard_list=[clean_guard, error_guard],
+        run_in_parallel=False,
+        early_exit=False,
+    )
+
+    result = await guardrail.async_scan("test input")
+
+    assert result.flagged is True
+    assert "errored:MockErrorDetector" in result.errored_methods
+
+
+@pytest.mark.asyncio
+async def test_guardrail_fail_closed_blocks_when_guard_task_raises() -> None:
+    """If a guard task itself raises (parallel path), fail_closed must BLOCK
+    rather than silently dropping the guard and passing."""
+
+    class ExplodingGuard(Guard):
+        async def async_scan(self, *args, **kwargs):  # type: ignore[override]
+            raise RuntimeError("guard exploded")
+
+    exploding = ExplodingGuard(
+        guard_name="boom",
+        detector_list=[MockCleanDetector()],
+        run_in_parallel=False,
+    )
+    guardrail = Guardrail(
+        level="input",
+        guard_list=[exploding],
+        run_in_parallel=True,
+        on_error="fail_closed",
+    )
+
+    result = await guardrail.async_scan("test input")
+
+    assert result.flagged is True
+
+
+@pytest.mark.asyncio
+async def test_guardrail_fail_open_default_passes_when_guard_task_raises() -> None:
+    """Back-compat: default fail_open still drops a raising guard and passes."""
+
+    class ExplodingGuard(Guard):
+        async def async_scan(self, *args, **kwargs):  # type: ignore[override]
+            raise RuntimeError("guard exploded")
+
+    exploding = ExplodingGuard(
+        guard_name="boom",
+        detector_list=[MockCleanDetector()],
+        run_in_parallel=False,
+    )
+    guardrail = Guardrail(
+        level="input",
+        guard_list=[exploding],
+        run_in_parallel=True,
+    )
+
+    result = await guardrail.async_scan("test input")
+
+    assert result.flagged is False
+
+
+def test_config_parser_wires_on_error_to_guard_and_guardrail() -> None:
+    """on_error from the config dict must reach both the Guardrail and its Guards."""
+    from vijil_dome.guardrails.config_parser import create_guardrail
+
+    config = {
+        "input-guards": ["my-guard"],
+        "input-on-error": "fail_closed",
+        "my-guard": {
+            "type": "security",
+            "methods": ["encoding-heuristics"],
+        },
+    }
+    # encoding-heuristics is a pure-heuristic local detector (no model
+    # weights, no network) — we only need construction, not a scan.
+    guardrail = create_guardrail("input", config)
+
+    assert guardrail.on_error == "fail_closed"
+    assert all(g.on_error == "fail_closed" for g in guardrail.guard_list)
+
+
+def test_config_parser_invalid_on_error_raises() -> None:
+    """A typo in on-error must fail loud, not silently default to fail_open."""
+    from vijil_dome.guardrails.config_parser import create_guardrail
+
+    config = {
+        "input-guards": ["my-guard"],
+        "input-on-error": "fail-closed",  # wrong: hyphen instead of underscore
+        "my-guard": {
+            "type": "security",
+            "methods": ["encoding-heuristics"],
+        },
+    }
+    with pytest.raises(ValueError, match="Invalid on-error value"):
+        create_guardrail("input", config)
+
+
+def test_config_parser_per_guard_on_error_overrides_guardrail(
+    tmp_path: pathlib.Path,
+) -> None:
+    """A per-guard on-error wins over the guardrail-level default, and the
+    TOML round-trip preserves on-error end to end."""
+    from vijil_dome.guardrails.config_parser import convert_toml_to_guardrails
+
+    toml_text = (
+        "[guardrail]\n"
+        'input-guards = ["strict", "lenient"]\n'
+        'input-on-error = "fail_closed"\n'
+        "\n"
+        "[strict]\n"
+        'type = "security"\n'
+        'methods = ["encoding-heuristics"]\n'
+        "\n"
+        "[lenient]\n"
+        'type = "security"\n'
+        'on-error = "fail_open"\n'
+        'methods = ["encoding-heuristics"]\n'
+    )
+    toml_path = tmp_path / "config.toml"
+    toml_path.write_text(toml_text)
+
+    input_guardrail, output_guardrail, *_ = convert_toml_to_guardrails(str(toml_path))
+
+    assert input_guardrail.on_error == "fail_closed"
+    by_name = {g.guard_name: g.on_error for g in input_guardrail.guard_list}
+    assert by_name["strict"] == "fail_closed"  # inherits guardrail default
+    assert by_name["lenient"] == "fail_open"  # per-guard override wins
+    assert output_guardrail.on_error == "fail_open"  # untouched default

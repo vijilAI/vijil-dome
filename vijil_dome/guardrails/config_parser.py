@@ -14,7 +14,7 @@
 #
 # vijil and vijil-dome are trademarks owned by Vijil Inc.
 
-from vijil_dome.guardrails import Guard, Guardrail
+from vijil_dome.guardrails import Guard, Guardrail, DEFAULT_ON_ERROR, OnError
 from vijil_dome.detectors.methods import *  # noqa: F403
 from vijil_dome.detectors import DetectionCategory, DetectionFactory, DetectionMethod
 from vijil_dome.detectors.methods.remote_method import RemoteDetectionMethod
@@ -63,6 +63,24 @@ REMOTE_DETECTORS: set[str] = {
 
 EARLY_EXIT = "early-exit"
 PARALLELIZED = "run-parallel"
+ON_ERROR = "on-error"
+
+_VALID_ON_ERROR = ("fail_open", "fail_closed")
+
+
+def _coerce_on_error(value: Any, context: str) -> OnError:
+    """Validate an on-error config value, failing loud on a typo.
+
+    A silently-ignored typo here would default an operator who intended
+    ``fail_closed`` back to ``fail_open`` — the exact silent downgrade B1
+    exists to prevent — so an invalid value raises rather than degrading.
+    """
+    if value not in _VALID_ON_ERROR:
+        raise ValueError(
+            f"Invalid on-error value '{value}' for {context}. "
+            f"Must be one of: {list(_VALID_ON_ERROR)}"
+        )
+    return value  # type: ignore[return-value]
 
 
 class _Route(str, Enum):
@@ -230,7 +248,11 @@ def create_detector_for_guard(
 
 
 # Create a Guard object from a config dict
-def create_guard(guard_name: str, guard_config_dict: dict) -> Guard:
+def create_guard(
+    guard_name: str,
+    guard_config_dict: dict,
+    on_error: OnError = DEFAULT_ON_ERROR,
+) -> Guard:
     if "type" not in guard_config_dict:
         raise ValueError("No type specified")
     elif guard_config_dict["type"] not in GUARDRAIL_CATEGORY_MAPPING:
@@ -245,6 +267,14 @@ def create_guard(guard_name: str, guard_config_dict: dict) -> Guard:
         guard_parallel_policy = guard_config_dict[PARALLELIZED]
     else:
         guard_parallel_policy = False
+
+    # A per-guard on-error overrides the guardrail-level default.
+    if ON_ERROR in guard_config_dict:
+        guard_on_error = _coerce_on_error(
+            guard_config_dict[ON_ERROR], f"guard '{guard_name}'"
+        )
+    else:
+        guard_on_error = on_error
 
     if "methods" not in guard_config_dict:
         raise ValueError("No methods specified")
@@ -271,7 +301,13 @@ def create_guard(guard_name: str, guard_config_dict: dict) -> Guard:
                 actual_method_name, guard_config_dict["type"], filtered_config
             )
         )
-    return Guard(guard_name, detector_list, guard_fail_policy, guard_parallel_policy)
+    return Guard(
+        guard_name,
+        detector_list,
+        guard_fail_policy,
+        guard_parallel_policy,
+        on_error=guard_on_error,
+    )
 
 
 # Create a guardrail object from a config dict
@@ -288,6 +324,16 @@ def create_guardrail(guardrail_location: str, config_dict: dict) -> Guardrail:
     fail_fast = f"{guardrail_location}-early-exit"
     run_parallel = f"{guardrail_location}-run-parallel"
     blocked_msg_key = f"{guardrail_location}-blocked-message"
+    on_error_key = f"{guardrail_location}-on-error"
+
+    # Resolve the guardrail-level on-error first so it can be propagated as
+    # the default to each child guard (a per-guard on-error still wins).
+    if on_error_key in config_dict:
+        on_error = _coerce_on_error(
+            config_dict[on_error_key], f"{guardrail_location} guardrail"
+        )
+    else:
+        on_error = DEFAULT_ON_ERROR
 
     if guard_level in config_dict:  # maybe worth raising a warning if missing?
         guard_list = config_dict[guard_level]
@@ -299,13 +345,17 @@ def create_guardrail(guardrail_location: str, config_dict: dict) -> Guardrail:
                     raise ValueError("Formatting for the guard appears to be incorrect")
                 else:
                     guard_name = list(guard.keys())[0]
-                    guard_objects.append(create_guard(guard_name, guard[guard_name]))
+                    guard_objects.append(
+                        create_guard(guard_name, guard[guard_name], on_error=on_error)
+                    )
             elif isinstance(guard, str):
                 if guard not in config_dict:
                     raise ValueError(
                         f"{guardrail_location} guardrail error: Guard {guard} was not specified in the config"
                     )
-                guard_objects.append(create_guard(guard, config_dict[guard]))
+                guard_objects.append(
+                    create_guard(guard, config_dict[guard], on_error=on_error)
+                )
             else:
                 raise ValueError(
                     f"Invalid type for guardgroup {type(guard)}. Must be dict or str."
@@ -321,7 +371,12 @@ def create_guardrail(guardrail_location: str, config_dict: dict) -> Guardrail:
         blocked_message = config_dict[blocked_msg_key]
 
     guardrail = Guardrail(
-        guardrail_location, guard_objects, fail_policy, parallel_policy, blocked_message
+        guardrail_location,
+        guard_objects,
+        fail_policy,
+        parallel_policy,
+        blocked_message,
+        on_error=on_error,
     )
     return guardrail
 
@@ -368,6 +423,9 @@ def convert_toml_to_guardrail_dict(path_to_toml: str):
     raw_config_dict["input-blocked-message"] = extract_field_from_toml(
         "input", "blocked-message", None, toml_config_dict
     )
+    raw_config_dict["input-on-error"] = extract_field_from_toml(
+        "input", "on-error", DEFAULT_ON_ERROR, toml_config_dict
+    )
     raw_config_dict["output-guards"] = extract_field_from_toml(
         "output", "guards", [], toml_config_dict
     )
@@ -379,6 +437,9 @@ def convert_toml_to_guardrail_dict(path_to_toml: str):
     )
     raw_config_dict["output-blocked-message"] = extract_field_from_toml(
         "output", "blocked-message", None, toml_config_dict
+    )
+    raw_config_dict["output-on-error"] = extract_field_from_toml(
+        "output", "on-error", DEFAULT_ON_ERROR, toml_config_dict
     )
 
     for groupname in raw_config_dict["input-guards"]:
