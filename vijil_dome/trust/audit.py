@@ -24,6 +24,31 @@ class AuditEvent(BaseModel):
     attributes: dict[str, Any]
 
 
+class Heartbeat(BaseModel):
+    """An enforcement-alive beacon: 'this agent is still enforcing'.
+
+    Emitted by a wrapped agent so a registered agent that goes dark or
+    silently downgrades its enforcement is detectable downstream. The
+    fields describe the live enforcement posture at emit time:
+
+    - ``effective_mode`` — the runtime's actual mode (``"warn"`` or
+      ``"enforce"``), so a silent downgrade from enforce to warn is visible.
+    - ``hooks_attached`` — whether the content guards are wired and live.
+    - ``detector_reachable`` — whether the detector backend is reachable; a
+      starved or failed detector flips this False without raising.
+    - ``agent_spiffe_id`` — the attested principal, or ``None`` when the
+      agent is unattested.
+
+    SVID-signing of the beacon and periodic scheduling are a follow-up; this
+    model is the unsigned event shape.
+    """
+
+    effective_mode: str
+    hooks_attached: bool
+    detector_reachable: bool
+    agent_spiffe_id: str | None
+
+
 class AuditEmitter:
     """Emits structured audit events to a pluggable sink.
 
@@ -80,6 +105,29 @@ class AuditEmitter:
             tool_name=tool_name,
             permitted=permitted,
             identity_verified=identity_verified,
+            agent_spiffe_id=agent_spiffe_id,
+        )
+
+    def emit_heartbeat(
+        self,
+        *,
+        effective_mode: str,
+        hooks_attached: bool,
+        detector_reachable: bool,
+        agent_spiffe_id: str | None = None,
+    ) -> None:
+        """Emit an enforcement-alive heartbeat ('I am enforcing') event.
+
+        Carries the live enforcement posture so a registered agent that goes
+        dark or silently downgrades is detectable downstream. See
+        ``Heartbeat`` for field semantics. SVID-signing of the beacon is a
+        follow-up; this emits the unsigned event shape.
+        """
+        self._emit(
+            "enforcement_heartbeat",
+            effective_mode=effective_mode,
+            hooks_attached=hooks_attached,
+            detector_reachable=detector_reachable,
             agent_spiffe_id=agent_spiffe_id,
         )
 

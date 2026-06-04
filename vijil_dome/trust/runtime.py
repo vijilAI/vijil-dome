@@ -11,7 +11,7 @@ from typing import Any
 
 from vijil_dome.controls.models import Control, EvaluationResult
 from vijil_dome.trust.attestation import AttestationResult, ToolAttestationStatus
-from vijil_dome.trust.audit import AuditEmitter, AuditEvent
+from vijil_dome.trust.audit import AuditEmitter, AuditEvent, Heartbeat
 from vijil_dome.trust.constraints import AgentConstraints
 from vijil_dome.trust.delta import (
     TrustDelta,
@@ -615,3 +615,39 @@ class TrustRuntime:
         except Exception as exc:
             logger.debug("Failed to extract SPIFFE ID from cert: %s", exc)
         return None
+
+    # ------------------------------------------------------------------
+    # Enforcement-alive heartbeat (B3)
+    # ------------------------------------------------------------------
+
+    def emit_heartbeat(self) -> Heartbeat:
+        """Emit an enforcement-alive beacon describing the live posture.
+
+        Gathers the runtime's effective mode, whether the content guards are
+        wired and live, whether the detector backend is reachable, and the
+        attested SPIFFE id, then emits an ``enforcement_heartbeat`` audit
+        event and returns the ``Heartbeat`` model.
+
+        ``hooks_attached`` is True only when a Dome instance was constructed
+        and guards are not disabled. ``detector_reachable`` is False when the
+        guards were disabled by a failed/starved detector backend, so a silent
+        downgrade is detectable downstream.
+
+        This is the event shape + emit. Periodic scheduling and SVID-signing
+        of the beacon are a follow-up (B3 part 2).
+        """
+        hooks_attached = self._dome is not None and not self._guards_disabled
+        detector_reachable = not self._guards_disabled
+        heartbeat = Heartbeat(
+            effective_mode=self.mode,
+            hooks_attached=hooks_attached,
+            detector_reachable=detector_reachable,
+            agent_spiffe_id=self._identity.spiffe_id,
+        )
+        self._audit.emit_heartbeat(
+            effective_mode=heartbeat.effective_mode,
+            hooks_attached=heartbeat.hooks_attached,
+            detector_reachable=heartbeat.detector_reachable,
+            agent_spiffe_id=heartbeat.agent_spiffe_id,
+        )
+        return heartbeat
