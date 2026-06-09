@@ -36,7 +36,7 @@ needs a review; `vijil-proxy-servers`/`vijil-sdk` unprotected. **The bulk of thi
 | A4 | Model-MAC: `allowed_models` / `max_tokens` / `allow_tool_use` + a `before_model` authorization hook, mirroring the proxy `checkMAC` field model | dome | M | A1 |
 | A5 | SVID-glob policy resolution (first-match), mirroring the proxy `MatchRoute` | dome | M | A1 |
 | A6 | Emit the agent SPIFFE ID in the audit stream (the reported-but-absent `agent_identity`) | dome | S | A1 |
-| A7 | Declare `py-spiffe` as an `identity` extra + lockfile (X.509 attestation is dead in a locked install today) | dome | S | — |
+| A7 | Declare the `spiffe` package (the py-spiffe project; imported and installed as `spiffe`) as an `identity` extra + lockfile (X.509 attestation is dead in a locked install today) | dome | S | — |
 | A8 | Console: materialize real per-identity MAC rulesets (replace the empty stubs at `constraints/service.py:117-123`); operator-authored domain | console | L | — |
 | A9 | Console: `get_by_spiffe_id` resolver + a workload-auth `/constraints` endpoint (present an SVID, not a human JWT) | console | M | A8 |
 | A10 | Dome: fetch constraints **by SVID** instead of the developer-supplied `agent_id` string | dome | M | A1, A9 |

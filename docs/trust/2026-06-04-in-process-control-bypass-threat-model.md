@@ -79,9 +79,11 @@ The Prometheus metric governance would scrape (`<name>-error_total`) increments 
 an `except` around a *raised* scan (`guardrails/instrumentation/metrics.py:202-226`). The
 fail-open path returns a normal result **without raising**, so `error_total` never increments;
 `flagged_total` stays 0; `requests_total` and latency look healthy. The `secure_agent` audit
-stream (`runtime.py:312-319`) carries `flagged` + `score` only — on fail-open both are
-`False`/`0.0`, **byte-identical to a genuinely clean prompt**. The only governance-visible
-signal is a Tempo **trace attribute** `detection.label='errored'` (`telemetry.py:71-88`) — and
+stream (`runtime.py:312-319`) records `direction`, `flagged`, `score`, and `exec_time_ms`, but
+the discriminating detection fields (`flagged` + `score`) are `False`/`0.0` on fail-open,
+**byte-identical to a genuinely clean prompt** — only `exec_time_ms` may differ, and it is not a
+governance signal. The only governance-visible signal is a Tempo **trace attribute**
+`detection.label='errored'` (`vijil_dome/integrations/vijil/telemetry.py:71-88`) — and
 it exists only if `instrument_dome(tracer=…)` was wired, which the core `Dome()`/`TrustRuntime`
 constructors **do not do** (only the example/smoke tests do). Passive, query-only, opt-in. No
 in-repo rule alerts on it.
@@ -108,7 +110,8 @@ property:
    content-guard path. *(dome)*
 2. **Make the failure loud** — a `detector_unavailable_total` counter that increments *without*
    a raised exception, and carry `errored_methods` / `guards_disabled` into the audit event
-   (today `flagged`+`score` only). *(dome)*
+   (today `direction`/`flagged`/`score`/`exec_time_ms`, none of which flags an errored
+   detector). *(dome)*
 3. **An enforcement-alive heartbeat** signed with the agent's SVID, carrying effective mode +
    hooks-attached + detector-reachable. *(dome)*
 4. **A Console liveness reconciler + the missing-agent alert** — `last_dome_report_at` on the
