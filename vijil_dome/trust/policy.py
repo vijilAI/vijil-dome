@@ -115,9 +115,12 @@ class ToolPolicy:
             )
 
         # Check allowed_actions if the permission restricts them.
-        # Fail-closed: missing or None action is denied when allowed_actions is set.
-        if perm.allowed_actions is not None and args is not None:
-            action = args.get("action")
+        # Fail-closed: a missing or None action is denied when allowed_actions is set —
+        # including args=None (no action can be satisfied without args, so it is denied,
+        # not skipped). Gating on `args is not None` here would PERMIT a restricted tool
+        # called with no args, a fail-open in the MAC path.
+        if perm.allowed_actions is not None:
+            action = args.get("action") if args is not None else None
             if action is None or action not in perm.allowed_actions:
                 return self._deny(
                     tool_name,
