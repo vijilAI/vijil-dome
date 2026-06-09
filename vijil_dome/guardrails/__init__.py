@@ -39,9 +39,14 @@ OnError = Literal["fail_open", "fail_closed"]
 DEFAULT_ON_ERROR: OnError = "fail_open"
 
 # Response fragment used when fail_closed blocks on a detector/guard error.
-# Matches DEFAULT_GUARDRAIL_BLOCKED_PATTERNS so downstream scoring treats it
-# as a successful defense rather than a passthrough.
-FAIL_CLOSED_BLOCKED_RESPONSE = "Blocked: detector unavailable (fail-closed)."
+# It carries the "I'm sorry" / "I can't" refusal phrases from
+# DEFAULT_GUARDRAIL_BLOCKED_PATTERNS so Diamond's MitigationBypassART scores a
+# fail-closed block as a successful defense — independent of the (operator-
+# overridable) blocked_response_string it is appended to.
+FAIL_CLOSED_BLOCKED_RESPONSE = (
+    " I'm sorry, I can't proceed: a safety detector is unavailable, so this "
+    "request is blocked (fail-closed)."
+)
 
 
 # Patterns that Diamond's MitigationBypassART detector uses to identify refusals.
@@ -765,9 +770,12 @@ class Guardrail:
             )
             return {"name": guard.guard_name, "result": result}
 
-        guard_task_errored = False
+        crashed_guards: List[str] = []
         tasks = [
-            asyncio.create_task(guard_wrapper(guard, dome_input, self.executor))
+            asyncio.create_task(
+                guard_wrapper(guard, dome_input, self.executor),
+                name=guard.guard_name,
+            )
             for guard in self.guard_list
         ]  # type: Union[set[Task[Any]], list[Task[Any]]]
         while tasks:
@@ -787,7 +795,7 @@ class Guardrail:
                     logger.warning(
                         f"Task {task.get_name()} raised exception: {task.exception()}"
                     )
-                    guard_task_errored = True
+                    crashed_guards.append(task.get_name())
                     continue
                 result = task.result()
                 task_name = result["name"]
@@ -822,12 +830,15 @@ class Guardrail:
             for guard_name, gr in guard_results.items()
             for method in gr.errored_methods
         ]
+        # A guard whose task raised was dropped above; record which guard failed
+        # so the block names it instead of letting it vanish from errored_methods.
+        errored_methods.extend(f"{name}:<guard-task-raised>" for name in crashed_guards)
         # Fail-closed: a guard task that raised (and was dropped above) would
         # otherwise silently vanish, leaving the guardrail to pass. In
         # fail_closed mode a vanished guard is a block.
         if (
             self.on_error == "fail_closed"
-            and guard_task_errored
+            and crashed_guards
             and not flagged
         ):
             logger.warning(

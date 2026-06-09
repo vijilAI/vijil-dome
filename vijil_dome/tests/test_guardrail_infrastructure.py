@@ -387,11 +387,18 @@ async def test_guard_fail_closed_parallel_blocks_on_error() -> None:
 
 
 @pytest.mark.asyncio
-async def test_guard_fail_closed_blocks_on_timeout() -> None:
-    """A detector timeout (slow-loris the inference server) must BLOCK."""
+async def test_guard_fail_closed_blocks_on_timeout(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A detector timeout (slow-loris the inference server) must BLOCK.
+
+    The detector timeout is monkeypatched to a few ms so the test exercises the
+    timeout path without forcing the real 5s DETECTOR_TIMEOUT_SECONDS wait in CI.
+    """
+    monkeypatch.setattr("vijil_dome.guardrails.DETECTOR_TIMEOUT_SECONDS", 0.05)
     guard = Guard(
         guard_name="test_guard",
-        detector_list=[MockHangingDetector(delay=30.0)],
+        detector_list=[MockHangingDetector(delay=1.0)],
         run_in_parallel=False,
         on_error="fail_closed",
     )
@@ -519,6 +526,8 @@ async def test_guardrail_fail_closed_blocks_when_guard_task_raises() -> None:
     result = await guardrail.async_scan("test input")
 
     assert result.flagged is True
+    # The crashed guard must be named in errored_methods, not vanish (review #247).
+    assert "boom:<guard-task-raised>" in result.errored_methods
 
 
 @pytest.mark.asyncio
