@@ -629,15 +629,17 @@ class TrustRuntime:
         event and returns the ``Heartbeat`` model.
 
         ``hooks_attached`` is True only when a Dome instance was constructed
-        and guards are not disabled. ``detector_reachable`` is False when the
-        guards were disabled by a failed/starved detector backend, so a silent
-        downgrade is detectable downstream.
+        and guards are not disabled. ``detector_reachable`` is False when no
+        guards are configured (``_dome is None`` — there is no detector to
+        reach) OR the guards were disabled by a failed/starved detector
+        backend, so a silent downgrade is detectable downstream. A real
+        reachability probe (vs this proxy) is a follow-up (DOME-169).
 
         This is the event shape + emit. Periodic scheduling and SVID-signing
-        of the beacon are a follow-up (B3 part 2).
+        of the beacon are a follow-up (B3 part 2, DOME-169).
         """
         hooks_attached = self._dome is not None and not self._guards_disabled
-        detector_reachable = not self._guards_disabled
+        detector_reachable = self._dome is not None and not self._guards_disabled
         heartbeat = Heartbeat(
             effective_mode=self.mode,
             hooks_attached=hooks_attached,

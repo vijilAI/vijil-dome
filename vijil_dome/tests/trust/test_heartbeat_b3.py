@@ -168,6 +168,19 @@ def test_runtime_emit_heartbeat_detector_unreachable_when_guards_disabled() -> N
     assert events[-1].attributes["detector_reachable"] is False
 
 
+def test_runtime_emit_heartbeat_no_guards_means_detector_not_reachable() -> None:
+    # varunc1996 review of #245: with no guards configured (_dome is None) and guards NOT
+    # disabled, detector_reachable must be False — "no detector configured" must not read as
+    # "detector reachable" (the B4 reconciler keys on it). A real reachability probe is DOME-169.
+    events: list[AuditEvent] = []
+    runtime = _runtime()  # empty guards -> _dome is None, _guards_disabled stays False
+    runtime._audit._sink = events.append
+
+    runtime.emit_heartbeat()
+
+    assert events[-1].attributes["detector_reachable"] is False
+
+
 def test_runtime_emit_heartbeat_returns_heartbeat_model() -> None:
     runtime = _runtime()
     hb = runtime.emit_heartbeat()
