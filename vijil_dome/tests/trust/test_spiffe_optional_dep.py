@@ -15,9 +15,19 @@ vacuously — so a not-installed environment cannot mask a regression.
 
 from __future__ import annotations
 
+import tomllib
+from pathlib import Path
+
 import pytest
 
 import vijil_dome.trust.identity as identity_module
+
+# Repo root: vijil_dome/tests/trust/<this file> -> parents[3].
+_REPO_ROOT = Path(__file__).resolve().parents[3]
+
+
+def _load_toml(name: str) -> dict:
+    return tomllib.loads((_REPO_ROOT / name).read_text())
 
 
 def _spiffe_imports_cleanly() -> bool:
@@ -76,3 +86,30 @@ def test_has_spiffe_flag_matches_importability() -> None:
     or False when present (the A7 gap — dep undeclared so never installed).
     """
     assert identity_module._HAS_SPIFFE is _SPIFFE_IMPORTABLE
+
+
+# ---------------------------------------------------------------------------
+# Packaging contract (review #246): the consumer-side tests above pass even
+# when spiffe is absent from BOTH the environment AND pyproject/lock (both
+# sides go False). These assert the declaration itself, so removing spiffe
+# from pyproject or the lock fails the build regardless of what is installed.
+# ---------------------------------------------------------------------------
+
+
+def test_pyproject_declares_spiffe_optional_in_identity_extra() -> None:
+    poetry = _load_toml("pyproject.toml")["tool"]["poetry"]
+    deps = poetry["dependencies"]
+    assert "spiffe" in deps, "spiffe missing from [tool.poetry.dependencies]"
+    assert deps["spiffe"].get("optional") is True, "spiffe must be optional"
+    assert "spiffe" in poetry["extras"].get("identity", []), (
+        "spiffe missing from the `identity` extra"
+    )
+
+
+def test_poetry_lock_pins_spiffe_below_cap() -> None:
+    lock = _load_toml("poetry.lock")
+    spiffe = next((p for p in lock["package"] if p["name"] == "spiffe"), None)
+    assert spiffe is not None, "spiffe not resolved into poetry.lock"
+    parts = tuple(int(x) for x in spiffe["version"].split(".")[:3])
+    # Capped < 0.2.4 (0.2.4+ protobuf gencode conflicts with the OTEL pins; DOME-168).
+    assert parts < (0, 2, 4), f"spiffe {spiffe['version']} violates the < 0.2.4 cap"
