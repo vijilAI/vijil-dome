@@ -110,7 +110,7 @@ In-process MAC lives in `vijil_dome/trust/constraints.py` and `vijil_dome/trust/
 | `name` | `str` | tool name; the permission key |
 | `identity` | `str` | SPIFFE ID **of the tool** (e.g. `spiffe://vijil.ai/tools/flights/v1`) |
 | `endpoint` | `str` | tool endpoint (e.g. `mcp+tls://flights.internal:8443`) |
-| `allowed_actions` | `list[str] \| None` | `None` ⇒ all actions; otherwise the call's `args["action"]` MUST be in the list (fail-closed, `policy.py`) |
+| `allowed_actions` | `list[str] \| None` | `None` ⇒ all actions; otherwise the call's `args["action"]` MUST be in the list — a missing action, `args["action"]=None`, OR `args=None` all deny (fail-closed, `policy.py`) |
 
 **`OrganizationConstraints`** (`constraints.py`) — the org-wide overlay:
 
@@ -141,7 +141,7 @@ In-process MAC lives in `vijil_dome/trust/constraints.py` and `vijil_dome/trust/
 `spiffe_id` and `attested` and records them on the result, and `runtime.check_tool_call`
 threads `self._identity.spiffe_id` / `is_attested()` through. **The SVID is recorded but the
 permit/deny outcome is not yet keyed on it** — that is exactly what A3 (subject binding), A5
-(glob resolution), and A4 (model-MAC) add. Audit emits `agent_identity` (the SVID) via
+(glob resolution), and A4 (model-MAC) add. Audit emits `agent_spiffe_id` (the SVID) via
 `emit_tool_mac` (`runtime.py`).
 
 ## Part 3 — the unified model (what A4/A5/A10 implement)
@@ -154,7 +154,9 @@ proxy field models plus the existing in-process tool-grant fields, all keyed on 
 
 Every in-process route carries an `agent_id_pattern` (SVID glob) with the **exact** `matchGlob`
 semantics of §1.1: `*` = any; no-`*` = equality; single-`*` = prefix+suffix; multi-`*` =
-Python `fnmatch`/`PurePath.match` equivalent of Go `filepath.Match`. Resolution is
+Go `filepath.Match` semantics. The Python side (A5) must **port the Go `matchGlob` algorithm** —
+`fnmatch`/`PurePath.match` are NOT equivalent to `filepath.Match` (they differ on `*`/separator
+and character-class handling). Resolution is
 **first-match, top-to-bottom**; **no match ⇒ deny** in `enforce` mode (the threat-model's
 fail-closed posture — a developer must not escape policy by presenting an unlisted SVID).
 A5 binds this against `self._identity.spiffe_id`; A3 asserts the resolved route's subject
