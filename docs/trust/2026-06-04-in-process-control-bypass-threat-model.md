@@ -61,9 +61,10 @@ its own network egress.
 On `httpx.ConnectError` the dispatcher logs a warning, `break`s the retry loop, and returns
 `DetectorResult(is_flagged=False, score=0.0, error=…)` for **every** requested detector
 (`remote_dispatcher.py:222-258`). `RemoteDetectionMethod.detect()` launders that into
-`(False, …)` — *not a hit* (`remote_method.py:130-140`) — so the guard pipeline treats it as
+`(False, …)` — *not a hit* (`vijil_dome/detectors/methods/remote_method.py:130-140`) — so the guard pipeline treats it as
 *allow*. A **second** independent fail-open exists: the Guard layer wraps each detector in
-`asyncio.timeout(5.0)` and synthesizes `hit=False` on timeout (`guardrails/__init__.py:195-215`).
+`asyncio.timeout(DETECTOR_TIMEOUT_SECONDS)` (= 5 s) and synthesizes `hit=False` on timeout
+(`vijil_dome/guardrails/__init__.py:195-215`).
 
 The configurable fail-**closed** option exists — the native `ControlEngine` honors
 `action.on_error == 'fail_closed'` (`controls/engine.py:268-289`) — but **the legacy

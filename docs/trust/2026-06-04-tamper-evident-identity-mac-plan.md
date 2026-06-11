@@ -30,12 +30,12 @@ needs a review; `vijil-proxy-servers`/`vijil-sdk` unprotected. **The bulk of thi
 
 | ID | Unit | Repo | Size | Depends |
 |---|---|---|---|---|
-| **A1** | **Keystone:** thread `spiffe_id`+attested into `ToolPolicy.check` / `check_tool_call` / `wrap_tool`; set `ToolCallResult.identity_verified` from real state (it is hardcoded `False` today) | dome | M | — |
+| ~~**A1**~~ | ~~**Keystone:** thread `spiffe_id`+attested into `ToolPolicy.check` / `check_tool_call` / `wrap_tool`; set `ToolCallResult.identity_verified` from real state~~ **✅ LANDED** (#242, `0e1a301`): `identity_verified` is set from real state; `agent_spiffe_id` is emitted in the audit stream. | dome | — | — |
 | A2 | Fail-closed-on-unattested in enforce mode (today an unattested process still gets policy) | dome | S | A1 |
 | A3 | Bind policy to the SVID: assert the policy subject matches `self._identity.spiffe_id`; fail-closed on mismatch (closes the "load any agent's constraints with an API token" priv-esc) | dome | S | A1 |
 | A4 | Model-MAC: `allowed_models` / `max_tokens` / `allow_tool_use` + a `before_model` authorization hook, mirroring the proxy `checkMAC` field model | dome | M | A1 |
 | A5 | SVID-glob policy resolution (first-match), mirroring the proxy `MatchRoute` | dome | M | A1 |
-| A6 | Emit the agent SPIFFE ID in the audit stream (the reported-but-absent `agent_identity`) | dome | S | A1 |
+| ~~A6~~ | ~~Emit the agent SPIFFE ID in the audit stream (the reported-but-absent `agent_identity`)~~ **✅ FOLDED INTO A1** (#242): audit field is `agent_spiffe_id`, not `agent_identity`. | dome | — | — |
 | A7 | Declare the `spiffe` package (the py-spiffe project; imported and installed as `spiffe`) as an `identity` extra + lockfile (X.509 attestation is dead in a locked install today) | dome | S | — |
 | A8 | Console: materialize real per-identity MAC rulesets (replace the empty stubs at `constraints/service.py:117-123`); operator-authored domain | console | L | — |
 | A9 | Console: `get_by_spiffe_id` resolver + a workload-auth `/constraints` endpoint (present an SVID, not a human JWT) | console | M | A8 |
