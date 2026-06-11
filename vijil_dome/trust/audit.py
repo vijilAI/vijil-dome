@@ -31,8 +31,6 @@ class Heartbeat(BaseModel):
     silently downgrades its enforcement is detectable downstream. The
     fields describe the live enforcement posture at emit time:
 
-    - ``effective_mode`` — the runtime's actual mode (``"warn"`` or
-      ``"enforce"``), so a silent downgrade from enforce to warn is visible.
     - ``configured_mode`` — the runtime's configured mode floor (``"warn"`` or
       ``"enforce"``), so a silent downgrade from enforce to warn is visible.
       Named *configured* rather than *effective* because the value reflects the

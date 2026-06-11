@@ -623,9 +623,9 @@ class TrustRuntime:
     def emit_heartbeat(self) -> Heartbeat:
         """Emit an enforcement-alive beacon describing the live posture.
 
-        Gathers the runtime's effective mode, whether the content guards are
-        wired and live, whether the detector backend is reachable, and the
-        attested SPIFFE id, then emits an ``enforcement_heartbeat`` audit
+        Gathers the configured mode, whether guards were successfully constructed,
+        whether the detector backend is reachable, the attestation state, and the
+        agent SPIFFE id, then emits an ``enforcement_heartbeat`` audit
         event and returns the ``Heartbeat`` model.
 
         ``guards_constructed`` is True when a Dome instance was successfully

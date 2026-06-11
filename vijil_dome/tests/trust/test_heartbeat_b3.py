@@ -128,7 +128,7 @@ def _runtime(*, mode: str = "enforce") -> TrustRuntime:
     return TrustRuntime(client=client, agent_id="agent-1", mode=mode)
 
 
-def test_runtime_emit_heartbeat_reports_effective_mode() -> None:
+def test_runtime_emit_heartbeat_reports_configured_mode() -> None:
     events: list[AuditEvent] = []
     runtime = _runtime(mode="enforce")
     runtime._audit._sink = events.append
@@ -152,7 +152,7 @@ def test_runtime_emit_heartbeat_reports_attested_spiffe_id() -> None:
     assert events[-1].attributes["agent_spiffe_id"] == _SPIFFE
 
 
-def test_runtime_emit_heartbeat_no_guards_means_hooks_not_attached() -> None:
+def test_runtime_emit_heartbeat_no_guards_means_guards_not_constructed() -> None:
     # No Dome guards configured (empty input/output guards) -> _dome is None.
     events: list[AuditEvent] = []
     runtime = _runtime()
