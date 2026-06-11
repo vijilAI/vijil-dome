@@ -710,6 +710,8 @@ class Guardrail:
                     team_id=team_id,
                     user_id=user_id,
                 )
+            except asyncio.CancelledError:
+                raise  # propagate caller-initiated cancellation; do not swallow
             except Exception as exc:
                 logger.warning("Guard %s raised an exception: %s", guard.guard_name, exc)
                 crashed_guards_seq.append(guard.guard_name)
