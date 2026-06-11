@@ -628,28 +628,30 @@ class TrustRuntime:
         attested SPIFFE id, then emits an ``enforcement_heartbeat`` audit
         event and returns the ``Heartbeat`` model.
 
-        ``hooks_attached`` is True only when a Dome instance was constructed
-        and guards are not disabled. ``detector_reachable`` is False when no
-        guards are configured (``_dome is None`` — there is no detector to
-        reach) OR the guards were disabled by a failed/starved detector
-        backend, so a silent downgrade is detectable downstream. A real
-        reachability probe (vs this proxy) is a follow-up (DOME-169).
+        ``guards_constructed`` is True when a Dome instance was successfully
+        built; it proves construction, not that framework callbacks are wired.
+        ``detector_reachable`` is False when no guards are configured or when
+        the backend failed/was starved. ``attested`` gates the SPIFFE id:
+        ``agent_spiffe_id`` is only meaningful when ``attested`` is True.
 
-        This is the event shape + emit. Periodic scheduling and SVID-signing
-        of the beacon are a follow-up (B3 part 2, DOME-169).
+        A real detector reachability probe, SVID-signing, and periodic
+        scheduling are a follow-up (DOME-169).
         """
-        hooks_attached = self._dome is not None and not self._guards_disabled
+        attested = self._identity.is_attested()
+        guards_constructed = self._dome is not None and not self._guards_disabled
         detector_reachable = self._dome is not None and not self._guards_disabled
         heartbeat = Heartbeat(
-            effective_mode=self.mode,
-            hooks_attached=hooks_attached,
+            configured_mode=self.mode,
+            guards_constructed=guards_constructed,
             detector_reachable=detector_reachable,
-            agent_spiffe_id=self._identity.spiffe_id,
+            attested=attested,
+            agent_spiffe_id=self._identity.spiffe_id if attested else None,
         )
         self._audit.emit_heartbeat(
-            effective_mode=heartbeat.effective_mode,
-            hooks_attached=heartbeat.hooks_attached,
+            configured_mode=heartbeat.configured_mode,
+            guards_constructed=heartbeat.guards_constructed,
             detector_reachable=heartbeat.detector_reachable,
+            attested=heartbeat.attested,
             agent_spiffe_id=heartbeat.agent_spiffe_id,
         )
         return heartbeat

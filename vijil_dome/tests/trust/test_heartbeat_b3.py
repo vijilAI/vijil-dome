@@ -26,25 +26,29 @@ _SPIFFE = "spiffe://vijil.ai/org/team-1/agent/agent-1"
 
 def test_heartbeat_model_fields() -> None:
     hb = Heartbeat(
-        effective_mode="enforce",
-        hooks_attached=True,
+        configured_mode="enforce",
+        guards_constructed=True,
         detector_reachable=True,
+        attested=True,
         agent_spiffe_id=_SPIFFE,
     )
-    assert hb.effective_mode == "enforce"
-    assert hb.hooks_attached is True
+    assert hb.configured_mode == "enforce"
+    assert hb.guards_constructed is True
     assert hb.detector_reachable is True
+    assert hb.attested is True
     assert hb.agent_spiffe_id == _SPIFFE
 
 
-def test_heartbeat_spiffe_id_optional() -> None:
-    # An unattested agent still emits a beacon — the spiffe_id is just absent.
+def test_heartbeat_unattested_spiffe_is_none() -> None:
+    # An unattested agent emits a beacon with attested=False and agent_spiffe_id=None.
     hb = Heartbeat(
-        effective_mode="warn",
-        hooks_attached=False,
+        configured_mode="warn",
+        guards_constructed=False,
         detector_reachable=False,
+        attested=False,
         agent_spiffe_id=None,
     )
+    assert hb.attested is False
     assert hb.agent_spiffe_id is None
 
 
@@ -58,9 +62,10 @@ def test_emit_heartbeat_event_shape() -> None:
     emitter = AuditEmitter(agent_id="agent-hb", sink=events.append)
 
     emitter.emit_heartbeat(
-        effective_mode="enforce",
-        hooks_attached=True,
+        configured_mode="enforce",
+        guards_constructed=True,
         detector_reachable=True,
+        attested=True,
         agent_spiffe_id=_SPIFFE,
     )
 
@@ -68,9 +73,10 @@ def test_emit_heartbeat_event_shape() -> None:
     event = events[0]
     assert event.event_type == "enforcement_heartbeat"
     assert event.agent_id == "agent-hb"
-    assert event.attributes["effective_mode"] == "enforce"
-    assert event.attributes["hooks_attached"] is True
+    assert event.attributes["configured_mode"] == "enforce"
+    assert event.attributes["guards_constructed"] is True
     assert event.attributes["detector_reachable"] is True
+    assert event.attributes["attested"] is True
     assert event.attributes["agent_spiffe_id"] == _SPIFFE
 
 
@@ -79,15 +85,17 @@ def test_emit_heartbeat_unattested_carries_none_spiffe() -> None:
     emitter = AuditEmitter(agent_id="agent-hb", sink=events.append)
 
     emitter.emit_heartbeat(
-        effective_mode="warn",
-        hooks_attached=False,
+        configured_mode="warn",
+        guards_constructed=False,
         detector_reachable=False,
+        attested=False,
         agent_spiffe_id=None,
     )
 
     assert events[-1].event_type == "enforcement_heartbeat"
     assert events[-1].attributes["agent_spiffe_id"] is None
-    assert events[-1].attributes["hooks_attached"] is False
+    assert events[-1].attributes["attested"] is False
+    assert events[-1].attributes["guards_constructed"] is False
     assert events[-1].attributes["detector_reachable"] is False
 
 
@@ -128,7 +136,7 @@ def test_runtime_emit_heartbeat_reports_effective_mode() -> None:
     runtime.emit_heartbeat()
 
     assert events[-1].event_type == "enforcement_heartbeat"
-    assert events[-1].attributes["effective_mode"] == "enforce"
+    assert events[-1].attributes["configured_mode"] == "enforce"
 
 
 def test_runtime_emit_heartbeat_reports_attested_spiffe_id() -> None:
@@ -152,7 +160,7 @@ def test_runtime_emit_heartbeat_no_guards_means_hooks_not_attached() -> None:
 
     runtime.emit_heartbeat()
 
-    assert events[-1].attributes["hooks_attached"] is False
+    assert events[-1].attributes["guards_constructed"] is False
 
 
 def test_runtime_emit_heartbeat_detector_unreachable_when_guards_disabled() -> None:
@@ -185,4 +193,4 @@ def test_runtime_emit_heartbeat_returns_heartbeat_model() -> None:
     runtime = _runtime()
     hb = runtime.emit_heartbeat()
     assert isinstance(hb, Heartbeat)
-    assert hb.effective_mode == "enforce"
+    assert hb.configured_mode == "enforce"

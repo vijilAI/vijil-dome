@@ -33,19 +33,28 @@ class Heartbeat(BaseModel):
 
     - ``effective_mode`` — the runtime's actual mode (``"warn"`` or
       ``"enforce"``), so a silent downgrade from enforce to warn is visible.
-    - ``hooks_attached`` — whether the content guards are wired and live.
-    - ``detector_reachable`` — whether the detector backend is reachable; a
-      starved or failed detector flips this False without raising.
-    - ``agent_spiffe_id`` — the attested principal, or ``None`` when the
-      agent is unattested.
+    - ``configured_mode`` — the runtime's configured mode floor (``"warn"`` or
+      ``"enforce"``), so a silent downgrade from enforce to warn is visible.
+      Named *configured* rather than *effective* because the value reflects the
+      constructor argument (after B5 floors it); it does not dynamically reflect
+      whether guards are currently running.
+    - ``guards_constructed`` — ``True`` when a ``Dome`` instance was successfully
+      built for this runtime. A proxy for "guards are in play"; it proves
+      construction, not that framework callbacks are actively wired.
+    - ``detector_reachable`` — ``False`` when no guards are configured or when the
+      detector backend failed/was starved; a reliable False-on-failure signal.
+    - ``attested`` — whether the agent's SPIFFE identity is attested at emit time.
+    - ``agent_spiffe_id`` — the attested principal SVID, or ``None`` when
+      ``attested`` is False. Consumers MUST gate on ``attested`` before keying
+      decisions on this value.
 
-    SVID-signing of the beacon and periodic scheduling are a follow-up; this
-    model is the unsigned event shape.
+    SVID-signing of the beacon and periodic scheduling are a follow-up (DOME-169).
     """
 
-    effective_mode: str
-    hooks_attached: bool
+    configured_mode: str
+    guards_constructed: bool
     detector_reachable: bool
+    attested: bool
     agent_spiffe_id: str | None
 
 
@@ -111,23 +120,24 @@ class AuditEmitter:
     def emit_heartbeat(
         self,
         *,
-        effective_mode: str,
-        hooks_attached: bool,
+        configured_mode: str,
+        guards_constructed: bool,
         detector_reachable: bool,
+        attested: bool,
         agent_spiffe_id: str | None = None,
     ) -> None:
         """Emit an enforcement-alive heartbeat ('I am enforcing') event.
 
         Carries the live enforcement posture so a registered agent that goes
         dark or silently downgrades is detectable downstream. See
-        ``Heartbeat`` for field semantics. SVID-signing of the beacon is a
-        follow-up; this emits the unsigned event shape.
+        ``Heartbeat`` for field semantics. SVID-signing is a follow-up (DOME-169).
         """
         self._emit(
             "enforcement_heartbeat",
-            effective_mode=effective_mode,
-            hooks_attached=hooks_attached,
+            configured_mode=configured_mode,
+            guards_constructed=guards_constructed,
             detector_reachable=detector_reachable,
+            attested=attested,
             agent_spiffe_id=agent_spiffe_id,
         )
 
