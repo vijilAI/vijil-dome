@@ -220,7 +220,9 @@ class Guard:
             self.guard_name,
             errored_methods,
         )
-        return True, self.blocked_response_string + FAIL_CLOSED_BLOCKED_RESPONSE
+        # Strip the internal "Guard:<name> " prefix — exposing the guard name in
+        # the user-facing response leaks implementation details.
+        return True, FAIL_CLOSED_BLOCKED_RESPONSE.strip()
 
     # Sequential guard
     async def sequential_guard(
@@ -698,14 +700,20 @@ class Guardrail:
         flagged = False
         guard_results = {}
         response_string = qs
+        crashed_guards_seq: List[str] = []
         for guard in self.guard_list:
-            guard_scan_result = await guard.async_scan(
-                dome_input,
-                self.executor,
-                agent_id=agent_id,
-                team_id=team_id,
-                user_id=user_id,
-            )
+            try:
+                guard_scan_result = await guard.async_scan(
+                    dome_input,
+                    self.executor,
+                    agent_id=agent_id,
+                    team_id=team_id,
+                    user_id=user_id,
+                )
+            except Exception as exc:
+                logger.warning("Guard %s raised an exception: %s", guard.guard_name, exc)
+                crashed_guards_seq.append(guard.guard_name)
+                continue
             guard_results[guard.guard_name] = guard_scan_result
             if guard_scan_result.triggered:
                 response_string = (
@@ -734,6 +742,14 @@ class Guardrail:
             for guard_name, gr in guard_results.items()
             for method in gr.errored_methods
         ]
+        errored_methods.extend(f"{name}:<guard-task-raised>" for name in crashed_guards_seq)
+        if self.on_error == "fail_closed" and crashed_guards_seq and not flagged:
+            logger.warning(
+                "Guardrail %s failing closed: a guard raised in the sequential path.",
+                self.level,
+            )
+            flagged = True
+            response_string = FAIL_CLOSED_BLOCKED_RESPONSE.strip()
         return GuardrailResult(
             flagged=flagged,
             guardrail_response_message=response_string,
@@ -846,9 +862,7 @@ class Guardrail:
                 self.level,
             )
             flagged = True
-            response_string = (
-                self.blocked_response_string + FAIL_CLOSED_BLOCKED_RESPONSE
-            )
+            response_string = FAIL_CLOSED_BLOCKED_RESPONSE.strip()
         return GuardrailResult(
             flagged=flagged,
             guardrail_response_message=response_string,
