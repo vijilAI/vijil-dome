@@ -110,7 +110,7 @@ In-process MAC lives in `vijil_dome/trust/constraints.py` and `vijil_dome/trust/
 | `name` | `str` | tool name; the permission key |
 | `identity` | `str` | SPIFFE ID **of the tool** (e.g. `spiffe://vijil.ai/tools/flights/v1`) |
 | `endpoint` | `str` | tool endpoint (e.g. `mcp+tls://flights.internal:8443`) |
-| `allowed_actions` | `list[str] \| None` | `None` ⇒ all actions; otherwise the call's `args["action"]` MUST be in the list — a missing action, `args["action"]=None`, OR `args=None` all deny (fail-closed, `policy.py`) |
+| `allowed_actions` | `list[str] \| None` | `None` ⇒ all actions; otherwise the call's `args["action"]` MUST be in the list — a missing action or `args["action"]=None` deny fail-closed; `args=None` (no dict) also denies fail-closed (fixed in PR #248; prior code skipped the check) |
 
 **`OrganizationConstraints`** (`constraints.py`) — the org-wide overlay:
 
