@@ -355,11 +355,12 @@ class TrustRuntime:
 
     def check_tool_call(self, tool_name: str, args: dict[str, Any]) -> ToolCallResult:
         """Check whether a tool call is permitted by policy."""
+        attested = self._identity.is_attested()
         result = self._policy.check(
             tool_name,
             args=args,
             spiffe_id=self._identity.spiffe_id,
-            attested=self._identity.is_attested(),
+            attested=attested,
         )
         self._audit.emit_tool_mac(
             tool_name,
@@ -367,6 +368,21 @@ class TrustRuntime:
             identity_verified=result.identity_verified,
             agent_spiffe_id=result.agent_spiffe_id,
         )
+        # A3 binding applies to attested callers only. When an SVID-keyed policy is
+        # evaluated for an unattested caller, emit a distinct audit event so the residual
+        # exposure (an unattested caller hitting an identity-bound policy) is visible — it
+        # is not a deny under the default "warn" unattested_tool_policy. Operators close
+        # this fully by setting unattested_tool_policy="deny" or awaiting the DOME-166
+        # default-flip once attestation is the norm.
+        if (
+            not attested
+            and self._policy._subject.startswith("spiffe://")
+            and result.permitted
+        ):
+            self._audit.emit_svid_keyed_unattested(
+                tool_name,
+                policy_subject=self._policy._subject,
+            )
         return result
 
     # ------------------------------------------------------------------
@@ -381,11 +397,11 @@ class TrustRuntime:
         def wrapper(*args: Any, **kwargs: Any) -> Any:
             mac_result = self.check_tool_call(tool_name, kwargs)
 
-            if not mac_result.permitted and self.mode == "enforce":
+            if not mac_result.permitted and mac_result.enforced:
                 raise PermissionError(
                     f"Tool '{tool_name}' denied: {mac_result.error}"
                 )
-            if not mac_result.permitted and self.mode == "warn":
+            if not mac_result.permitted and not mac_result.enforced:
                 logger.warning(
                     "Tool '%s' would be denied in enforce mode: %s",
                     tool_name,
