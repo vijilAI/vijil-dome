@@ -374,14 +374,10 @@ class TrustRuntime:
         # is not a deny under the default "warn" unattested_tool_policy. Operators close
         # this fully by setting unattested_tool_policy="deny" or awaiting the DOME-166
         # default-flip once attestation is the norm.
-        if (
-            not attested
-            and self._policy._subject.startswith("spiffe://")
-            and result.permitted
-        ):
+        if not attested and self._policy.is_svid_keyed() and result.permitted:
             self._audit.emit_svid_keyed_unattested(
                 tool_name,
-                policy_subject=self._policy._subject,
+                policy_subject=self._policy.policy_subject,
             )
         return result
 

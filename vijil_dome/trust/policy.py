@@ -143,6 +143,20 @@ class ToolPolicy:
         """Return the ToolPermission entry for *tool_name*, or None if absent."""
         return self._permissions.get(tool_name)
 
+    def is_svid_keyed(self) -> bool:
+        """Return True when the policy subject is a SPIFFE ID (``spiffe://`` prefix).
+
+        The A3 binding check only fires for SVID-keyed policies; legacy UUID-keyed
+        policies skip it. Expose as a predicate so callers do not need to access
+        the private ``_subject``.
+        """
+        return self._subject.startswith("spiffe://")
+
+    @property
+    def policy_subject(self) -> str:
+        """The agent identity subject this policy was issued for."""
+        return self._subject
+
     # ------------------------------------------------------------------
     # Private helpers
     # ------------------------------------------------------------------
