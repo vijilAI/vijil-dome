@@ -8,6 +8,7 @@ from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
+from urllib.parse import quote
 
 from vijil_dome.controls.models import Control, EvaluationResult
 from vijil_dome.trust.attestation import AttestationResult, ToolAttestationStatus
@@ -69,7 +70,23 @@ class TrustRuntime:
         elif isinstance(constraints, dict):
             self._constraints = AgentConstraints.model_validate(constraints)
         elif client is not None:
-            raw_constraints = client._http.get(f"/agents/{agent_id}/constraints")
+            # A10: an attested agent fetches by its SVID, not the developer-supplied
+            # agent_id string — so the developer cannot pick which constraints apply by
+            # naming a different agent. The SVID is percent-encoded (it carries ':' and
+            # '/'). This branch activates under the pure-mTLS Console client (CON-525):
+            # that client carries no API-key token, so identity resolution (step 1) takes
+            # the SPIRE path and attests. Transport auth is the mTLS client cert; this code
+            # only chooses WHAT to fetch. DEPLOY GATE: CON-525's Console side must bind the
+            # served constraints to the mTLS-verified cert SVID (not trust this query param
+            # blindly) before this endpoint takes production traffic. An unattested agent
+            # keeps today's by-agent_id behavior so existing key-only flows are not bricked.
+            svid = self._identity.spiffe_id
+            if self._identity.is_attested() and svid:
+                raw_constraints = client._http.get(
+                    f"/agents/constraints-by-spiffe-id?spiffe_id={quote(svid, safe='')}"
+                )
+            else:
+                raw_constraints = client._http.get(f"/agents/{agent_id}/constraints")
             self._constraints = AgentConstraints.model_validate(raw_constraints)
         else:
             # Minimal default: no guards, no tool restrictions, warn mode
