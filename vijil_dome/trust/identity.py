@@ -16,6 +16,13 @@ from typing import ClassVar
 logger = logging.getLogger(__name__)
 
 # Optional dependency: spiffe (SPIRE Workload API client)
+# GUARD IS ImportError-ONLY. The >=0.2.0,<0.2.4 version cap in pyproject.toml is
+# load-bearing: spiffe >= 0.2.4 raises a protobuf VersionError (a RuntimeError
+# subclass, NOT ImportError) at import time when the OTEL stack pins protobuf<6.
+# The cap prevents that crash; do NOT loosen it without first verifying OTEL has
+# unpinned protobuf, or broadening this except to also catch RuntimeError/VersionError
+# (see DOME-168). A future broadening without the cap could silently degrade base
+# installs by swallowing an unrelated import-time crash.
 _HAS_SPIFFE = False
 try:
     from spiffe import WorkloadApiClient

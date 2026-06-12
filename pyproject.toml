@@ -88,6 +88,23 @@ jsonschema = {version = ">=4.0", optional = true}
 cel-python = {version = ">=0.1.0", optional = true}
 google-re2 = {version = ">=1.0", optional = true}
 
+# --- Identity deps (DOME-163) ---
+# py-spiffe: SPIRE Workload API client for X.509 SVID attestation.
+# Optional so core installs stay slim; the `from spiffe import
+# WorkloadApiClient` guard in vijil_dome/trust/identity.py only resolves
+# to a real client when this extra is installed. Without it declared and
+# locked here, X.509 attestation required a manual `pip install spiffe`.
+#
+# Capped < 0.2.4: from 0.2.4 the vendored protobuf stubs are generated with
+# protoc gencode 6.31.1, whose runtime-version guard refuses to load under a
+# protobuf 5.x runtime. The opentelemetry stack pins protobuf < 6.0
+# (opentelemetry-proto, grpcio-status), so 0.2.4+ raises protobuf
+# VersionError at `import spiffe` — and the ImportError guard in identity.py
+# does not catch it, crashing the module. 0.2.3 ships gencode 4.25.1 (no
+# runtime guard) and imports cleanly under protobuf 5.x. Revisit when the
+# OTEL pins move to protobuf 6.x.
+spiffe = {version = ">=0.2.0,<0.2.4", optional = true}
+
 [tool.poetry.extras]
 # --- Detection extras ---
 local = ["torch", "transformers", "sentence-transformers"]
@@ -126,9 +143,14 @@ google = [ "google-api-python-client", ]
 strands = [ "strands-agents", ]
 mcp = ["mcp", "fastmcp"]
 s3 = [ "boto3", ]
-trust = [ "cryptography", "httpx", ]
-trust-cli = [ "cryptography", "httpx", "typer", ]
-trust-adapters = [ "cryptography", "httpx", "langgraph", "google-adk", "strands-agents", ]
+# SPIFFE X.509 SVID attestation. Standalone so `pip install vijil-dome[identity]`
+# enables real attestation; also folded into the trust extras since the
+# trust runtime's identity path (vijil_dome/trust/identity.py) is what
+# consumes it.
+identity = [ "spiffe", ]
+trust = [ "cryptography", "httpx", "spiffe", ]
+trust-cli = [ "cryptography", "httpx", "typer", "spiffe", ]
+trust-adapters = [ "cryptography", "httpx", "langgraph", "google-adk", "strands-agents", "spiffe", ]
 controls = [ "pyyaml", ]
 controls-full = [ "pyyaml", "jsonschema", "cel-python", "google-re2", ]
 langchain = [ ]  # no langchain usage detected — you can add back if needed
