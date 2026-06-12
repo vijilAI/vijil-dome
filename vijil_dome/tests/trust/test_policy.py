@@ -203,6 +203,18 @@ def test_none_action_denied_when_allowed_actions_set() -> None:
     assert "not in allowed_actions" in (result.error or "")
 
 
+def test_none_args_denied_when_allowed_actions_set() -> None:
+    # Fail-open regression (DOME-163, varunc1996 review of #244/#248): args=None — the whole
+    # dict, not just a missing "action" key — must still fail closed when the tool restricts
+    # allowed_actions. The action cannot be satisfied without args, so it is denied. The prior
+    # guard `and args is not None` skipped the check entirely and PERMITTED the call.
+    policy = ToolPolicy(_make_constraints_with_allowed_actions(["read"]))
+    result = policy.check("file_tool", args=None)
+
+    assert result.permitted is False
+    assert "not in allowed_actions" in (result.error or "")
+
+
 def test_valid_action_permitted() -> None:
     policy = ToolPolicy(_make_constraints_with_allowed_actions(["read", "write"]))
     result = policy.check("file_tool", args={"action": "read"})

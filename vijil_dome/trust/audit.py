@@ -165,6 +165,46 @@ class AuditEmitter:
             error=error,
         )
 
+    def emit_mode_downgrade(
+        self,
+        *,
+        requested: str,
+        effective: str,
+    ) -> None:
+        """Emit an enforcement-mode downgrade event.
+
+        Records that a weaker local mode (``requested``) was overridden by a stronger
+        mandated mode (``effective``) — enforce is a floor that cannot be silently downgraded.
+        """
+        self._emit(
+            "mode_downgrade",
+            requested=requested,
+            effective=effective,
+        )
+
+    def emit_svid_keyed_unattested(
+        self,
+        tool_name: str,
+        *,
+        policy_subject: str,
+    ) -> None:
+        """Emit an audit event when an SVID-keyed policy is evaluated for an unattested caller.
+
+        A3 binding only applies to attested callers; an unattested caller passes through
+        without identity verification even when the policy subject is a ``spiffe://`` URI.
+        This event makes that residual exposure visible in the audit stream so operators
+        can detect and alert on it — without a distinct audit event, the permitted call is
+        indistinguishable from a legitimately-attested call.
+
+        Close this gap fully by setting ``unattested_tool_policy="deny"`` (A2), or by
+        flipping the default once attestation is the norm (DOME-166).
+        """
+        self._emit(
+            "svid_keyed_unattested",
+            tool_name=tool_name,
+            policy_subject=policy_subject,
+        )
+
     def emit_guards_disabled(
         self,
         *,

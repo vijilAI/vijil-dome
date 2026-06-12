@@ -147,7 +147,7 @@ def secure_agent(
         tool_name = getattr(tool, "name", getattr(tool, "__name__", str(tool)))
         mac_result = runtime.check_tool_call(tool_name, args)
 
-        if not mac_result.permitted and runtime.mode == "enforce":
+        if not mac_result.permitted and mac_result.enforced:
             # Return a dict to short-circuit the tool call
             return {"error": f"Tool '{tool_name}' denied: {mac_result.error}"}
         if not mac_result.permitted:

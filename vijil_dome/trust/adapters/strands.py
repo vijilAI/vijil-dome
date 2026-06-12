@@ -208,7 +208,7 @@ def create_trust_hooks(
 
             mac_result = runtime.check_tool_call(tool_name, dict(tool_use.get("input", {})))
 
-            if not mac_result.permitted and runtime.mode == "enforce":
+            if not mac_result.permitted and mac_result.enforced:
                 event.cancel_tool = f"Tool '{tool_name}' denied: {mac_result.error}"
                 logger.warning("Tool '%s' blocked (enforce mode)", tool_name)
             elif not mac_result.permitted:

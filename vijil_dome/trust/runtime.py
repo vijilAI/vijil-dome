@@ -86,11 +86,15 @@ class TrustRuntime:
                 "updated_at": datetime.now(tz=UTC).isoformat(),
             })
 
-        # 3. Create ToolPolicy — override enforcement_mode to match runtime mode.
-        # Safe: mode is already validated against _valid_modes above, which
-        # matches AgentConstraints.enforcement_mode's Literal["warn","enforce"].
+        # 3. B5: enforce is a FLOOR. A local mode='warn' must not silently downgrade a Console-
+        # (or constraint-) mandated 'enforce'. Take the stronger of the two; record any downgrade
+        # attempt so it is audited (below) rather than honored. mode is already validated above.
+        mandated_mode = self._constraints.enforcement_mode
+        effective_mode = "enforce" if "enforce" in (mandated_mode, mode) else "warn"
+        self._mode_downgrade_attempted: bool = mandated_mode == "enforce" and mode == "warn"
+        self.mode = effective_mode
         constraints_for_policy = self._constraints.model_copy(
-            update={"enforcement_mode": mode}
+            update={"enforcement_mode": effective_mode}
         )
         self._policy = ToolPolicy(constraints_for_policy)
 
@@ -108,9 +112,12 @@ class TrustRuntime:
                         "output-guards": dome_cfg.output_guards,
                     }
                     config.update(dome_cfg.guards)
-                    self._dome = Dome(dome_config=config, enforce=(mode == "enforce"))
+                    self._dome = Dome(dome_config=config, enforce=(effective_mode == "enforce"))
                 except Exception as exc:
-                    if mode == "enforce":
+                    # B5: gate on effective_mode, not the raw local mode — else a Dome-init
+                    # failure under a mandated-enforce-but-local-warn posture would silently
+                    # disable guards (the exact downgrade B5 prevents) instead of raising.
+                    if effective_mode == "enforce":
                         raise RuntimeError(
                             f"Dome initialization failed in enforce mode: {exc}"
                         ) from exc
@@ -131,6 +138,11 @@ class TrustRuntime:
 
         # 6. Create audit emitter
         self._audit = AuditEmitter(agent_id=agent_id, sink=audit_sink)
+        if self._mode_downgrade_attempted:
+            logger.warning(
+                "local mode='warn' cannot downgrade a mandated 'enforce'; using enforce"
+            )
+            self._audit.emit_mode_downgrade(requested=mode, effective=effective_mode)
 
         if self._guards_disabled:
             self._audit.emit_guards_disabled(
@@ -228,14 +240,6 @@ class TrustRuntime:
             )
         self._trust_vector = current
         return current
-
-        if self._guards_disabled:
-            self._audit.emit_guards_disabled(
-                error=getattr(self, "_guards_disabled_error", "unknown"),
-            )
-
-        if not self._identity.is_attested():
-            self._audit.emit_identity_unattested()
 
     # ------------------------------------------------------------------
     # Attestation
@@ -351,11 +355,12 @@ class TrustRuntime:
 
     def check_tool_call(self, tool_name: str, args: dict[str, Any]) -> ToolCallResult:
         """Check whether a tool call is permitted by policy."""
+        attested = self._identity.is_attested()
         result = self._policy.check(
             tool_name,
             args=args,
             spiffe_id=self._identity.spiffe_id,
-            attested=self._identity.is_attested(),
+            attested=attested,
         )
         self._audit.emit_tool_mac(
             tool_name,
@@ -363,6 +368,17 @@ class TrustRuntime:
             identity_verified=result.identity_verified,
             agent_spiffe_id=result.agent_spiffe_id,
         )
+        # A3 binding applies to attested callers only. When an SVID-keyed policy is
+        # evaluated for an unattested caller, emit a distinct audit event so the residual
+        # exposure (an unattested caller hitting an identity-bound policy) is visible — it
+        # is not a deny under the default "warn" unattested_tool_policy. Operators close
+        # this fully by setting unattested_tool_policy="deny" or awaiting the DOME-166
+        # default-flip once attestation is the norm.
+        if not attested and self._policy.is_svid_keyed() and result.permitted:
+            self._audit.emit_svid_keyed_unattested(
+                tool_name,
+                policy_subject=self._policy.policy_subject,
+            )
         return result
 
     # ------------------------------------------------------------------
@@ -377,11 +393,11 @@ class TrustRuntime:
         def wrapper(*args: Any, **kwargs: Any) -> Any:
             mac_result = self.check_tool_call(tool_name, kwargs)
 
-            if not mac_result.permitted and self.mode == "enforce":
+            if not mac_result.permitted and mac_result.enforced:
                 raise PermissionError(
                     f"Tool '{tool_name}' denied: {mac_result.error}"
                 )
-            if not mac_result.permitted and self.mode == "warn":
+            if not mac_result.permitted and not mac_result.enforced:
                 logger.warning(
                     "Tool '%s' would be denied in enforce mode: %s",
                     tool_name,
