@@ -11,7 +11,7 @@ from typing import Any
 
 from vijil_dome.controls.models import Control, EvaluationResult
 from vijil_dome.trust.attestation import AttestationResult, ToolAttestationStatus
-from vijil_dome.trust.audit import AuditEmitter, AuditEvent
+from vijil_dome.trust.audit import AuditEmitter, AuditEvent, Heartbeat
 from vijil_dome.trust.constraints import AgentConstraints
 from vijil_dome.trust.delta import (
     TrustDelta,
@@ -615,3 +615,43 @@ class TrustRuntime:
         except Exception as exc:
             logger.debug("Failed to extract SPIFFE ID from cert: %s", exc)
         return None
+
+    # ------------------------------------------------------------------
+    # Enforcement-alive heartbeat (B3)
+    # ------------------------------------------------------------------
+
+    def emit_heartbeat(self) -> Heartbeat:
+        """Emit an enforcement-alive beacon describing the live posture.
+
+        Gathers the configured mode, whether guards were successfully constructed,
+        whether the detector backend is reachable, the attestation state, and the
+        agent SPIFFE id, then emits an ``enforcement_heartbeat`` audit
+        event and returns the ``Heartbeat`` model.
+
+        ``guards_constructed`` is True when a Dome instance was successfully
+        built; it proves construction, not that framework callbacks are wired.
+        ``detector_reachable`` is False when no guards are configured or when
+        the backend failed/was starved. ``attested`` gates the SPIFFE id:
+        ``agent_spiffe_id`` is only meaningful when ``attested`` is True.
+
+        A real detector reachability probe, SVID-signing, and periodic
+        scheduling are a follow-up (DOME-169).
+        """
+        attested = self._identity.is_attested()
+        guards_constructed = self._dome is not None and not self._guards_disabled
+        detector_reachable = self._dome is not None and not self._guards_disabled
+        heartbeat = Heartbeat(
+            configured_mode=self.mode,
+            guards_constructed=guards_constructed,
+            detector_reachable=detector_reachable,
+            attested=attested,
+            agent_spiffe_id=self._identity.spiffe_id if attested else None,
+        )
+        self._audit.emit_heartbeat(
+            configured_mode=heartbeat.configured_mode,
+            guards_constructed=heartbeat.guards_constructed,
+            detector_reachable=heartbeat.detector_reachable,
+            attested=heartbeat.attested,
+            agent_spiffe_id=heartbeat.agent_spiffe_id,
+        )
+        return heartbeat
