@@ -61,6 +61,7 @@ vijil_dome/
 │
 ├── integrations/              # Framework integrations (content guards only)
 │   ├── adk/                   # Google ADK DomeCallback
+│   ├── agentcore/             # S3 config poller + OTel shutdown (managed runtimes)
 │   ├── langchain/             # LangChain DomeRunnable
 │   ├── mcp/                   # MCP tool wrapping
 │   ├── strands/               # Strands DomeHookProvider
@@ -193,6 +194,11 @@ poetry run ruff check vijil_dome/ demo/
 | `VIJIL_MODEL_DIR` | `/models` | Local model directory (S3-synced in production) |
 | `VIJIL_CONSOLE_URL` | — | Console URL for constraints and manifest signing |
 | `VIJIL_API_KEY` | — | Console API key |
+| `DOME_CONFIG_S3_BUCKET` | — | With `TEAM_ID` and `AGENT_ID`, enables settings-based S3 config polling in `start_agentcore_background_services()` |
+| `TEAM_ID` | — | `team.id` / `service.namespace` on the AgentCore OTel resource; with `AGENT_ID`, builds `teams/{team}/agents/{agent}/dome/config.json` for settings-based S3 polling; optional `team_id=` on setup overrides |
+| `AGENT_ID` | — | `agent.id` on the OTel resource; with `TEAM_ID` and `DOME_CONFIG_S3_BUCKET`, enables settings-based S3 polling; optional `agent_id=` on setup overrides |
+| `DOME_OTEL_EXPORTER_OTLP_ENDPOINT` | — | Dome OTLP/HTTP base URL for AgentCore exporters (avoids host `OTEL_EXPORTER_OTLP_ENDPOINT`); per-signal `OTEL_EXPORTER_OTLP_*_ENDPOINT` still apply |
+| `DEPLOYMENT_ENVIRONMENT` | `production` | `deployment.environment` on the AgentCore OTel resource when not set |
 
 ## Testing Conventions
 
@@ -227,6 +233,7 @@ poetry run ruff check vijil_dome/ demo/
 - **LangChain**: `DomeRunnable` in chains
 - **MCP**: `DomeMCPWrapper` for tool wrapping
 - **Strands**: `DomeHookProvider` for before/after model hooks
+- **AgentCore / long-lived agents**: `vijil_dome.integrations.agentcore` — S3 config polling when `Dome.create_from_s3()` metadata exists or `DOME_CONFIG_S3_BUCKET` + `TEAM_ID` / `AGENT_ID` are set; OTLP via `DOME_OTEL_EXPORTER_OTLP_ENDPOINT` and `setup_agentcore_otel_for_dome` / `setup_agentcore_otel_exporters_from_env`; coordinated shutdown via `AgentCoreBackgroundServices` / `AgentCoreOtelExporterHandle`. See `vijil_dome/integrations/agentcore/README.md`.
 
 ## Relationship to Other Repos
 
