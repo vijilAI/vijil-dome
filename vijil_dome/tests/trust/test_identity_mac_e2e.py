@@ -47,7 +47,7 @@ def _constraints(*, unattested_tool_policy: str = "deny", enforcement_mode: str 
 
 def _runtime(c: dict, *, sid: str | None, att: bool) -> TrustRuntime:
     rt = TrustRuntime(agent_id="agent-1", mode="enforce", constraints=c)
-    rt._identity = SimpleNamespace(is_attested=lambda: att, spiffe_id=sid)
+    rt._identity = SimpleNamespace(is_attested=lambda: att, spiffe_id=sid)  # type: ignore[assignment]
     return rt
 
 
@@ -96,7 +96,7 @@ def test_wrap_tool_a3_svid_match_permits() -> None:
 def test_wrap_tool_warn_mode_does_not_raise() -> None:
     c = _constraints(unattested_tool_policy="deny", enforcement_mode="warn")
     rt = TrustRuntime(agent_id="agent-1", mode="warn", constraints=c)
-    rt._identity = SimpleNamespace(is_attested=lambda: False, spiffe_id=None)
+    rt._identity = SimpleNamespace(is_attested=lambda: False, spiffe_id=None)  # type: ignore[assignment]
     # Both constraint enforcement_mode and runtime mode are "warn" -> enforced=False -> no raise.
     result = rt.check_tool_call("book_flight", {})
     assert result.permitted is False
