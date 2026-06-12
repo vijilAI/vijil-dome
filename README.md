@@ -307,7 +307,7 @@ Dome integrates with OpenTelemetry, Weave, AgentOps, and Google Cloud Trace. See
 
 ## Learn more
 
-- [Documentation](https://docs.vijil.ai/dome/intro.html) — full guides, tutorials, and API reference
+- [Documentation](https://docs.vijil.ai/developer-guide/protect/overview) — full guides, tutorials, and API reference
 - [Detector Reference](vijil_dome/detectors/DETECTOR_INFO.md) — all 20+ detectors with parameters and examples
 - [Trust Runtime Design](docs/trust/2026-04-03-trust-runtime-design.md) — architecture and security model
 
