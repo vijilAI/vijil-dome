@@ -20,13 +20,33 @@ import asyncio
 from asyncio import Task  # noqa: F401
 import concurrent.futures
 import os
-from typing import List, Dict, Tuple, Union, Any, Optional  # noqa: F401
+from typing import List, Dict, Tuple, Union, Any, Optional, Literal  # noqa: F401
 from abc import ABC, abstractmethod
 import time
 from pydantic import BaseModel
 import logging
 
 DETECTOR_TIMEOUT_SECONDS: float = 5.0
+
+# Behavior when a detector / guard errors or times out (e.g. the remote
+# inference server is unreachable):
+#   fail_open   — synthesize a clean pass (back-compat default; coverage
+#                 degrades but availability is preserved).
+#   fail_closed — treat the errored detector / guard as a block. This is the
+#                 tamper-evidence keystone: starving the detector can no
+#                 longer launder an error into a silent pass.
+OnError = Literal["fail_open", "fail_closed"]
+DEFAULT_ON_ERROR: OnError = "fail_open"
+
+# Response fragment used when fail_closed blocks on a detector/guard error.
+# It carries the "I'm sorry" / "I can't" refusal phrases from
+# DEFAULT_GUARDRAIL_BLOCKED_PATTERNS so Diamond's MitigationBypassART scores a
+# fail-closed block as a successful defense — independent of the (operator-
+# overridable) blocked_response_string it is appended to.
+FAIL_CLOSED_BLOCKED_RESPONSE = (
+    " I'm sorry, I can't proceed: a safety detector is unavailable, so this "
+    "request is blocked (fail-closed)."
+)
 
 
 # Patterns that Diamond's MitigationBypassART detector uses to identify refusals.
@@ -169,12 +189,40 @@ class Guard:
         detector_list: List[DetectionMethod],
         early_exit: bool = True,
         run_in_parallel: bool = False,
+        on_error: OnError = DEFAULT_ON_ERROR,
     ):
         self.guard_name = guard_name
         self.detector_list = detector_list
         self.early_exit = early_exit
         self.run_in_parallel = run_in_parallel
+        self.on_error = on_error
         self.blocked_response_string = f"Guard:{self.guard_name} "
+
+    def _apply_fail_closed(
+        self,
+        flagged: bool,
+        response_string: str,
+        errored_methods: List[str],
+    ) -> Tuple[bool, str]:
+        """Fail-closed post-processing for a single guard scan.
+
+        When ``on_error == 'fail_closed'`` and at least one detector errored
+        or timed out (and nothing genuinely triggered), promote the result to
+        a block. A real detector hit always takes precedence and is left
+        untouched. Returns the (possibly updated) ``(flagged, response)``.
+        """
+        if self.on_error != "fail_closed":
+            return flagged, response_string
+        if flagged or not errored_methods:
+            return flagged, response_string
+        logger.warning(
+            "Guard %s failing closed: detector(s) errored/timed out: %s",
+            self.guard_name,
+            errored_methods,
+        )
+        # Strip the internal "Guard:<name> " prefix — exposing the guard name in
+        # the user-facing response leaks implementation details.
+        return True, FAIL_CLOSED_BLOCKED_RESPONSE.strip()
 
     # Sequential guard
     async def sequential_guard(
@@ -245,6 +293,9 @@ class Guard:
         ]
         if errored_methods:
             logger.warning("Detectors returned errors: %s", errored_methods)
+        flagged, response_string = self._apply_fail_closed(
+            flagged, response_string, errored_methods
+        )
         return GuardResult(
             triggered=flagged,
             details=detector_results,
@@ -394,6 +445,9 @@ class Guard:
         ]
         if errored_methods:
             logger.warning("Detectors returned errors: %s", errored_methods)
+        flagged, response_string = self._apply_fail_closed(
+            flagged, response_string, errored_methods
+        )
         return GuardResult(
             triggered=flagged,
             details=detector_results,
@@ -545,11 +599,14 @@ class Guard:
             ]
             if errored_methods:
                 logger.warning("Detectors returned errors (batch item %d): %s", i, errored_methods)
+            item_flagged_i, item_response_i = self._apply_fail_closed(
+                item_flagged[i], item_response[i], errored_methods
+            )
             items.append(GuardResult(
-                triggered=item_flagged[i],
+                triggered=item_flagged_i,
                 details=item_detector_results[i],
                 exec_time=0.0,
-                response=item_response[i],
+                response=item_response_i,
                 detection_score=detection_score,
                 triggered_methods=triggered_methods,
                 errored_methods=errored_methods,
@@ -600,6 +657,7 @@ class Guardrail:
         early_exit: bool = True,
         run_in_parallel: bool = False,
         blocked_message: Optional[str] = None,
+        on_error: OnError = DEFAULT_ON_ERROR,
     ):
         if level not in ["input", "output"]:
             raise ValueError("Guardrail level must be 'input' or 'output'")
@@ -607,6 +665,7 @@ class Guardrail:
         self.guard_list = guard_list
         self.early_exit = early_exit
         self.run_in_parallel = run_in_parallel
+        self.on_error = on_error
         # Use custom blocked message or default that matches safe LLM refusal patterns
         if blocked_message is not None:
             self.blocked_response_string = blocked_message
@@ -641,14 +700,22 @@ class Guardrail:
         flagged = False
         guard_results = {}
         response_string = qs
+        crashed_guards_seq: List[str] = []
         for guard in self.guard_list:
-            guard_scan_result = await guard.async_scan(
-                dome_input,
-                self.executor,
-                agent_id=agent_id,
-                team_id=team_id,
-                user_id=user_id,
-            )
+            try:
+                guard_scan_result = await guard.async_scan(
+                    dome_input,
+                    self.executor,
+                    agent_id=agent_id,
+                    team_id=team_id,
+                    user_id=user_id,
+                )
+            except asyncio.CancelledError:
+                raise  # propagate caller-initiated cancellation; do not swallow
+            except Exception as exc:
+                logger.warning("Guard %s raised an exception: %s", guard.guard_name, exc)
+                crashed_guards_seq.append(guard.guard_name)
+                continue
             guard_results[guard.guard_name] = guard_scan_result
             if guard_scan_result.triggered:
                 response_string = (
@@ -677,6 +744,14 @@ class Guardrail:
             for guard_name, gr in guard_results.items()
             for method in gr.errored_methods
         ]
+        errored_methods.extend(f"{name}:<guard-task-raised>" for name in crashed_guards_seq)
+        if self.on_error == "fail_closed" and crashed_guards_seq and not flagged:
+            logger.warning(
+                "Guardrail %s failing closed: a guard raised in the sequential path.",
+                self.level,
+            )
+            flagged = True
+            response_string = FAIL_CLOSED_BLOCKED_RESPONSE.strip()
         return GuardrailResult(
             flagged=flagged,
             guardrail_response_message=response_string,
@@ -713,8 +788,12 @@ class Guardrail:
             )
             return {"name": guard.guard_name, "result": result}
 
+        crashed_guards: List[str] = []
         tasks = [
-            asyncio.create_task(guard_wrapper(guard, dome_input, self.executor))
+            asyncio.create_task(
+                guard_wrapper(guard, dome_input, self.executor),
+                name=guard.guard_name,
+            )
             for guard in self.guard_list
         ]  # type: Union[set[Task[Any]], list[Task[Any]]]
         while tasks:
@@ -734,6 +813,7 @@ class Guardrail:
                     logger.warning(
                         f"Task {task.get_name()} raised exception: {task.exception()}"
                     )
+                    crashed_guards.append(task.get_name())
                     continue
                 result = task.result()
                 task_name = result["name"]
@@ -768,6 +848,23 @@ class Guardrail:
             for guard_name, gr in guard_results.items()
             for method in gr.errored_methods
         ]
+        # A guard whose task raised was dropped above; record which guard failed
+        # so the block names it instead of letting it vanish from errored_methods.
+        errored_methods.extend(f"{name}:<guard-task-raised>" for name in crashed_guards)
+        # Fail-closed: a guard task that raised (and was dropped above) would
+        # otherwise silently vanish, leaving the guardrail to pass. In
+        # fail_closed mode a vanished guard is a block.
+        if (
+            self.on_error == "fail_closed"
+            and crashed_guards
+            and not flagged
+        ):
+            logger.warning(
+                "Guardrail %s failing closed: a guard task raised and was dropped.",
+                self.level,
+            )
+            flagged = True
+            response_string = FAIL_CLOSED_BLOCKED_RESPONSE.strip()
         return GuardrailResult(
             flagged=flagged,
             guardrail_response_message=response_string,
