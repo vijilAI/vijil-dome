@@ -11,7 +11,8 @@ realistic test data.
 from __future__ import annotations
 
 from typing import Any
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
+from urllib.parse import quote
 
 from vijil_dome.trust.constraints import AgentConstraints
 from vijil_dome.trust.runtime import TrustRuntime
@@ -173,3 +174,87 @@ class TestTrustRuntimeWithConsoleConstraints:
         assert runtime._constraints.agent_id == "dev-agent"
         assert runtime._constraints.dome_config.input_guards == []
         assert runtime._constraints.enforcement_mode == "warn"
+
+
+class TestTrustRuntimeFetchesBySpiffeId:
+    """A10 (DOME-173): an ATTESTED runtime fetches constraints by its SVID, never by
+    the developer-supplied agent_id string — closing the spoof where a developer picks
+    which constraints apply by naming a different agent_id.
+
+    Activation reflects the real CON-525 path: the pure-mTLS Console client carries no
+    API-key token, so identity resolution (runtime step 1) constructs an
+    ``AgentIdentity(spire_socket=...)`` and attests via SPIRE. These tests patch that
+    constructor (no real SPIRE socket in unit tests) and use a token-LESS client so the
+    SPIRE path is taken for real — not the always-unattested ``from_api_key`` factory."""
+
+    _SVID = "spiffe://vijil.ai/org/7b3c/agent/2f1a"
+
+    @staticmethod
+    def _tokenless_client() -> MagicMock:
+        """A pure-mTLS client: present, but with no API-key token (CON-525 shape)."""
+        client = MagicMock()
+        client._http.get.return_value = _console_constraints_response()
+        client._http._token = None
+        return client
+
+    @staticmethod
+    def _attested_identity(spiffe_id: str | None) -> MagicMock:
+        identity = MagicMock()
+        identity.is_attested.return_value = True
+        identity.spiffe_id = spiffe_id
+        return identity
+
+    def test_attested_runtime_fetches_by_svid_not_agent_id(self):
+        """Token-less client → SPIRE-attested identity → fetch by SVID, not by agent_id."""
+        client = self._tokenless_client()
+        with patch("vijil_dome.trust.runtime.AgentIdentity") as MockIdentity:
+            # The token-less path constructs AgentIdentity(spire_socket=...); make it attested.
+            MockIdentity.return_value = self._attested_identity(self._SVID)
+            TrustRuntime(client=client, agent_id="developer-supplied-name")
+
+        called_url = client._http.get.call_args.args[0]
+        assert called_url.startswith("/agents/constraints-by-spiffe-id?spiffe_id=")
+        # The developer-supplied agent_id must NOT determine the fetch.
+        assert "developer-supplied-name" not in called_url
+        # The SVID is percent-encoded into the query (it carries ':' and '/').
+        assert quote(self._SVID, safe="") in called_url
+
+    def test_unattested_api_key_runtime_falls_back_to_agent_id(self):
+        """A real token-carrying client → from_api_key → unattested → today's agent_id path.
+
+        No identity patching: this exercises the genuine api-key-is-unattested invariant."""
+        client = MagicMock()
+        client._http.get.return_value = _console_constraints_response()
+        client._http._token = "test-api-key"
+        TrustRuntime(client=client, agent_id="dev-name")
+
+        client._http.get.assert_called_once_with("/agents/dev-name/constraints")
+
+    def test_fallback_percent_encodes_agent_id_path_segment(self):
+        """A developer-supplied agent_id with path metacharacters is percent-encoded so it
+        cannot change the effective request path (e.g. add a segment via '/')."""
+        client = MagicMock()
+        client._http.get.return_value = _console_constraints_response()
+        client._http._token = "test-api-key"
+        TrustRuntime(client=client, agent_id="a/b?x")
+
+        client._http.get.assert_called_once_with("/agents/a%2Fb%3Fx/constraints")
+
+    def test_attested_without_spiffe_id_falls_back_to_agent_id(self):
+        """Defensive: is_attested True but no SVID → fall back rather than fetch an empty SVID."""
+        client = self._tokenless_client()
+        with patch("vijil_dome.trust.runtime.AgentIdentity") as MockIdentity:
+            MockIdentity.return_value = self._attested_identity(None)
+            TrustRuntime(client=client, agent_id="dev-name")
+
+        client._http.get.assert_called_once_with("/agents/dev-name/constraints")
+
+    def test_tokenless_client_without_attestation_falls_back_to_agent_id(self, monkeypatch):
+        """The real local-dev path: token-less client but no SPIRE socket and no delegate →
+        the REAL AgentIdentity stays unattested → agent_id fallback. No mock on AgentIdentity,
+        so a future change that silently attested a socketless runtime would fail here."""
+        monkeypatch.delenv("VIJIL_IDENTITY_DELEGATE_URL", raising=False)
+        client = self._tokenless_client()
+        TrustRuntime(client=client, agent_id="dev-name", spire_socket="/nonexistent/spire.sock")
+
+        client._http.get.assert_called_once_with("/agents/dev-name/constraints")
