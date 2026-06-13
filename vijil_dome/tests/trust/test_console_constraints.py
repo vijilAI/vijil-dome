@@ -230,6 +230,16 @@ class TestTrustRuntimeFetchesBySpiffeId:
 
         client._http.get.assert_called_once_with("/agents/dev-name/constraints")
 
+    def test_fallback_percent_encodes_agent_id_path_segment(self):
+        """A developer-supplied agent_id with path metacharacters is percent-encoded so it
+        cannot change the effective request path (e.g. add a segment via '/')."""
+        client = MagicMock()
+        client._http.get.return_value = _console_constraints_response()
+        client._http._token = "test-api-key"
+        TrustRuntime(client=client, agent_id="a/b?x")
+
+        client._http.get.assert_called_once_with("/agents/a%2Fb%3Fx/constraints")
+
     def test_attested_without_spiffe_id_falls_back_to_agent_id(self):
         """Defensive: is_attested True but no SVID → fall back rather than fetch an empty SVID."""
         client = self._tokenless_client()

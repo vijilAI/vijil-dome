@@ -86,7 +86,11 @@ class TrustRuntime:
                     f"/agents/constraints-by-spiffe-id?spiffe_id={quote(svid, safe='')}"
                 )
             else:
-                raw_constraints = client._http.get(f"/agents/{agent_id}/constraints")
+                # Percent-encode the developer-supplied agent_id too: a '/', '?', or '#'
+                # would otherwise change the effective request path (Copilot review).
+                raw_constraints = client._http.get(
+                    f"/agents/{quote(agent_id, safe='')}/constraints"
+                )
             self._constraints = AgentConstraints.model_validate(raw_constraints)
         else:
             # Minimal default: no guards, no tool restrictions, warn mode
