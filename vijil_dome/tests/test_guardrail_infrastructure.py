@@ -554,6 +554,59 @@ async def test_guardrail_fail_open_default_passes_when_guard_task_raises() -> No
     assert result.flagged is False
 
 
+@pytest.mark.asyncio
+async def test_guardrail_sequential_fail_closed_blocks_when_guard_raises() -> None:
+    """DOME-170: a guard that raises on the SEQUENTIAL guardrail path must fail_closed -> BLOCK,
+    symmetric with the parallel path, naming the crashed guard rather than letting it vanish."""
+
+    class ExplodingGuard(Guard):
+        async def async_scan(self, *args, **kwargs):  # type: ignore[override]
+            raise RuntimeError("guard exploded")
+
+    exploding = ExplodingGuard(
+        guard_name="boom",
+        detector_list=[MockCleanDetector()],
+        run_in_parallel=False,
+    )
+    guardrail = Guardrail(
+        level="input",
+        guard_list=[exploding],
+        run_in_parallel=False,
+        on_error="fail_closed",
+    )
+
+    result = await guardrail.async_scan("test input")
+
+    assert result.flagged is True
+    assert "boom:<guard-task-raised>" in result.errored_methods
+
+
+@pytest.mark.asyncio
+async def test_guardrail_sequential_fail_open_default_passes_when_guard_raises() -> None:
+    """Back-compat on the SEQUENTIAL path: default fail_open still drops a raising guard and
+    passes, but the crash is still recorded in errored_methods (visible, not silent)."""
+
+    class ExplodingGuard(Guard):
+        async def async_scan(self, *args, **kwargs):  # type: ignore[override]
+            raise RuntimeError("guard exploded")
+
+    exploding = ExplodingGuard(
+        guard_name="boom",
+        detector_list=[MockCleanDetector()],
+        run_in_parallel=False,
+    )
+    guardrail = Guardrail(
+        level="input",
+        guard_list=[exploding],
+        run_in_parallel=False,
+    )
+
+    result = await guardrail.async_scan("test input")
+
+    assert result.flagged is False
+    assert "boom:<guard-task-raised>" in result.errored_methods
+
+
 def test_config_parser_wires_on_error_to_guard_and_guardrail() -> None:
     """on_error from the config dict must reach both the Guardrail and its Guards."""
     from vijil_dome.guardrails.config_parser import create_guardrail
