@@ -17,6 +17,7 @@ from vijil_dome.trust.adapters.base import BaseAdapter, register_adapter
 
 from vijil_dome.trust.constraints import AgentConstraints
 from vijil_dome.trust.runtime import TrustRuntime
+from vijil_dome.trust.signing import BeaconSigner
 
 logger = logging.getLogger(__name__)
 
@@ -29,6 +30,8 @@ def secure_agent(
     constraints: AgentConstraints | dict[str, Any] | None = None,
     manifest: Any = None,
     mode: str = "warn",
+    heartbeat_interval: float | None = None,
+    beacon_signer: BeaconSigner | None = None,
 ) -> Any:
     """Add trust enforcement to a Google ADK Agent via callbacks.
 
@@ -54,6 +57,10 @@ def secure_agent(
         Optional signed tool manifest.
     mode:
         ``"warn"`` or ``"enforce"``.
+    heartbeat_interval:
+        If set, auto-start an enforcement-heartbeat thread on this cadence.
+    beacon_signer:
+        Optional signer for heartbeat beacons (unsigned by default).
 
     Returns
     -------
@@ -74,6 +81,8 @@ def secure_agent(
         constraints=constraints,
         manifest=manifest,
         mode=mode,
+        heartbeat_interval=heartbeat_interval,
+        beacon_signer=beacon_signer,
     )
 
     # Store runtime on the agent for external access

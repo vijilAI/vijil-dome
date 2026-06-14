@@ -13,6 +13,7 @@ from typing import Any
 
 from vijil_dome.trust.adapters.base import BaseAdapter, register_adapter
 from vijil_dome.trust.runtime import TrustRuntime
+from vijil_dome.trust.signing import BeaconSigner
 
 logger = logging.getLogger(__name__)
 
@@ -160,6 +161,8 @@ def secure_graph(
     constraints: Any = None,
     manifest: Any = None,
     mode: str = "warn",
+    heartbeat_interval: float | None = None,
+    beacon_signer: BeaconSigner | None = None,
     **compile_kwargs: Any,
 ) -> SecureGraph:
     """Create a :class:`SecureGraph` from a LangGraph graph.
@@ -184,6 +187,10 @@ def secure_graph(
         Optional tool manifest (path or :class:`ToolManifest`).
     mode:
         ``"warn"`` (log violations) or ``"enforce"`` (block violations).
+    heartbeat_interval:
+        If set, auto-start an enforcement-heartbeat thread on this cadence.
+    beacon_signer:
+        Optional signer for heartbeat beacons (unsigned by default).
     **compile_kwargs:
         Passed to ``graph.compile()`` when compiling.
     """
@@ -193,6 +200,8 @@ def secure_graph(
         constraints=constraints,
         manifest=manifest,
         mode=mode,
+        heartbeat_interval=heartbeat_interval,
+        beacon_signer=beacon_signer,
     )
 
     # Compile if needed
