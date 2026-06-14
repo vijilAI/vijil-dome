@@ -2,6 +2,11 @@
 
 from __future__ import annotations
 
+import importlib
+import logging
+import sys
+from unittest.mock import patch
+
 import pytest
 
 from vijil_dome.trust.identity import AgentIdentity
@@ -145,3 +150,31 @@ def test_delegate_failure_falls_through(monkeypatch: pytest.MonkeyPatch) -> None
 
     assert not identity.is_attested()
     assert identity.spiffe_id is None
+
+
+def test_spiffe_import_degrades_loudly_on_non_importerror(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """DOME-168: spiffe >= 0.2.4 raises a protobuf VersionError (a RuntimeError, NOT ImportError)
+    at import when protobuf is pinned <6. The guard must catch it, LOG it, and degrade — never
+    crash `import vijil_dome`. (ImportError, i.e. the dep being absent, stays a silent degrade.)"""
+    import vijil_dome.trust.identity as identity_mod
+
+    class _BrokenSpiffe:
+        # `from spiffe import WorkloadApiClient` does getattr(module, "WorkloadApiClient");
+        # raising there mimics spiffe >= 0.2.4 failing under protobuf < 6.
+        def __getattr__(self, name: str) -> object:
+            raise RuntimeError("protobuf gencode is older than the runtime (VersionError)")
+
+    try:
+        with patch.dict(sys.modules, {"spiffe": _BrokenSpiffe()}):
+            with caplog.at_level(logging.WARNING):
+                importlib.reload(identity_mod)  # must NOT raise
+
+        assert identity_mod._HAS_SPIFFE is False
+        assert any(
+            record.levelno == logging.WARNING and "failed to import" in record.message.lower()
+            for record in caplog.records
+        )
+    finally:
+        importlib.reload(identity_mod)  # restore the real import state for other tests
