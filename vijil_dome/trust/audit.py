@@ -30,9 +30,12 @@ class BeaconSignature(BaseModel):
     Produced by an ``X509BeaconSigner`` from the agent's SVID so a downstream
     consumer (B4's liveness reconciler) can confirm a beacon was emitted by the
     attested principal it names — a forged or replayed "I am enforcing" beacon
-    fails verification. ``signed_subject`` is the SPIFFE id the signing key
-    attests; ``cert_chain`` is leaf-first PEM so the verifier can recover the
-    public key and (Console-side) check it chains to the trust bundle.
+    fails verification. ``signed_subject`` is advisory: the authoritative binding
+    is enforced by ``verify_beacon_signature`` (the leaf cert's SPIFFE SAN must
+    equal the beacon's ``agent_spiffe_id``), so consumers MUST call it rather
+    than trusting ``signed_subject``. ``cert_chain`` is leaf-first PEM so the
+    verifier can recover the public key and (Console-side) check it chains to
+    the trust bundle.
     """
 
     model_config = ConfigDict(frozen=True)

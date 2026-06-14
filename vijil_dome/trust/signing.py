@@ -50,10 +50,11 @@ def canonical_beacon_payload(beacon: Heartbeat) -> bytes:
 
     Signer and verifier must agree on the exact bytes, so keys are sorted and
     separators are fixed. ``model_dump(include=...)`` selects exactly the signed
-    fields (excluding ``signature``) and fails loud if the field set ever drifts
-    from the model. Cross-language note: Python ``json`` encodes ``bool`` as
-    ``true``/``false`` and ``None`` as ``null`` — a future non-Python verifier
-    must match this encoding.
+    fields (excluding ``signature``). ``_SIGNED_FIELDS`` must stay in sync with
+    ``Heartbeat``: a new identity-bearing field left out would ship unsigned and
+    tamperable, so ``test_signed_fields_match_heartbeat_model`` guards the drift.
+    Cross-language note: Python ``json`` encodes ``bool`` as ``true``/``false``
+    and ``None`` as ``null`` — a future non-Python verifier must match this.
     """
     content = beacon.model_dump(include=_SIGNED_FIELDS)
     return json.dumps(content, sort_keys=True, separators=(",", ":")).encode("utf-8")

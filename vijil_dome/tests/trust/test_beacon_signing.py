@@ -19,6 +19,7 @@ from cryptography.x509.oid import NameOID
 
 from vijil_dome.trust.audit import AuditEmitter, BeaconSignature, Heartbeat
 from vijil_dome.trust.signing import (
+    _SIGNED_FIELDS,
     UnwiredBeaconSigner,
     X509BeaconSigner,
     canonical_beacon_payload,
@@ -165,6 +166,13 @@ def test_canonical_payload_changes_with_content() -> None:
 
 def test_heartbeat_signature_field_defaults_none() -> None:
     assert _beacon().signature is None
+
+
+def test_signed_fields_match_heartbeat_model() -> None:
+    # Drift guard: every identity-bearing Heartbeat field (all but the signature
+    # itself) must be covered by the signed payload. A new field left out would
+    # ship unsigned and tamperable.
+    assert _SIGNED_FIELDS == set(Heartbeat.model_fields) - {"signature"}
 
 
 def test_emit_heartbeat_carries_signature_in_attributes() -> None:
