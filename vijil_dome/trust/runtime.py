@@ -4,10 +4,11 @@ from __future__ import annotations
 
 import functools
 import logging
+import time
 from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, NamedTuple
 from urllib.parse import quote
 
 from vijil_dome.controls.models import Control, EvaluationResult
@@ -28,6 +29,22 @@ from vijil_dome.trust.policy import ToolCallResult, ToolPolicy
 logger = logging.getLogger(__name__)
 
 _HAS_DOME = True  # Dome is always available — trust runtime lives inside vijil-dome.
+
+# A benign canned input the reachability probe runs through the guards. It is not
+# meant to trip any detector; success (no exception) means the backend responded.
+_DETECTOR_PROBE_INPUT = "ping"
+
+# How long a reachability result is reused before the probe runs the real
+# detectors again. Defaults at least as long as a typical heartbeat cadence so a
+# beacon does not run the backend on every emit. Overridable per instance.
+_DEFAULT_DETECTOR_PROBE_TTL_S = 60.0
+
+
+class _ProbeResult(NamedTuple):
+    """A cached detector-reachability result stamped with its monotonic time."""
+
+    at: float
+    reachable: bool
 
 
 class TrustRuntime:
@@ -179,6 +196,12 @@ class TrustRuntime:
         # ``seed_trust_vector()`` is called.
         self._trust_vector: TrustVector | None = None
         self._pending_deltas: list[tuple[str, TrustDelta]] = []
+
+        # 8. Detector-reachability probe state. The clock is injectable so the
+        # TTL cache can be tested without real time; production uses monotonic.
+        self._clock: Callable[[], float] = time.monotonic
+        self._detector_probe_ttl_s: float = _DEFAULT_DETECTOR_PROBE_TTL_S
+        self._detector_probe_cache: _ProbeResult | None = None
 
     # ------------------------------------------------------------------
     # Trust vector
@@ -657,6 +680,60 @@ class TrustRuntime:
     # Enforcement-alive heartbeat (B3)
     # ------------------------------------------------------------------
 
+    def _probe_detector_reachable(self) -> bool:
+        """Report whether the detector backend actually responds.
+
+        Distinct from ``guards_constructed``: True only when at least one
+        configured guardrail runs a canned input and no probed detector errors —
+        proving the backend (local models or a remote inference server) is live,
+        not merely that a Dome instance was built. The result is cached for
+        ``_detector_probe_ttl_s`` so the real detectors run at most once per
+        cadence; a backend that fails after a cached True therefore reads as
+        reachable until the entry expires (a bounded, configurable staleness).
+        """
+        if self._dome is None or self._guards_disabled:
+            return False
+        now = self._clock()
+        cached = self._detector_probe_cache
+        if cached is not None and (now - cached.at) < self._detector_probe_ttl_s:
+            return cached.reachable
+        reachable = self._run_detector_probe(self._dome)
+        self._detector_probe_cache = _ProbeResult(at=now, reachable=reachable)
+        return reachable
+
+    @staticmethod
+    def _run_detector_probe(dome: Any) -> bool:
+        """Run the canned input through each configured guardrail; True iff it responds.
+
+        Reachability is read from ``ScanResult.errored_methods``, NOT from a
+        raised exception: the guard engine catches a failing detector internally
+        and records it in ``errored_methods`` rather than propagating, so a
+        ``try/except`` around the call would miss a dead backend entirely. The
+        backend is reachable only when at least one guardrail is configured and
+        none of the probed detectors errored. The outer ``except`` covers
+        unexpected (non-detector) failures, which also mean not-reachable.
+
+        Blocking bound: each detector carries an internal per-call timeout, so a
+        guard with N detectors can block up to N×timeout. The heartbeat scheduler
+        (DOME-169) runs this off the request path so a slow probe degrades the
+        beacon cadence (itself detectable) rather than the agent's own latency.
+        """
+        probes: list[Callable[[str], Any]] = []
+        if dome.input_guardrail is not None:
+            probes.append(dome.guard_input)
+        if dome.output_guardrail is not None:
+            probes.append(dome.guard_output)
+        if not probes:
+            return False  # Dome built, but no guardrail with detectors to probe.
+        try:
+            for probe in probes:
+                if probe(_DETECTOR_PROBE_INPUT).errored_methods:
+                    return False  # a configured detector failed to respond
+        except Exception:  # noqa: BLE001 -- any unexpected failure means unreachable
+            logger.warning("detector reachability probe failed", exc_info=True)
+            return False
+        return True
+
     def emit_heartbeat(self) -> Heartbeat:
         """Emit an enforcement-alive beacon describing the live posture.
 
@@ -667,16 +744,18 @@ class TrustRuntime:
 
         ``guards_constructed`` is True when a Dome instance was successfully
         built; it proves construction, not that framework callbacks are wired.
-        ``detector_reachable`` is False when no guards are configured or when
-        the backend failed/was starved. ``attested`` gates the SPIFFE id:
-        ``agent_spiffe_id`` is only meaningful when ``attested`` is True.
+        ``detector_reachable`` is a live probe result (see
+        ``_probe_detector_reachable``): True only when the backend actually
+        responds, False when no guards are configured, guards are disabled, or
+        the probe fails. ``attested`` gates the SPIFFE id: ``agent_spiffe_id``
+        is only meaningful when ``attested`` is True.
 
-        A real detector reachability probe, SVID-signing, and periodic
-        scheduling are a follow-up (DOME-169).
+        SVID-signing of the beacon and periodic scheduling are wired by the
+        heartbeat scheduler (DOME-169).
         """
         attested = self._identity.is_attested()
         guards_constructed = self._dome is not None and not self._guards_disabled
-        detector_reachable = self._dome is not None and not self._guards_disabled
+        detector_reachable = self._probe_detector_reachable()
         heartbeat = Heartbeat(
             configured_mode=self.mode,
             guards_constructed=guards_constructed,
