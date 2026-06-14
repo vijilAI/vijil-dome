@@ -13,7 +13,9 @@ from __future__ import annotations
 import threading
 import time
 from collections.abc import Callable
+from threading import Thread
 from types import SimpleNamespace
+from typing import cast
 from unittest.mock import MagicMock
 
 import pytest
@@ -211,16 +213,29 @@ def test_health_not_alive_before_first_emit() -> None:
     assert health.running is False
 
 
-def test_health_alive_when_recent_then_stale() -> None:
+def test_health_alive_when_running_and_recent_then_stale() -> None:
     runtime = _runtime()
+    # simulate a running loop thread (only is_alive() is read by heartbeat_health)
+    runtime._heartbeat_thread = cast(Thread, SimpleNamespace(is_alive=lambda: True))
     now = [0.0]
     runtime._clock = lambda: now[0]
     runtime._heartbeat_interval = 10.0
     runtime._last_emit_at = 0.0
 
-    now[0] = 15.0  # within 2x interval (20s)
+    now[0] = 15.0  # running + within 2x interval (20s)
     assert runtime.heartbeat_health().alive is True
-    now[0] = 25.0  # past the staleness threshold -> a dead loop is loud
+    now[0] = 25.0  # past the staleness threshold -> a stuck loop is loud
+    assert runtime.heartbeat_health().alive is False
+
+
+def test_health_not_alive_after_stop_even_if_recent() -> None:
+    # A stopped (non-running) scheduler must not report alive, even when the last
+    # emit is recent — otherwise alive lingers True for up to 2x interval.
+    runtime = _runtime()
+    runtime._clock = lambda: 0.0
+    runtime._heartbeat_interval = 10.0
+    runtime._last_emit_at = 0.0  # very recent
+    assert runtime.heartbeat_health().running is False
     assert runtime.heartbeat_health().alive is False
 
 

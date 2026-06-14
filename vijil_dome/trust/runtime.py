@@ -892,9 +892,10 @@ class TrustRuntime:
     def heartbeat_health(self) -> HeartbeatHealth:
         """Report the heartbeat's in-process liveness (see ``HeartbeatHealth``).
 
-        ``alive`` is derived from emit recency, so it turns False whether the
-        loop thread died or its ticks are failing — without waiting on the
-        Console staleness sweep.
+        ``alive`` requires both a running loop AND a recent successful emit, so it
+        turns False immediately when the loop is stopped or its thread dies, and
+        also when a still-running loop's ticks are failing (staleness) — without
+        waiting on the Console staleness sweep.
         """
         thread = self._heartbeat_thread
         running = thread is not None and thread.is_alive()
@@ -904,5 +905,5 @@ class TrustRuntime:
         threshold = (
             interval * _HEARTBEAT_STALENESS_FACTOR if interval is not None else None
         )
-        alive = age is not None and threshold is not None and age <= threshold
-        return HeartbeatHealth(running=running, last_emit_age_s=age, alive=alive)
+        fresh = age is not None and threshold is not None and age <= threshold
+        return HeartbeatHealth(running=running, last_emit_age_s=age, alive=running and fresh)

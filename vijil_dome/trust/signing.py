@@ -136,9 +136,11 @@ class X509BeaconSigner:
 def verify_beacon_signature(beacon: Heartbeat, signature: BeaconSignature) -> bool:
     """Verify a detached beacon signature against the leaf cert it carries.
 
-    Confirms two things: (1) the leaf cert's SPIFFE SAN equals the beacon's
+    Confirms three things: (1) the leaf cert's SPIFFE SAN equals the beacon's
     ``agent_spiffe_id`` — without this, any holder of a valid SVID could sign a
-    beacon impersonating another agent; (2) the signature verifies under the
+    beacon impersonating another agent; (2) the envelope's self-asserted
+    ``signed_subject`` also equals ``agent_spiffe_id``, so a consumer reading it
+    off a verified signature can trust it; (3) the signature verifies under the
     leaf's public key over the canonical payload. Algorithm choice is driven by
     the cert's key type, NOT the attacker-supplied ``alg`` field, so an algorithm-
     confusion forgery cannot succeed.
@@ -154,6 +156,11 @@ def verify_beacon_signature(beacon: Heartbeat, signature: BeaconSignature) -> bo
         leaf = x509.load_pem_x509_certificate(signature.cert_chain[0].encode("utf-8"))
         cert_spiffe_id = _spiffe_id_from_cert(leaf)
         if cert_spiffe_id is None or cert_spiffe_id != beacon.agent_spiffe_id:
+            return False
+        # Reject an envelope whose self-asserted signed_subject disagrees with the
+        # beacon, so a consumer reading signed_subject off a *verified* signature
+        # can trust it equals agent_spiffe_id.
+        if signature.signed_subject != beacon.agent_spiffe_id:
             return False
         public_key = leaf.public_key()
         raw = base64.b64decode(signature.signature, validate=True)

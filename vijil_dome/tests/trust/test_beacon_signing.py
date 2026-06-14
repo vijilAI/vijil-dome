@@ -128,6 +128,16 @@ def test_from_svid_constructs_working_signer() -> None:
     assert verify_beacon_signature(_beacon(), sig) is True
 
 
+def test_verify_rejects_mismatched_signed_subject() -> None:
+    # ADVERSARIAL: a genuine signature whose envelope signed_subject was swapped
+    # must not verify, so a verified beacon's signed_subject is authoritative.
+    key, cert = _self_signed(_SPIFFE)
+    sig = X509BeaconSigner(key, cert).sign(_beacon())
+    assert sig is not None
+    tampered = sig.model_copy(update={"signed_subject": "spiffe://vijil.ai/org/t/agent/other"})
+    assert verify_beacon_signature(_beacon(), tampered) is False
+
+
 def test_verify_rejects_empty_cert_chain() -> None:
     bad = BeaconSignature(alg="ES256", signature="AA==", cert_chain=[], signed_subject=_SPIFFE)
     assert verify_beacon_signature(_beacon(), bad) is False
