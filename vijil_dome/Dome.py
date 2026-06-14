@@ -14,7 +14,13 @@
 #
 # vijil and vijil-dome are trademarks owned by Vijil Inc.
 
-from vijil_dome.guardrails import Guardrail, GuardrailConfig, BatchGuardrailResult
+from vijil_dome.guardrails import (
+    Guardrail,
+    GuardrailConfig,
+    BatchGuardrailResult,
+    DEFAULT_ON_ERROR,
+    OnError,
+)
 from vijil_dome.guardrails.config_parser import (
     convert_dict_to_guardrails,
     convert_toml_to_guardrails,
@@ -70,10 +76,12 @@ class DomeConfig(GuardrailConfig):
         return self.config_id
 
 
-def create_dome_config(config: Union[Dict, str]) -> DomeConfig:
+def create_dome_config(
+    config: Union[Dict, str], default_on_error: OnError = DEFAULT_ON_ERROR
+) -> DomeConfig:
     if isinstance(config, str):
         input_guardrail, output_guardrail, agent_id, team_id, user_id = (
-            convert_toml_to_guardrails(config)
+            convert_toml_to_guardrails(config, default_on_error)
         )
         config_object = DomeConfig(
             input_guardrail,
@@ -85,7 +93,7 @@ def create_dome_config(config: Union[Dict, str]) -> DomeConfig:
         return config_object
     elif isinstance(config, dict):
         input_guardrail, output_guardrail, agent_id, team_id, user_id = (
-            convert_dict_to_guardrails(config)
+            convert_dict_to_guardrails(config, default_on_error)
         )
         config_id = config.get("id")
         config_object = DomeConfig(
@@ -179,17 +187,25 @@ class Dome:
         self._s3_config_dict = None  # type: Optional[Dict]
         self._s3_aws_kwargs = None  # type: Optional[Dict]
         self._s3_cache_dir = None  # type: Optional[str]
+        # DOME-167: in enforce mode, content guards default to fail_closed so an unreachable
+        # detector BLOCKS rather than silently passing; an explicit on-error in the config still
+        # wins. A pre-built DomeConfig is taken as-is — its guards already carry their on-error.
+        default_on_error: OnError = "fail_closed" if enforce else DEFAULT_ON_ERROR
         if dome_config is not None:
             if isinstance(dome_config, DomeConfig):
                 self._init_from_dome_config(dome_config)
             elif isinstance(dome_config, str) or isinstance(dome_config, dict):
-                self._init_from_dome_config(create_dome_config(dome_config))
+                self._init_from_dome_config(
+                    create_dome_config(dome_config, default_on_error)
+                )
             else:
                 raise ValueError(
                     f"Dome recieved an invalid type ({type(dome_config)}) for configuration. Please use a dictionary, a path to a .toml file, or a DomeConfig object to initialize Dome."
                 )
         else:
-            self._init_from_dome_config(create_dome_config(get_default_config()))
+            self._init_from_dome_config(
+                create_dome_config(get_default_config(), default_on_error)
+            )
 
     @staticmethod
     def create_from_config(

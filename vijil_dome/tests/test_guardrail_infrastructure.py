@@ -574,6 +574,30 @@ def test_config_parser_wires_on_error_to_guard_and_guardrail() -> None:
     assert all(g.on_error == "fail_closed" for g in guardrail.guard_list)
 
 
+def test_create_guardrail_default_on_error_applies_when_config_omits_it() -> None:
+    """DOME-167: enforce mode passes default_on_error="fail_closed"; it applies only when the
+    config omits on-error. An explicit config on-error still wins, and with no default the
+    back-compatible fail_open is preserved."""
+    from vijil_dome.guardrails.config_parser import create_guardrail
+
+    config = {
+        "input-guards": ["my-guard"],
+        "my-guard": {"type": "security", "methods": ["encoding-heuristics"]},
+    }
+
+    # enforce mode supplies fail_closed → applies, propagates to child guards
+    enforced = create_guardrail("input", config, default_on_error="fail_closed")
+    assert enforced.on_error == "fail_closed"
+    assert all(g.on_error == "fail_closed" for g in enforced.guard_list)
+
+    # back-compat: no default supplied → fail_open
+    assert create_guardrail("input", config).on_error == "fail_open"
+
+    # explicit config on-error beats the enforce default
+    explicit = {**config, "input-on-error": "fail_open"}
+    assert create_guardrail("input", explicit, default_on_error="fail_closed").on_error == "fail_open"
+
+
 def test_config_parser_invalid_on_error_raises() -> None:
     """A typo in on-error must fail loud, not silently default to fail_open."""
     from vijil_dome.guardrails.config_parser import create_guardrail

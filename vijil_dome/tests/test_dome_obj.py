@@ -246,3 +246,67 @@ def test_toml_config_generic_policy_guard(tmp_path):
     assert detector.reasoning_effort == "medium"
 
     assert dome.agent_id is None
+
+
+# ---------------------------------------------------------------------------
+# DOME-167: enforce mode auto-selects fail_closed for content guards.
+# B1 (#247) shipped the on_error=fail_closed lever; enforce mode flips it on by
+# default, so a detector that is unreachable BLOCKS rather than silently passing.
+# An explicit per-guardrail / per-guard on-error still wins (operator escape).
+# encoding-heuristics is a pure-local detector (no model weights / network): we
+# build the guardrail and inspect on_error, never run a scan.
+# ---------------------------------------------------------------------------
+
+_ENFORCE_HEURISTIC_CONFIG = {
+    "input-guards": ["in-guard"],
+    "output-guards": ["out-guard"],
+    "in-guard": {"type": "security", "methods": ["encoding-heuristics"]},
+    "out-guard": {"type": "security", "methods": ["encoding-heuristics"]},
+}
+
+
+def test_dome_enforce_defaults_guards_to_fail_closed() -> None:
+    dome = Dome(dome_config=_ENFORCE_HEURISTIC_CONFIG, enforce=True)
+
+    assert dome.input_guardrail.on_error == "fail_closed"
+    assert dome.output_guardrail.on_error == "fail_closed"
+    assert all(g.on_error == "fail_closed" for g in dome.input_guardrail.guard_list)
+
+
+def test_dome_shadow_mode_keeps_fail_open_default() -> None:
+    # enforce=False (shadow mode) must NOT flip the back-compatible default.
+    dome = Dome(dome_config=_ENFORCE_HEURISTIC_CONFIG, enforce=False)
+
+    assert dome.input_guardrail.on_error == "fail_open"
+    assert dome.output_guardrail.on_error == "fail_open"
+
+
+def test_dome_explicit_on_error_wins_over_enforce_default() -> None:
+    # An operator who explicitly sets fail_open keeps it even under enforce — the
+    # escape hatch for a flaky detector. Explicit config beats the enforce default.
+    config = {
+        "input-guards": ["in-guard"],
+        "input-on-error": "fail_open",
+        "in-guard": {"type": "security", "methods": ["encoding-heuristics"]},
+    }
+    dome = Dome(dome_config=config, enforce=True)
+
+    assert dome.input_guardrail.on_error == "fail_open"
+    assert all(g.on_error == "fail_open" for g in dome.input_guardrail.guard_list)
+
+
+def test_dome_enforce_defaults_toml_guards_to_fail_closed(tmp_path: Path) -> None:
+    # The toml loader pre-fills on-error, so this path is the subtle one: enforce must still
+    # flip an OMITTED on-error to fail_closed, and an EXPLICIT toml on-error must still win.
+    guard_block = '\n[in-guard]\ntype = "security"\nmethods = ["encoding-heuristics"]\n'
+
+    omitted = tmp_path / "omitted.toml"
+    omitted.write_text('[guardrail]\ninput-guards = ["in-guard"]\n' + guard_block)
+    assert Dome(dome_config=str(omitted), enforce=True).input_guardrail.on_error == "fail_closed"
+    assert Dome(dome_config=str(omitted), enforce=False).input_guardrail.on_error == "fail_open"
+
+    explicit = tmp_path / "explicit.toml"
+    explicit.write_text(
+        '[guardrail]\ninput-guards = ["in-guard"]\ninput-on-error = "fail_open"\n' + guard_block
+    )
+    assert Dome(dome_config=str(explicit), enforce=True).input_guardrail.on_error == "fail_open"
