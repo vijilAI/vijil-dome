@@ -15,20 +15,24 @@ from typing import ClassVar
 
 logger = logging.getLogger(__name__)
 
-# Optional dependency: spiffe (SPIRE Workload API client)
-# GUARD IS ImportError-ONLY. The >=0.2.0,<0.2.4 version cap in pyproject.toml is
-# load-bearing: spiffe >= 0.2.4 raises a protobuf VersionError (a RuntimeError
-# subclass, NOT ImportError) at import time when the OTEL stack pins protobuf<6.
-# The cap prevents that crash; do NOT loosen it without first verifying OTEL has
-# unpinned protobuf, or broadening this except to also catch RuntimeError/VersionError
-# (see DOME-168). A future broadening without the cap could silently degrade base
-# installs by swallowing an unrelated import-time crash.
+# Optional dependency: spiffe (SPIRE Workload API client).
+# ImportError = spiffe absent (normal base install) -> silently degrade. Any OTHER import-time
+# failure means spiffe is installed but cannot load -- notably spiffe >= 0.2.4 raises a protobuf
+# VersionError (a RuntimeError, NOT ImportError) when the OTEL stack pins protobuf<6. Catch it,
+# LOG it (loud, not silent -- an installed-but-broken spiffe must be visible), and degrade rather
+# than crashing `import vijil_dome` (DOME-168). The >=0.2.0,<0.2.4 cap in pyproject.toml still
+# avoids the VersionError on a default install; this guard is the belt-and-suspenders if the cap
+# is ever loosened before OTEL unpins protobuf.
 _HAS_SPIFFE = False
 try:
     from spiffe import WorkloadApiClient
     _HAS_SPIFFE = True
 except ImportError:
     pass
+except Exception as exc:
+    logger.warning(
+        "spiffe is installed but failed to import (%s); SPIRE identity disabled.", exc
+    )
 
 
 class AgentIdentity:
