@@ -7,7 +7,7 @@ from collections.abc import Callable
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 
 if TYPE_CHECKING:
     from vijil_dome.trust.delta import TrustDelta, TrustVector
@@ -22,6 +22,26 @@ class AuditEvent(BaseModel):
     agent_id: str
     timestamp: datetime
     attributes: dict[str, Any]
+
+
+class BeaconSignature(BaseModel):
+    """A detached signature over a heartbeat's identity-bearing fields.
+
+    Produced by an ``X509BeaconSigner`` from the agent's SVID so a downstream
+    consumer (B4's liveness reconciler) can confirm a beacon was emitted by the
+    attested principal it names — a forged or replayed "I am enforcing" beacon
+    fails verification. ``signed_subject`` is the SPIFFE id the signing key
+    attests; ``cert_chain`` is leaf-first PEM so the verifier can recover the
+    public key and (Console-side) check it chains to the trust bundle.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    alg: str
+    signature: str  # base64-encoded raw signature bytes
+    cert_chain: list[str]  # PEM certificates, leaf first
+    signed_subject: str  # the SPIFFE id the signing key attests; never None
+    # (X509BeaconSigner declines to sign an unattested beacon)
 
 
 class Heartbeat(BaseModel):
@@ -46,7 +66,9 @@ class Heartbeat(BaseModel):
       ``attested`` is False. Consumers MUST gate on ``attested`` before keying
       decisions on this value.
 
-    SVID-signing of the beacon and periodic scheduling are a follow-up (DOME-169).
+    - ``signature`` — a detached ``BeaconSignature`` over the identity-bearing
+      fields when an SVID-backed signer is wired, else ``None`` (the beacon
+      ships unsigned). Wiring the live signer to a real SVID is DOME-179.
     """
 
     configured_mode: str
@@ -54,6 +76,7 @@ class Heartbeat(BaseModel):
     detector_reachable: bool
     attested: bool
     agent_spiffe_id: str | None
+    signature: BeaconSignature | None = None
 
 
 class AuditEmitter:
@@ -123,12 +146,14 @@ class AuditEmitter:
         detector_reachable: bool,
         attested: bool,
         agent_spiffe_id: str | None = None,
+        signature: BeaconSignature | None = None,
     ) -> None:
         """Emit an enforcement-alive heartbeat ('I am enforcing') event.
 
         Carries the live enforcement posture so a registered agent that goes
-        dark or silently downgrades is detectable downstream. See
-        ``Heartbeat`` for field semantics. SVID-signing is a follow-up (DOME-169).
+        dark or silently downgrades is detectable downstream. See ``Heartbeat``
+        for field semantics. ``signature`` travels with the event (as a dict, or
+        ``None`` when unsigned) so a consumer can verify the beacon's origin.
         """
         self._emit(
             "enforcement_heartbeat",
@@ -137,6 +162,7 @@ class AuditEmitter:
             detector_reachable=detector_reachable,
             attested=attested,
             agent_spiffe_id=agent_spiffe_id,
+            signature=signature.model_dump() if signature is not None else None,
         )
 
     def emit_attestation(
