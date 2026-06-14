@@ -200,7 +200,7 @@ class Dome:
                 )
             else:
                 raise ValueError(
-                    f"Dome recieved an invalid type ({type(dome_config)}) for configuration. Please use a dictionary, a path to a .toml file, or a DomeConfig object to initialize Dome."
+                    f"Dome received an invalid type ({type(dome_config)}) for configuration. Please use a dictionary, a path to a .toml file, or a DomeConfig object to initialize Dome."
                 )
         else:
             self._init_from_dome_config(
