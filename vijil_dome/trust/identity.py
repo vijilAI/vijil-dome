@@ -16,20 +16,28 @@ from typing import ClassVar
 logger = logging.getLogger(__name__)
 
 # Optional dependency: spiffe (SPIRE Workload API client).
-# ImportError = spiffe absent (normal base install) -> silently degrade. Any OTHER import-time
-# failure means spiffe is installed but cannot load -- notably spiffe >= 0.2.4 raises a protobuf
-# VersionError (a RuntimeError, NOT ImportError) when the OTEL stack pins protobuf<6. Catch it,
-# LOG it (loud, not silent -- an installed-but-broken spiffe must be visible), and degrade rather
-# than crashing `import vijil_dome` (DOME-168). The >=0.2.0,<0.2.4 cap in pyproject.toml still
-# avoids the VersionError on a default install; this guard is the belt-and-suspenders if the cap
-# is ever loosened before OTEL unpins protobuf.
+# ONLY spiffe genuinely absent (ModuleNotFoundError naming spiffe itself) is a silent, expected
+# degrade on a base install. Every other import-time failure means spiffe is installed but
+# unusable -- a missing transitive dep (ModuleNotFoundError naming another module), a missing
+# WorkloadApiClient symbol (plain ImportError), or a protobuf VersionError (a RuntimeError, raised
+# by spiffe >= 0.2.4 under protobuf<6). Those are LOGGED (loud, not silent -- an installed-but-
+# broken spiffe must be visible) and degrade rather than crashing `import vijil_dome` (DOME-168).
+# The >=0.2.0,<0.2.4 cap in pyproject.toml still avoids the VersionError on a default install;
+# this guard is the belt-and-suspenders if the cap is ever loosened before OTEL unpins protobuf.
 _HAS_SPIFFE = False
 try:
     from spiffe import WorkloadApiClient
     _HAS_SPIFFE = True
-except ImportError:
-    pass
+except ModuleNotFoundError as exc:
+    # spiffe itself absent -> silent. A DIFFERENT missing module means spiffe is installed but
+    # pulled in a missing transitive dep (installed-but-broken) -> loud.
+    if exc.name != "spiffe":
+        logger.warning(
+            "spiffe is installed but a dependency is missing (%s); SPIRE identity disabled.", exc
+        )
 except Exception as exc:
+    # Installed but failed to import: a missing symbol (plain ImportError) or a protobuf
+    # VersionError (RuntimeError). Loud, not silent.
     logger.warning(
         "spiffe is installed but failed to import (%s); SPIRE identity disabled.", exc
     )

@@ -152,29 +152,65 @@ def test_delegate_failure_falls_through(monkeypatch: pytest.MonkeyPatch) -> None
     assert identity.spiffe_id is None
 
 
-def test_spiffe_import_degrades_loudly_on_non_importerror(
-    caplog: pytest.LogCaptureFixture,
-) -> None:
-    """DOME-168: spiffe >= 0.2.4 raises a protobuf VersionError (a RuntimeError, NOT ImportError)
-    at import when protobuf is pinned <6. The guard must catch it, LOG it, and degrade — never
-    crash `import vijil_dome`. (ImportError, i.e. the dep being absent, stays a silent degrade.)"""
+# DOME-168: the spiffe import guard distinguishes "absent" (silent degrade) from
+# "installed-but-broken" (loud WARNING degrade). It must never crash `import vijil_dome`.
+_IDENTITY_LOGGER = "vijil_dome.trust.identity"
+
+
+class _RaisingSpiffe:
+    """A fake `spiffe` module whose import (`from spiffe import ...`) raises ``exc``."""
+
+    def __init__(self, exc: Exception) -> None:
+        self._exc = exc
+
+    def __getattr__(self, name: str) -> object:
+        raise self._exc
+
+
+@pytest.fixture
+def _restore_identity() -> object:
+    yield
     import vijil_dome.trust.identity as identity_mod
 
-    class _BrokenSpiffe:
-        # `from spiffe import WorkloadApiClient` does getattr(module, "WorkloadApiClient");
-        # raising there mimics spiffe >= 0.2.4 failing under protobuf < 6.
-        def __getattr__(self, name: str) -> object:
-            raise RuntimeError("protobuf gencode is older than the runtime (VersionError)")
+    importlib.reload(identity_mod)  # restore the real import state for the rest of the suite
 
-    try:
-        with patch.dict(sys.modules, {"spiffe": _BrokenSpiffe()}):
-            with caplog.at_level(logging.WARNING):
-                importlib.reload(identity_mod)  # must NOT raise
 
-        assert identity_mod._HAS_SPIFFE is False
-        assert any(
-            record.levelno == logging.WARNING and "failed to import" in record.message.lower()
-            for record in caplog.records
-        )
-    finally:
-        importlib.reload(identity_mod)  # restore the real import state for other tests
+def test_spiffe_absent_degrades_silently(
+    _restore_identity: object, caplog: pytest.LogCaptureFixture
+) -> None:
+    """spiffe genuinely absent (ModuleNotFoundError naming spiffe) is the expected base install:
+    degrade quietly, no warning."""
+    import vijil_dome.trust.identity as identity_mod
+
+    absent = ModuleNotFoundError("No module named 'spiffe'", name="spiffe")
+    with patch.dict(sys.modules, {"spiffe": _RaisingSpiffe(absent)}):
+        with caplog.at_level(logging.WARNING):
+            importlib.reload(identity_mod)
+
+    assert identity_mod._HAS_SPIFFE is False
+    assert not [r for r in caplog.records if r.name == _IDENTITY_LOGGER]  # silent
+
+
+@pytest.mark.parametrize(
+    "exc",
+    [
+        ModuleNotFoundError("No module named 'grpc'", name="grpc"),  # missing transitive dep
+        ImportError("cannot import name 'WorkloadApiClient'", name="spiffe"),  # symbol gone
+        RuntimeError("protobuf gencode older than runtime (VersionError)"),  # spiffe>=0.2.4, protobuf<6
+    ],
+)
+def test_spiffe_installed_but_broken_degrades_loudly(
+    _restore_identity: object, caplog: pytest.LogCaptureFixture, exc: Exception
+) -> None:
+    """An installed-but-unusable spiffe — transitive dep missing, symbol gone, or protobuf
+    VersionError — must degrade with a loud WARNING, never crash `import vijil_dome`."""
+    import vijil_dome.trust.identity as identity_mod
+
+    with patch.dict(sys.modules, {"spiffe": _RaisingSpiffe(exc)}):
+        with caplog.at_level(logging.WARNING):
+            importlib.reload(identity_mod)  # must NOT raise
+
+    assert identity_mod._HAS_SPIFFE is False
+    assert any(
+        r.levelno == logging.WARNING and r.name == _IDENTITY_LOGGER for r in caplog.records
+    )
