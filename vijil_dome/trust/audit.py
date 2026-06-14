@@ -79,6 +79,21 @@ class Heartbeat(BaseModel):
     signature: BeaconSignature | None = None
 
 
+class HeartbeatHealth(BaseModel):
+    """In-process liveness view of the heartbeat scheduler.
+
+    Lets a host (or B4's reconciler) detect a dead or stalled emitter without
+    waiting on the Console staleness sweep. ``alive`` is derived from emit
+    recency, so it turns False whether the loop thread died or its ticks are
+    failing. ``running`` reports the thread directly; ``last_emit_age_s`` is the
+    seconds since the last successful emit, or ``None`` before the first.
+    """
+
+    running: bool
+    last_emit_age_s: float | None
+    alive: bool
+
+
 class AuditEmitter:
     """Emits structured audit events to a pluggable sink.
 
