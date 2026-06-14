@@ -4,15 +4,22 @@ from __future__ import annotations
 
 import functools
 import logging
+import threading
+import time
 from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, NamedTuple
 from urllib.parse import quote
 
 from vijil_dome.controls.models import Control, EvaluationResult
 from vijil_dome.trust.attestation import AttestationResult, ToolAttestationStatus
-from vijil_dome.trust.audit import AuditEmitter, AuditEvent, Heartbeat
+from vijil_dome.trust.audit import (
+    AuditEmitter,
+    AuditEvent,
+    Heartbeat,
+    HeartbeatHealth,
+)
 from vijil_dome.trust.constraints import AgentConstraints
 from vijil_dome.trust.delta import (
     TrustDelta,
@@ -24,17 +31,46 @@ from vijil_dome.trust.guard import EnforcementResult
 from vijil_dome.trust.identity import AgentIdentity
 from vijil_dome.trust.manifest import ToolManifest
 from vijil_dome.trust.policy import ToolCallResult, ToolPolicy
+from vijil_dome.trust.signing import BeaconSigner, UnwiredBeaconSigner
 
 logger = logging.getLogger(__name__)
 
 _HAS_DOME = True  # Dome is always available — trust runtime lives inside vijil-dome.
+
+# A benign canned input the reachability probe runs through the guards. It is not
+# meant to trip any detector; success (no exception) means the backend responded.
+_DETECTOR_PROBE_INPUT = "ping"
+
+# How long a reachability result is reused before the probe runs the real
+# detectors again. Defaults at least as long as a typical heartbeat cadence so a
+# beacon does not run the backend on every emit. Overridable per instance.
+_DEFAULT_DETECTOR_PROBE_TTL_S = 60.0
+
+
+class _ProbeResult(NamedTuple):
+    """A cached detector-reachability result stamped with its monotonic time."""
+
+    at: float
+    reachable: bool
+
+
+# A heartbeat is considered stale (the emitter is not alive) once this many
+# intervals have elapsed since the last successful emit — one missed beat is
+# tolerated as jitter; two means the loop is dead or stuck.
+_HEARTBEAT_STALENESS_FACTOR = 2.0
+
+# How long stop_heartbeat waits for the loop thread to exit before giving up, so
+# a hung probe inside the thread cannot make stop block forever.
+_HEARTBEAT_JOIN_TIMEOUT_S = 5.0
 
 
 class TrustRuntime:
     """Core orchestrator composing identity, constraints, guards, MAC, and audit.
 
     Wires together all trust modules into a single object that agent
-    frameworks (LangGraph, CrewAI, etc.) can integrate with.
+    frameworks (LangGraph, CrewAI, etc.) can integrate with. Passing
+    ``heartbeat_interval`` auto-starts a daemon thread that emits enforcement
+    beacons on that cadence (opt-in; off by default).
     """
 
     def __init__(
@@ -47,6 +83,8 @@ class TrustRuntime:
         mode: str = "warn",
         spire_socket: str = "/run/spire/sockets/agent.sock",
         audit_sink: Callable[[AuditEvent], None] | None = None,
+        heartbeat_interval: float | None = None,
+        beacon_signer: BeaconSigner | None = None,
     ) -> None:
         _valid_modes = ("warn", "enforce")
         if mode not in _valid_modes:
@@ -179,6 +217,25 @@ class TrustRuntime:
         # ``seed_trust_vector()`` is called.
         self._trust_vector: TrustVector | None = None
         self._pending_deltas: list[tuple[str, TrustDelta]] = []
+
+        # 8. Detector-reachability probe state. The clock is injectable so the
+        # TTL cache can be tested without real time; production uses monotonic.
+        self._clock: Callable[[], float] = time.monotonic
+        self._detector_probe_ttl_s: float = _DEFAULT_DETECTOR_PROBE_TTL_S
+        self._detector_probe_cache: _ProbeResult | None = None
+
+        # 9. Heartbeat scheduler state. The signer defaults to unsigned; the
+        # scheduler is opt-in via heartbeat_interval and, when set, auto-starts
+        # here as a documented construction side effect (a daemon thread, so it
+        # never blocks process exit; one thread per runtime instance).
+        self._beacon_signer: BeaconSigner = beacon_signer or UnwiredBeaconSigner()
+        self._heartbeat_interval: float | None = heartbeat_interval
+        self._heartbeat_thread: threading.Thread | None = None
+        self._heartbeat_stop: threading.Event | None = None
+        self._heartbeat_join_timeout_s: float = _HEARTBEAT_JOIN_TIMEOUT_S
+        self._last_emit_at: float | None = None
+        if heartbeat_interval is not None:
+            self.start_heartbeat(heartbeat_interval)
 
     # ------------------------------------------------------------------
     # Trust vector
@@ -657,6 +714,60 @@ class TrustRuntime:
     # Enforcement-alive heartbeat (B3)
     # ------------------------------------------------------------------
 
+    def _probe_detector_reachable(self) -> bool:
+        """Report whether the detector backend actually responds.
+
+        Distinct from ``guards_constructed``: True only when at least one
+        configured guardrail runs a canned input and no probed detector errors —
+        proving the backend (local models or a remote inference server) is live,
+        not merely that a Dome instance was built. The result is cached for
+        ``_detector_probe_ttl_s`` so the real detectors run at most once per
+        cadence; a backend that fails after a cached True therefore reads as
+        reachable until the entry expires (a bounded, configurable staleness).
+        """
+        if self._dome is None or self._guards_disabled:
+            return False
+        now = self._clock()
+        cached = self._detector_probe_cache
+        if cached is not None and (now - cached.at) < self._detector_probe_ttl_s:
+            return cached.reachable
+        reachable = self._run_detector_probe(self._dome)
+        self._detector_probe_cache = _ProbeResult(at=now, reachable=reachable)
+        return reachable
+
+    @staticmethod
+    def _run_detector_probe(dome: Any) -> bool:
+        """Run the canned input through each configured guardrail; True iff it responds.
+
+        Reachability is read from ``ScanResult.errored_methods``, NOT from a
+        raised exception: the guard engine catches a failing detector internally
+        and records it in ``errored_methods`` rather than propagating, so a
+        ``try/except`` around the call would miss a dead backend entirely. The
+        backend is reachable only when at least one guardrail is configured and
+        none of the probed detectors errored. The outer ``except`` covers
+        unexpected (non-detector) failures, which also mean not-reachable.
+
+        Blocking bound: each detector carries an internal per-call timeout, so a
+        guard with N detectors can block up to N×timeout. The heartbeat scheduler
+        (DOME-169) runs this off the request path so a slow probe degrades the
+        beacon cadence (itself detectable) rather than the agent's own latency.
+        """
+        probes: list[Callable[[str], Any]] = []
+        if dome.input_guardrail is not None:
+            probes.append(dome.guard_input)
+        if dome.output_guardrail is not None:
+            probes.append(dome.guard_output)
+        if not probes:
+            return False  # Dome built, but no guardrail with detectors to probe.
+        try:
+            for probe in probes:
+                if probe(_DETECTOR_PROBE_INPUT).errored_methods:
+                    return False  # a configured detector failed to respond
+        except Exception:  # noqa: BLE001 -- any unexpected failure means unreachable
+            logger.warning("detector reachability probe failed", exc_info=True)
+            return False
+        return True
+
     def emit_heartbeat(self) -> Heartbeat:
         """Emit an enforcement-alive beacon describing the live posture.
 
@@ -667,16 +778,20 @@ class TrustRuntime:
 
         ``guards_constructed`` is True when a Dome instance was successfully
         built; it proves construction, not that framework callbacks are wired.
-        ``detector_reachable`` is False when no guards are configured or when
-        the backend failed/was starved. ``attested`` gates the SPIFFE id:
-        ``agent_spiffe_id`` is only meaningful when ``attested`` is True.
+        ``detector_reachable`` is a live probe result (see
+        ``_probe_detector_reachable``): True only when the backend actually
+        responds, False when no guards are configured, guards are disabled, or
+        the probe fails. ``attested`` gates the SPIFFE id: ``agent_spiffe_id``
+        is only meaningful when ``attested`` is True.
 
-        A real detector reachability probe, SVID-signing, and periodic
-        scheduling are a follow-up (DOME-169).
+        The beacon is signed by the injected ``BeaconSigner`` (unsigned by
+        default); ``start_heartbeat`` drives this method on a cadence. Calling it
+        directly is fail-loud — a signer or audit-sink error propagates; the
+        scheduler path wraps it (see ``_emit_heartbeat_safely``).
         """
         attested = self._identity.is_attested()
         guards_constructed = self._dome is not None and not self._guards_disabled
-        detector_reachable = self._dome is not None and not self._guards_disabled
+        detector_reachable = self._probe_detector_reachable()
         heartbeat = Heartbeat(
             configured_mode=self.mode,
             guards_constructed=guards_constructed,
@@ -684,11 +799,111 @@ class TrustRuntime:
             attested=attested,
             agent_spiffe_id=self._identity.spiffe_id if attested else None,
         )
+        signature = self._beacon_signer.sign(heartbeat)
+        heartbeat = heartbeat.model_copy(update={"signature": signature})
         self._audit.emit_heartbeat(
             configured_mode=heartbeat.configured_mode,
             guards_constructed=heartbeat.guards_constructed,
             detector_reachable=heartbeat.detector_reachable,
             attested=heartbeat.attested,
             agent_spiffe_id=heartbeat.agent_spiffe_id,
+            signature=signature,
         )
         return heartbeat
+
+    # ------------------------------------------------------------------
+    # Heartbeat scheduler (DOME-169)
+    # ------------------------------------------------------------------
+
+    def start_heartbeat(self, interval: float | None = None) -> None:
+        """Start the background heartbeat loop if it is not already running.
+
+        Spawns a daemon thread that emits a beacon every ``interval`` seconds.
+        Idempotent — a no-op while a loop is already alive. ``interval`` defaults
+        to the value given at construction.
+        """
+        resolved = interval if interval is not None else self._heartbeat_interval
+        if resolved is None or resolved <= 0:
+            raise ValueError("heartbeat interval must be a positive number of seconds")
+        if self._heartbeat_thread is not None and self._heartbeat_thread.is_alive():
+            return
+        self._heartbeat_interval = resolved
+        stop = threading.Event()
+        thread = threading.Thread(
+            target=self._run_heartbeat_loop,
+            args=(stop, resolved),
+            name=f"dome-heartbeat-{self._agent_id}",
+            daemon=True,
+        )
+        self._heartbeat_stop = stop
+        self._heartbeat_thread = thread
+        thread.start()
+
+    def stop_heartbeat(self) -> None:
+        """Signal the heartbeat loop to stop and wait (bounded) for it to exit.
+
+        Idempotent. The join is bounded by ``_HEARTBEAT_JOIN_TIMEOUT_S`` so a
+        probe hung inside the loop cannot make stop block forever.
+        """
+        stop, thread = self._heartbeat_stop, self._heartbeat_thread
+        if stop is not None:
+            stop.set()
+        if thread is not None:
+            thread.join(timeout=self._heartbeat_join_timeout_s)
+            if thread.is_alive():
+                # The loop did not exit in time — a probe is likely hung. Keep the
+                # handle so start_heartbeat refuses to spawn a duplicate; the stop
+                # event is set, so the thread exits once the probe returns. Surface
+                # it loudly rather than silently orphaning the thread.
+                logger.warning(
+                    "heartbeat thread %s did not stop within %ss; it will exit when "
+                    "its in-flight probe returns",
+                    thread.name,
+                    self._heartbeat_join_timeout_s,
+                )
+                return
+        self._heartbeat_stop = None
+        self._heartbeat_thread = None
+
+    def _run_heartbeat_loop(self, stop: threading.Event, interval: float) -> None:
+        """Emit a beacon immediately, then once per ``interval`` until stopped.
+
+        ``stop.wait(interval)`` doubles as the sleep and the stop signal, so a
+        stop request interrupts the wait at once rather than after a full cycle.
+        """
+        self._emit_heartbeat_safely()
+        while not stop.wait(interval):
+            self._emit_heartbeat_safely()
+
+    def _emit_heartbeat_safely(self) -> None:
+        """Emit one beacon, advancing ``_last_emit_at`` only on success.
+
+        A failed emit is logged but never propagated, so a single failure cannot
+        kill the loop; because the timestamp advances only on success, a run of
+        failures grows the staleness that ``heartbeat_health`` surfaces.
+        """
+        try:
+            self.emit_heartbeat()
+        except Exception:  # noqa: BLE001 -- a tick failure must not kill the loop
+            logger.warning("heartbeat emit failed", exc_info=True)
+            return
+        self._last_emit_at = self._clock()
+
+    def heartbeat_health(self) -> HeartbeatHealth:
+        """Report the heartbeat's in-process liveness (see ``HeartbeatHealth``).
+
+        ``alive`` requires both a running loop AND a recent successful emit, so it
+        turns False immediately when the loop is stopped or its thread dies, and
+        also when a still-running loop's ticks are failing (staleness) — without
+        waiting on the Console staleness sweep.
+        """
+        thread = self._heartbeat_thread
+        running = thread is not None and thread.is_alive()
+        last = self._last_emit_at
+        age = None if last is None else self._clock() - last
+        interval = self._heartbeat_interval
+        threshold = (
+            interval * _HEARTBEAT_STALENESS_FACTOR if interval is not None else None
+        )
+        fresh = age is not None and threshold is not None and age <= threshold
+        return HeartbeatHealth(running=running, last_emit_age_s=age, alive=running and fresh)
