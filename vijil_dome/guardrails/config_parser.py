@@ -311,7 +311,11 @@ def create_guard(
 
 
 # Create a guardrail object from a config dict
-def create_guardrail(guardrail_location: str, config_dict: dict) -> Guardrail:
+def create_guardrail(
+    guardrail_location: str,
+    config_dict: dict,
+    default_on_error: OnError = DEFAULT_ON_ERROR,
+) -> Guardrail:
     if guardrail_location not in ["input", "output"]:
         raise ValueError(f"Invalid location for guardrail: {guardrail_location}")
 
@@ -328,12 +332,15 @@ def create_guardrail(guardrail_location: str, config_dict: dict) -> Guardrail:
 
     # Resolve the guardrail-level on-error first so it can be propagated as
     # the default to each child guard (a per-guard on-error still wins).
+    # When the config omits on-error, fall back to default_on_error — enforce mode
+    # passes fail_closed here (DOME-167) so an unset guardrail blocks rather than
+    # silently passing on a detector error; an explicit config value still wins.
     if on_error_key in config_dict:
         on_error = _coerce_on_error(
             config_dict[on_error_key], f"{guardrail_location} guardrail"
         )
     else:
-        on_error = DEFAULT_ON_ERROR
+        on_error = default_on_error
 
     if guard_level in config_dict:  # maybe worth raising a warning if missing?
         guard_list = config_dict[guard_level]
@@ -391,7 +398,9 @@ def extract_field_from_toml(field_level, field_name, default_value, toml_dict):
 
 
 # Convert a toml config file into a guardrail dict
-def convert_toml_to_guardrail_dict(path_to_toml: str):
+def convert_toml_to_guardrail_dict(
+    path_to_toml: str, default_on_error: OnError = DEFAULT_ON_ERROR
+):
     with open(path_to_toml, "r") as file:
         toml_config_dict = toml.load(file)
 
@@ -424,7 +433,7 @@ def convert_toml_to_guardrail_dict(path_to_toml: str):
         "input", "blocked-message", None, toml_config_dict
     )
     raw_config_dict["input-on-error"] = extract_field_from_toml(
-        "input", "on-error", DEFAULT_ON_ERROR, toml_config_dict
+        "input", "on-error", default_on_error, toml_config_dict
     )
     raw_config_dict["output-guards"] = extract_field_from_toml(
         "output", "guards", [], toml_config_dict
@@ -439,7 +448,7 @@ def convert_toml_to_guardrail_dict(path_to_toml: str):
         "output", "blocked-message", None, toml_config_dict
     )
     raw_config_dict["output-on-error"] = extract_field_from_toml(
-        "output", "on-error", DEFAULT_ON_ERROR, toml_config_dict
+        "output", "on-error", default_on_error, toml_config_dict
     )
 
     for groupname in raw_config_dict["input-guards"]:
@@ -453,9 +462,10 @@ def convert_toml_to_guardrail_dict(path_to_toml: str):
 # Convert a dictionary into the corresponding guardrails
 def convert_dict_to_guardrails(
     config_dict: dict,
+    default_on_error: OnError = DEFAULT_ON_ERROR,
 ) -> Tuple[Guardrail, Guardrail, Optional[str], Optional[str], Optional[str]]:
-    input_guardrail = create_guardrail("input", config_dict)
-    output_guardrail = create_guardrail("output", config_dict)
+    input_guardrail = create_guardrail("input", config_dict, default_on_error)
+    output_guardrail = create_guardrail("output", config_dict, default_on_error)
     team_id = config_dict.get("team_id", None)
     user_id = config_dict.get("user_id", None)
     agent_id = config_dict.get("agent_id") or config_dict.get("agent_config_id")
@@ -465,6 +475,7 @@ def convert_dict_to_guardrails(
 # convert a toml file into its corresponding guardrails
 def convert_toml_to_guardrails(
     path_to_toml: str,
+    default_on_error: OnError = DEFAULT_ON_ERROR,
 ) -> Tuple[Guardrail, Guardrail, Optional[str], Optional[str], Optional[str]]:
-    config_dict = convert_toml_to_guardrail_dict(path_to_toml)
-    return convert_dict_to_guardrails(config_dict)
+    config_dict = convert_toml_to_guardrail_dict(path_to_toml, default_on_error)
+    return convert_dict_to_guardrails(config_dict, default_on_error)
