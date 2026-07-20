@@ -139,8 +139,8 @@ LLM-based security classification via LiteLLM.
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
-| `hub_name` | `str` | `"openai"` | LLM API provider |
-| `model_name` | `str` | `"gpt-4-turbo"` | Model name |
+| `hub_name` | `str` | `"groq"` | LLM API provider |
+| `model_name` | `str` | `"groq/openai/gpt-oss-120b"` | Model name |
 | `api_key` | `str` | `None` | API key (falls back to env var) |
 | `max_input_chars` | `int` | `None` | Truncate input to this many characters |
 
@@ -353,8 +353,8 @@ LLM-based moderation classification via LiteLLM.
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
-| `hub_name` | `str` | `"openai"` | LLM API provider |
-| `model_name` | `str` | `"gpt-4-turbo"` | Model name |
+| `hub_name` | `str` | `"groq"` | LLM API provider |
+| `model_name` | `str` | `"groq/openai/gpt-oss-120b"` | Model name |
 | `api_key` | `str` | `None` | API key (falls back to env var) |
 | `max_input_chars` | `int` | `None` | Truncate input to this many characters |
 
@@ -534,8 +534,8 @@ LLM-based hallucination detection with reference context.
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
-| `hub_name` | `str` | `"openai"` | LLM API provider |
-| `model_name` | `str` | `"gpt-4-turbo"` | Model name |
+| `hub_name` | `str` | `"groq"` | LLM API provider |
+| `model_name` | `str` | `"groq/openai/gpt-oss-120b"` | Model name |
 | `api_key` | `str` | `None` | API key (falls back to env var) |
 | `max_input_chars` | `int` | `None` | Truncate input to this many characters |
 | `context` | `str` | `None` | Reference context for comparison |
@@ -548,8 +548,8 @@ LLM-based fact-checking with reference context.
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
-| `hub_name` | `str` | `"openai"` | LLM API provider |
-| `model_name` | `str` | `"gpt-4-turbo"` | Model name |
+| `hub_name` | `str` | `"groq"` | LLM API provider |
+| `model_name` | `str` | `"groq/openai/gpt-oss-120b"` | Model name |
 | `api_key` | `str` | `None` | API key (falls back to env var) |
 | `max_input_chars` | `int` | `None` | Truncate input to this many characters |
 | `context` | `str` | `None` | Reference context for comparison |
@@ -570,8 +570,8 @@ Custom LLM-based detection with user-provided system prompts and trigger words.
 |-----------|------|---------|-------------|
 | `sys_prompt_template` | `str` | *(required)* | System prompt with `$query_string` placeholder |
 | `trigger_word_list` | `list[str]` | *(required)* | Words in LLM response that indicate a hit |
-| `hub_name` | `str` | `"openai"` | LLM API provider |
-| `model_name` | `str` | `"gpt-4-turbo"` | Model name |
+| `hub_name` | `str` | `"groq"` | LLM API provider |
+| `model_name` | `str` | `"groq/openai/gpt-oss-120b"` | Model name |
 | `api_key` | `str` | `None` | API key (falls back to env var) |
 | `max_input_chars` | `int` | `None` | Truncate input to this many characters |
 
