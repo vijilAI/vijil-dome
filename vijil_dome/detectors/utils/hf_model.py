@@ -18,10 +18,13 @@ import logging
 import os
 from abc import ABC, abstractmethod
 from pathlib import Path
-from typing import Optional
 
 try:
-    from transformers import AutoTokenizer, AutoModelForSequenceClassification
+    from transformers import (
+        AutoModelForSequenceClassification,
+        AutoTokenizer,
+        PreTrainedTokenizerFast,
+    )
     _HAS_TRANSFORMERS = True
 except ImportError:
     _HAS_TRANSFORMERS = False
@@ -69,7 +72,7 @@ class HFBaseModel(DetectionMethod, ABC):
     def __init__(
         self,
         model_name: str,
-        tokenizer_name: Optional[str] = None,
+        tokenizer_name: str | None = None,
         local_files_only: bool = False,
         trust_remote_code: bool = False,
     ):
@@ -94,11 +97,35 @@ class HFBaseModel(DetectionMethod, ABC):
         )
         model_tokenizer_name = tokenizer_name or model_name
         resolved_tokenizer = resolve_model_path(model_tokenizer_name)
-        self.tokenizer = AutoTokenizer.from_pretrained(
-            resolved_tokenizer,
-            local_files_only=effective_local_only,
-            trust_remote_code=trust_remote_code,
-        )
+        try:
+            self.tokenizer = AutoTokenizer.from_pretrained(
+                resolved_tokenizer,
+                local_files_only=effective_local_only,
+                trust_remote_code=trust_remote_code,
+            )
+        except ValueError:
+            # Some models ship tokenizer_config.json with a custom
+            # tokenizer_class (e.g. "TokenizersBackend") that AutoTokenizer
+            # cannot resolve. Fall back to loading the tokenizer.json
+            # directly via PreTrainedTokenizerFast.
+            tokenizer_json = Path(resolved_tokenizer) / "tokenizer.json"
+            if not tokenizer_json.exists():
+                if effective_local_only:
+                    raise
+                from huggingface_hub import hf_hub_download
+                tokenizer_json = Path(
+                    hf_hub_download(model_tokenizer_name, "tokenizer.json")
+                )
+            logger.info(
+                "AutoTokenizer failed; loading tokenizer.json via "
+                "PreTrainedTokenizerFast: %s",
+                tokenizer_json,
+            )
+            self.tokenizer = PreTrainedTokenizerFast(
+                tokenizer_file=str(tokenizer_json),
+            )
+            if self.tokenizer.pad_token_id is None:
+                self.tokenizer.pad_token_id = self.model.config.pad_token_id
 
     @abstractmethod
     async def detect(self, dome_input: DomePayload) -> DetectionResult:
@@ -112,7 +139,6 @@ class HFBaseModel(DetectionMethod, ABC):
             DetectionResult: A tuple containing a boolean indicating whether the input was flagged,
                              and a dictionary with additional details about the detection.
         """
-        pass
 
 
 class HFBaseModelWithContext(HFBaseModel):
@@ -123,8 +149,8 @@ class HFBaseModelWithContext(HFBaseModel):
     def __init__(
         self,
         model_name: str,
-        tokenizer_name: Optional[str] = None,
-        context: Optional[str] = None,
+        tokenizer_name: str | None = None,
+        context: str | None = None,
         local_files_only: bool = False,
         trust_remote_code: bool = False,
     ):
