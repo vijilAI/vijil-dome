@@ -164,7 +164,7 @@ class StereotypeEEOCBase(HFBaseModel):
         # at 2.4% prevalence. Customers can lower this for higher recall
         # (more false positives) or raise it for higher precision.
         score_threshold: float = 0.90,
-        max_length: int = 512,
+        max_length: int = 1024,
     ):
         if not _HAS_TORCH:
             raise ImportError(

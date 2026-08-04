@@ -43,7 +43,7 @@ class ToxicityDeberta(HFBaseModel):
         self,
         truncation=True,
         max_length=208,
-        window_stride: int = 104,
+        window_stride: int = 144,
         device: Optional[str] = None,
     ):
         """
@@ -57,9 +57,7 @@ class ToxicityDeberta(HFBaseModel):
             non-trivial inputs.
         window_stride:
             Step size in tokens between sliding windows for inputs that
-            exceed *max_length*. Default 104 (half of *max_length*).
-            A smaller stride increases overlap and detection
-            thoroughness at the cost of speed.
+            exceed *max_length*. Default 144 (64-token overlap).
         device:
             Torch device string (e.g. ``"cpu"``, ``"cuda:0"``). If
             *None*, CUDA is used when available.

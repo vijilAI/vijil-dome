@@ -114,8 +114,8 @@ class PromptHarmfulnessFast(HFBaseModel):
         model_name: str = "vijil/prompt-harmfulness-detector",
         tokenizer_name: str = "answerdotai/ModernBERT-base",
         score_threshold: float = 0.95,
-        max_length: int = 512,
-        window_stride: int = 256,
+        max_length: int = 1024,
+        window_stride: int = 960,
     ):
         if not _HAS_TORCH:
             raise ImportError(

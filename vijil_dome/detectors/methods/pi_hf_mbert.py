@@ -81,7 +81,7 @@ DEFAULT_SAFEGUARD_BASE_URL = "https://api.groq.com/openai/v1"
 DEFAULT_SAFEGUARD_MODEL = "openai/gpt-oss-safeguard-20b"
 
 # Default model name on Vijil's inference endpoint (matches HuggingFace).
-DEFAULT_VIJIL_INFERENCE_PI_MODEL = "vijil/vijil_dome_prompt_injection_detection"
+DEFAULT_VIJIL_INFERENCE_PI_MODEL = "vijil/prompt-injection-08042026"
 
 
 # ----------------------------------------------------------------------
@@ -97,25 +97,26 @@ class MBertPromptInjectionModel(HFBaseModel):
 
     def __init__(
         self,
-        score_threshold: float = 0.5,
+        score_threshold: float = 0.75,
         truncation: bool = True,
-        max_length: int = 8192,
-        window_stride: int = 4096,
+        max_length: int = 1024,
+        window_stride: int = 960,
     ):
         """
         Parameters
         ----------
         score_threshold:
             Injection probability above which input is flagged.
+            Default 0.75 — calibrated for vijil/prompt-injection-08042026
+            (real injections score >0.82, benign long text peaks ~0.55).
         truncation:
             Whether to truncate inputs exceeding *max_length*.
         max_length:
-            Maximum tokens per window. ModernBERT natively supports up
-            to 8192 tokens, so sliding windows only activate for very
-            long inputs.
+            Maximum tokens per window. Default 1024 tokens; sliding
+            windows activate for longer inputs.
         window_stride:
             Step size in tokens between sliding windows for inputs that
-            exceed *max_length*. Default 4096 (half of *max_length*).
+            exceed *max_length*. Default 960 (64-token overlap).
         """
         if not _HAS_TORCH:
             raise ImportError(
@@ -124,8 +125,7 @@ class MBertPromptInjectionModel(HFBaseModel):
             )
         try:
             super().__init__(
-                model_name="vijil/vijil_dome_prompt_injection_detection",
-                tokenizer_name="answerdotai/ModernBERT-base",
+                model_name="vijil/prompt-injection-08042026",
             )
 
             self.score_threshold = score_threshold
@@ -147,7 +147,7 @@ class MBertPromptInjectionModel(HFBaseModel):
             raise
 
     def _extract_injection_score(self, item):
-        if item["label"] in (1, "1", "LABEL_1"):
+        if item["label"] in (1, "1", "LABEL_1", "injection"):
             return item["score"]
         return 1.0 - item["score"]
 
@@ -455,7 +455,7 @@ class MBertPromptInjectionRemote(DetectionMethod):
         vijil_inference_url: str,
         vijil_inference_model: Optional[str] = None,
         vijil_inference_api_key: Optional[str] = None,
-        score_threshold: float = 0.5,
+        score_threshold: float = 0.75,
         timeout_seconds: float = 10.0,
     ):
         from vijil_dome.detectors.utils.vijil_inference import VijilInferenceClient
@@ -548,7 +548,7 @@ class PImbertHybrid(MBertPromptInjectionModel):
         if self._use_vijil_inference:
             from vijil_dome.detectors.utils.vijil_inference import VijilInferenceClient
             assert vijil_inference_url is not None
-            self.score_threshold = kwargs.get("score_threshold", 0.5)
+            self.score_threshold = kwargs.get("score_threshold", 0.75)
             self._vijil_client = VijilInferenceClient(
                 base_url=vijil_inference_url,
                 model=vijil_inference_model or DEFAULT_VIJIL_INFERENCE_PI_MODEL,

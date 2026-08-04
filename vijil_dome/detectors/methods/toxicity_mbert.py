@@ -98,8 +98,8 @@ class MBertToxicContentModel(HFBaseModel):
         self,
         score_threshold: float = 0.5,
         truncation: bool = True,
-        max_length: int = 8192,
-        window_stride: int = 4096,
+        max_length: int = 1024,
+        window_stride: int = 960,
     ):
         """
         Parameters
@@ -109,12 +109,11 @@ class MBertToxicContentModel(HFBaseModel):
         truncation:
             Whether to truncate inputs exceeding *max_length*.
         max_length:
-            Maximum tokens per window. ModernBERT natively supports up
-            to 8192 tokens, so sliding windows only activate for very
-            long inputs.
+            Maximum tokens per window. Default 1024 tokens; sliding
+            windows activate for longer inputs.
         window_stride:
             Step size in tokens between sliding windows for inputs that
-            exceed *max_length*. Default 4096 (half of *max_length*).
+            exceed *max_length*. Default 960 (64-token overlap).
         """
         if not _HAS_TORCH:
             raise ImportError(

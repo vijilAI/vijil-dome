@@ -48,7 +48,7 @@ class BaseDebertaPromptInjectionModel(HFBaseModel):
         model_dir: str = "deberta-prompt-injection",
         truncation: bool = True,
         max_length: int = 512,
-        window_stride: int = 256,
+        window_stride: int = 448,
     ):
         """
         Parameters
@@ -65,9 +65,7 @@ class BaseDebertaPromptInjectionModel(HFBaseModel):
             Maximum tokens per window (DeBERTa supports up to 512).
         window_stride:
             Step size in tokens between sliding windows for inputs that
-            exceed *max_length*. Must be positive and ideally less than
-            *max_length* to ensure overlapping coverage. Default 256
-            (half of *max_length*) balances thoroughness and speed.
+            exceed *max_length*. Default 448 (64-token overlap).
         """
         try:
             model_path = os.path.join(
@@ -190,7 +188,7 @@ class DebertaPromptInjectionModel(BaseDebertaPromptInjectionModel):
         self,
         truncation: bool = True,
         max_length: int = 512,
-        window_stride: int = 256,
+        window_stride: int = 448,
     ):
         super().__init__(
             model_identifier="protectai/deberta-v3-base-prompt-injection-v2",
@@ -211,7 +209,7 @@ class DebertaTuned60PromptInjectionModel(BaseDebertaPromptInjectionModel):
         self,
         truncation: bool = True,
         max_length: int = 512,
-        window_stride: int = 256,
+        window_stride: int = 448,
     ):
         super().__init__(
             model_identifier="vijil/pi_deberta_finetuned_11122024",
@@ -229,7 +227,7 @@ class PromptGuardSecurityModel(HFBaseModel):
         score_threshold: float = 0.5,
         truncation: bool = True,
         max_length: int = 512,
-        window_stride: int = 256,
+        window_stride: int = 448,
     ):
         """
         Parameters
@@ -242,7 +240,7 @@ class PromptGuardSecurityModel(HFBaseModel):
             Maximum tokens per window (PromptGuard supports up to 512).
         window_stride:
             Step size in tokens between sliding windows for inputs that
-            exceed *max_length*. Default 256 (half of *max_length*).
+            exceed *max_length*. Default 448 (64-token overlap).
         """
         try:
             model_path = os.path.join(

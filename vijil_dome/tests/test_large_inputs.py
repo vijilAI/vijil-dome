@@ -372,7 +372,7 @@ class TestDebertaPiLargeInputs:
 
 
 # ---------------------------------------------------------------------------
-# 3. ModernBERT PI (max_length=8192, window at 8192 tokens)
+# 3. ModernBERT PI (max_length=1024, window at 1024 tokens)
 # ---------------------------------------------------------------------------
 
 class TestMBertPiLargeInputs:
@@ -384,7 +384,7 @@ class TestMBertPiLargeInputs:
 
     @pytest.mark.asyncio
     async def test_mbert_pi_injection_beyond_old_512_limit(self):
-        """Injection text >512 tokens flagged in single 8192-token window."""
+        """Injection text >512 tokens flagged in single 1024-token window."""
         injection_text = (INJECTION_PAYLOAD + " ") * 15
         result = await self.detector.detect(injection_text)
         assert result[0]
@@ -392,8 +392,8 @@ class TestMBertPiLargeInputs:
 
     @pytest.mark.asyncio
     async def test_mbert_pi_long_safe(self):
-        """>8192 token safe input -> not flagged, num_windows > 1."""
-        padding = make_safe_padding(9000)
+        """>1024 token safe input -> not flagged, num_windows > 1."""
+        padding = make_safe_padding(2000)
         result = await self.detector.detect(padding)
         assert not result[0]
         assert result[1].get("num_windows", 1) > 1
@@ -401,8 +401,8 @@ class TestMBertPiLargeInputs:
     @pytest.mark.asyncio
     async def test_mbert_pi_windowed_injection_at_start(self):
         """Injection-heavy first window + safe rest -> flagged with windowing."""
-        injection_text = make_injection_block(4500)
-        padding = make_safe_padding(5000)
+        injection_text = make_injection_block(800)
+        padding = make_safe_padding(1500)
         text = injection_text + " " + padding
         result = await self.detector.detect(text)
         assert result[0]
@@ -410,8 +410,8 @@ class TestMBertPiLargeInputs:
     @pytest.mark.asyncio
     async def test_mbert_pi_windowed_injection_at_end(self):
         """Safe first window + injection-heavy end -> flagged with windowing."""
-        padding = make_safe_padding(5000)
-        injection_text = make_injection_block(4500)
+        padding = make_safe_padding(1500)
+        injection_text = make_injection_block(800)
         text = padding + " " + injection_text
         result = await self.detector.detect(text)
         assert result[0]
@@ -427,12 +427,12 @@ class TestMBertPiLargeInputs:
     @pytest.mark.asyncio
     async def test_mbert_pi_batch_large_inputs(self):
         """Batch with mix of short and long inputs."""
-        injection_text = make_injection_block(4500)
-        padding = make_safe_padding(5000)
+        injection_text = make_injection_block(800)
+        padding = make_safe_padding(1500)
         inputs = [
             "What is the capital of France?",
             padding + " " + injection_text,
-            make_safe_padding(9000),
+            make_safe_padding(2000),
         ]
         results = await self.detector.detect_batch(inputs)
         assert len(results) == 3
@@ -500,7 +500,7 @@ class TestToxicityDebertaLargeInputs:
 
 
 # ---------------------------------------------------------------------------
-# 5. ModernBERT Toxicity (max_length=8192, window at 8192 tokens)
+# 5. ModernBERT Toxicity (max_length=1024, window at 1024 tokens)
 # ---------------------------------------------------------------------------
 
 class TestMBertToxicityLargeInputs:
@@ -512,7 +512,7 @@ class TestMBertToxicityLargeInputs:
 
     @pytest.mark.asyncio
     async def test_mbert_toxicity_beyond_old_512_limit(self):
-        """Toxic text >512 tokens fits in new 8192 window -> flagged, single window."""
+        """Toxic text >512 tokens fits in 1024 window -> flagged, single window."""
         toxic_text = (TOXIC_PAYLOAD + " ") * 20  # ~520 tokens
         result = await self.detector.detect(toxic_text)
         assert result[0]
@@ -520,8 +520,8 @@ class TestMBertToxicityLargeInputs:
 
     @pytest.mark.asyncio
     async def test_mbert_toxicity_long_safe(self):
-        """>8192 token safe input -> not flagged, num_windows > 1."""
-        padding = make_safe_padding(9000)
+        """>1024 token safe input -> not flagged, num_windows > 1."""
+        padding = make_safe_padding(2000)
         result = await self.detector.detect(padding)
         assert not result[0]
         assert result[1].get("num_windows", 1) > 1
@@ -529,8 +529,8 @@ class TestMBertToxicityLargeInputs:
     @pytest.mark.asyncio
     async def test_mbert_toxicity_windowed_toxic_at_start(self):
         """Toxic-heavy first window + safe rest -> flagged with windowing."""
-        toxic_text = (TOXIC_PAYLOAD + " ") * 150  # ~3900 tokens
-        padding = make_safe_padding(5000)
+        toxic_text = (TOXIC_PAYLOAD + " ") * 30  # ~780 tokens
+        padding = make_safe_padding(1500)
         text = toxic_text + " " + padding
         result = await self.detector.detect(text)
         assert result[0]
@@ -538,8 +538,8 @@ class TestMBertToxicityLargeInputs:
     @pytest.mark.asyncio
     async def test_mbert_toxicity_windowed_toxic_at_end(self):
         """Safe first window + toxic-heavy end -> flagged with windowing."""
-        padding = make_safe_padding(5000)
-        toxic_text = (TOXIC_PAYLOAD + " ") * 150
+        padding = make_safe_padding(1500)
+        toxic_text = (TOXIC_PAYLOAD + " ") * 30
         text = padding + " " + toxic_text
         result = await self.detector.detect(text)
         assert result[0]
@@ -555,12 +555,12 @@ class TestMBertToxicityLargeInputs:
     @pytest.mark.asyncio
     async def test_mbert_toxicity_batch_large_inputs(self):
         """Batch with mix of short and long inputs."""
-        padding = make_safe_padding(5000)
-        toxic_text = (TOXIC_PAYLOAD + " ") * 150
+        padding = make_safe_padding(1500)
+        toxic_text = (TOXIC_PAYLOAD + " ") * 30
         inputs = [
             "Why is the sky blue?",
             padding + " " + toxic_text,
-            make_safe_padding(9000),
+            make_safe_padding(2000),
         ]
         results = await self.detector.detect_batch(inputs)
         assert len(results) == 3
