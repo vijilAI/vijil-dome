@@ -255,8 +255,8 @@ class MBertPromptInjectionModel(HFBaseModel):
         all_preds = []
         for chunk in chunks:
             pred = self.classifier(chunk)
-            all_preds.append(pred)
-            item = pred[0]
+            item = pred[0] if isinstance(pred, list) else pred
+            all_preds.append(item)
             score = self._extract_injection_score(item)
             if score > max_score:
                 max_score = score
@@ -270,6 +270,7 @@ class MBertPromptInjectionModel(HFBaseModel):
             "predictions": all_preds,
             "response_string": self.response_string if flagged else query_string,
             "num_windows": num_windows,
+            "windows_scanned": len(all_preds),
         }
 
     async def detect(self, dome_input: DomePayload) -> DetectionResult:

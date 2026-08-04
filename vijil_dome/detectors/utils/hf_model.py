@@ -111,6 +111,8 @@ class HFBaseModel(DetectionMethod, ABC):
             # directly via PreTrainedTokenizerFast.
             tokenizer_json = Path(resolved_tokenizer) / "tokenizer.json"
             if not tokenizer_json.exists():
+                if effective_local_only:
+                    raise
                 from huggingface_hub import hf_hub_download
                 tokenizer_json = Path(
                     hf_hub_download(model_tokenizer_name, "tokenizer.json")
