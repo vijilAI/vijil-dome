@@ -170,15 +170,17 @@ class MBertPromptInjectionModel(HFBaseModel):
             item = pred[0]
             return self._extract_injection_score(item), item
 
-        all_preds = self.classifier(chunks, batch_size=self.max_batch_concurrency)
         best_score = 0.0
         best_item: dict = {}
-        for window_pred in all_preds:
-            item = window_pred[0] if isinstance(window_pred, list) else window_pred  # type: ignore[assignment]
+        for chunk in chunks:
+            pred = self.classifier(chunk)
+            item = pred[0]
             score = self._extract_injection_score(item)
             if score > best_score:
                 best_score = score
                 best_item = item
+            if best_score >= self.score_threshold:
+                break
         return best_score, best_item
 
     def _classify_batch(
@@ -246,14 +248,20 @@ class MBertPromptInjectionModel(HFBaseModel):
                 "num_windows": 1,
             }
 
-        # Multi-window: batch all chunks, any-positive with max score
-        all_preds = self.classifier(chunks, batch_size=self.max_batch_concurrency)
+        # Multi-window: process chunks one-at-a-time for early exit.
+        # On CPU, single-item inference is faster than padded batches,
+        # and any-positive aggregation lets us stop at the first hit.
         max_score = 0.0
-        for window_pred in all_preds:
-            item = window_pred[0] if isinstance(window_pred, list) else window_pred  # type: ignore[assignment]
+        all_preds = []
+        for chunk in chunks:
+            pred = self.classifier(chunk)
+            all_preds.append(pred)
+            item = pred[0]
             score = self._extract_injection_score(item)
             if score > max_score:
                 max_score = score
+            if max_score >= self.score_threshold:
+                break
 
         flagged = max_score >= self.score_threshold
         return flagged, {
