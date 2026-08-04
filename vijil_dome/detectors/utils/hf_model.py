@@ -18,12 +18,11 @@ import logging
 import os
 from abc import ABC, abstractmethod
 from pathlib import Path
-from typing import Optional
 
 try:
     from transformers import (
-        AutoTokenizer,
         AutoModelForSequenceClassification,
+        AutoTokenizer,
         PreTrainedTokenizerFast,
     )
     _HAS_TRANSFORMERS = True
@@ -73,7 +72,7 @@ class HFBaseModel(DetectionMethod, ABC):
     def __init__(
         self,
         model_name: str,
-        tokenizer_name: Optional[str] = None,
+        tokenizer_name: str | None = None,
         local_files_only: bool = False,
         trust_remote_code: bool = False,
     ):
@@ -140,7 +139,6 @@ class HFBaseModel(DetectionMethod, ABC):
             DetectionResult: A tuple containing a boolean indicating whether the input was flagged,
                              and a dictionary with additional details about the detection.
         """
-        pass
 
 
 class HFBaseModelWithContext(HFBaseModel):
@@ -151,8 +149,8 @@ class HFBaseModelWithContext(HFBaseModel):
     def __init__(
         self,
         model_name: str,
-        tokenizer_name: Optional[str] = None,
-        context: Optional[str] = None,
+        tokenizer_name: str | None = None,
+        context: str | None = None,
         local_files_only: bool = False,
         trust_remote_code: bool = False,
     ):

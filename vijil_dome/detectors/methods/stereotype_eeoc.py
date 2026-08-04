@@ -66,7 +66,6 @@ Input format and chunking:
 import asyncio
 import logging
 import os
-from typing import Dict, List, Optional, Tuple, Union
 
 import httpx
 
@@ -79,14 +78,14 @@ except ImportError:
 
 from vijil_dome.detectors import (
     STEREOTYPE_EEOC_FAST,
-    STEREOTYPE_EEOC_SAFEGUARD,
     STEREOTYPE_EEOC_HYBRID,
     STEREOTYPE_EEOC_REMOTE,
-    register_method,
+    STEREOTYPE_EEOC_SAFEGUARD,
+    BatchDetectionResult,
     DetectionCategory,
     DetectionMethod,
     DetectionResult,
-    BatchDetectionResult,
+    register_method,
 )
 from vijil_dome.detectors.utils.hf_model import HFBaseModel
 from vijil_dome.types import DomePayload
@@ -226,7 +225,7 @@ class StereotypeEEOCBase(HFBaseModel):
         return self._calibrate(raw)
 
     @staticmethod
-    def _split_payload(dome_input: DomePayload) -> Tuple[str, str]:
+    def _split_payload(dome_input: DomePayload) -> tuple[str, str]:
         """Pull ``(prompt_text, response_text)`` from a DomePayload.
 
         Structured prompt/response fields win over the legacy text field.
@@ -238,7 +237,7 @@ class StereotypeEEOCBase(HFBaseModel):
             return dome_input.prompt or "", dome_input.response or ""
         return dome_input.text or "", ""
 
-    def _decode(self, ids: List[int]) -> str:
+    def _decode(self, ids: list[int]) -> str:
         """Decode a list of token ids, returning an empty string when empty."""
         if not ids:
             return ""
@@ -246,7 +245,7 @@ class StereotypeEEOCBase(HFBaseModel):
 
     def _build_chunks(
         self, prompt_text: str, response_text: str
-    ) -> List[str]:
+    ) -> list[str]:
         """Construct one or more classifier-ready chunks.
 
         The primary chunk is the ``[SEP]``-centered window (last
@@ -308,14 +307,14 @@ class StereotypeEEOCBase(HFBaseModel):
         # Prompt tokens before the center tail → prompt-only flank chunks.
         prompt_head_len = len(prompt_ids) - prompt_keep
         prompt_head_ids = prompt_ids[:prompt_head_len] if prompt_head_len > 0 else []
-        prompt_chunks: List[str] = []
+        prompt_chunks: list[str] = []
         for start in range(0, len(prompt_head_ids), usable):
             chunk_ids = prompt_head_ids[start : start + usable]
             prompt_chunks.append(f"{self._decode(chunk_ids)} [SEP] ")
 
         # Response tokens after the center head → response-only flank chunks.
         response_tail_ids = response_ids[response_keep:]
-        response_chunks: List[str] = []
+        response_chunks: list[str] = []
         for start in range(0, len(response_tail_ids), usable):
             chunk_ids = response_tail_ids[start : start + usable]
             response_chunks.append(f" [SEP] {self._decode(chunk_ids)}")
@@ -348,12 +347,12 @@ class StereotypeEEOCBase(HFBaseModel):
         )
         return total > usable
 
-    def _build_chunks_for_payload(self, dome_input: DomePayload) -> List[str]:
+    def _build_chunks_for_payload(self, dome_input: DomePayload) -> list[str]:
         """End-to-end: DomePayload → list of classifier-ready chunks."""
         prompt_text, response_text = self._split_payload(dome_input)
         return self._build_chunks(prompt_text, response_text)
 
-    def _aggregate(self, preds) -> Tuple[float, dict]:
+    def _aggregate(self, preds) -> tuple[float, dict]:
         """Reduce per-chunk predictions to a single (score, item) pair.
 
         Policy: the chunk with the highest stereotype score wins. Any
@@ -371,7 +370,7 @@ class StereotypeEEOCBase(HFBaseModel):
                 best_item = item
         return best_score, best_item
 
-    def _classify(self, dome_input: DomePayload) -> Tuple[float, dict]:
+    def _classify(self, dome_input: DomePayload) -> tuple[float, dict]:
         """Run ModernBERT classification on a single DomePayload.
 
         When the payload exceeds ``max_length`` the chunker emits
@@ -388,8 +387,8 @@ class StereotypeEEOCBase(HFBaseModel):
     # ------------------------------------------------------------------
 
     def _classify_batch(
-        self, dome_inputs: List[DomePayload]
-    ) -> List[Tuple[float, dict]]:
+        self, dome_inputs: list[DomePayload]
+    ) -> list[tuple[float, dict]]:
         """Run ModernBERT classification on many DomePayloads in one call.
 
         Each input may produce one or more chunks (see ``_build_chunks``).
@@ -402,8 +401,8 @@ class StereotypeEEOCBase(HFBaseModel):
         per_payload_chunks = [
             self._build_chunks_for_payload(d) for d in dome_inputs
         ]
-        flat_chunks: List[str] = []
-        offsets: List[Tuple[int, int]] = []
+        flat_chunks: list[str] = []
+        offsets: list[tuple[int, int]] = []
         for chunks in per_payload_chunks:
             start = len(flat_chunks)
             flat_chunks.extend(chunks)
@@ -436,7 +435,7 @@ class StereotypeEEOCFast(StereotypeEEOCBase):
         dome_input: DomePayload,
         stereotype_score: float,
         prediction: dict,
-    ) -> Dict:
+    ) -> dict:
         flagged = stereotype_score >= self.score_threshold
         return {
             "type": type(self),
@@ -452,7 +451,7 @@ class StereotypeEEOCFast(StereotypeEEOCBase):
     def sync_detect(
         self,
         dome_input: DomePayload,
-        agent_id: Optional[str] = None,
+        agent_id: str | None = None,
     ) -> DetectionResult:
         dome_input = DomePayload.coerce(dome_input)
         stereotype_score, prediction = self._classify(dome_input)
@@ -469,7 +468,7 @@ class StereotypeEEOCFast(StereotypeEEOCBase):
         return self.sync_detect(DomePayload.coerce(dome_input))
 
     async def detect_batch(
-        self, inputs: List[Union[str, DomePayload]]
+        self, inputs: list[str | DomePayload]
     ) -> BatchDetectionResult:
         dome_inputs = [DomePayload.coerce(x) for x in inputs]
         scored = self._classify_batch(dome_inputs)
@@ -506,15 +505,15 @@ class StereotypeEEOCSafeguard(DetectionMethod):
 
     def __init__(
         self,
-        api_key: Optional[str] = None,
+        api_key: str | None = None,
         api_key_name: str = DEFAULT_SAFEGUARD_API_KEY_NAME,
         base_url: str = DEFAULT_SAFEGUARD_BASE_URL,
         model: str = DEFAULT_SAFEGUARD_MODEL,
         temperature: float = DEFAULT_SAFEGUARD_TEMPERATURE,
         max_tokens: int = DEFAULT_SAFEGUARD_MAX_TOKENS,
-        reasoning_effort: Optional[str] = "low",
+        reasoning_effort: str | None = "low",
         timeout_seconds: float = 10.0,
-        max_input_chars: Optional[int] = DEFAULT_SAFEGUARD_MAX_INPUT_CHARS,
+        max_input_chars: int | None = DEFAULT_SAFEGUARD_MAX_INPUT_CHARS,
         **kwargs,
     ):
         self.api_key_name = api_key_name
@@ -606,7 +605,7 @@ class StereotypeEEOCSafeguard(DetectionMethod):
             }
 
     async def detect_batch(
-        self, inputs: List[Union[str, DomePayload]]
+        self, inputs: list[str | DomePayload]
     ) -> BatchDetectionResult:
         """Run Safeguard on a batch, capped by ``self.max_batch_concurrency``.
 
@@ -640,8 +639,8 @@ class StereotypeEEOCRemote(DetectionMethod):
     def __init__(
         self,
         vijil_inference_url: str,
-        vijil_inference_model: Optional[str] = None,
-        vijil_inference_api_key: Optional[str] = None,
+        vijil_inference_model: str | None = None,
+        vijil_inference_api_key: str | None = None,
         score_threshold: float = 0.5,
         timeout_seconds: float = 10.0,
     ):
@@ -690,7 +689,7 @@ class StereotypeEEOCRemote(DetectionMethod):
             }
 
     async def detect_batch(
-        self, inputs: List[Union[str, DomePayload]]
+        self, inputs: list[str | DomePayload]
     ) -> BatchDetectionResult:
         return await self._gather_with_concurrency(
             [self.detect(DomePayload.coerce(item)) for item in inputs]
@@ -715,19 +714,19 @@ class StereotypeEEOCHybrid(StereotypeEEOCBase):
 
     def __init__(
         self,
-        vijil_inference_url: Optional[str] = None,
-        vijil_inference_model: Optional[str] = None,
-        vijil_inference_api_key: Optional[str] = None,
+        vijil_inference_url: str | None = None,
+        vijil_inference_model: str | None = None,
+        vijil_inference_api_key: str | None = None,
         confidence_threshold: float = 0.85,
-        api_key: Optional[str] = None,
+        api_key: str | None = None,
         api_key_name: str = DEFAULT_SAFEGUARD_API_KEY_NAME,
         base_url: str = DEFAULT_SAFEGUARD_BASE_URL,
         model: str = DEFAULT_SAFEGUARD_MODEL,
         temperature: float = DEFAULT_SAFEGUARD_TEMPERATURE,
         max_tokens: int = DEFAULT_SAFEGUARD_MAX_TOKENS,
-        reasoning_effort: Optional[str] = "low",
+        reasoning_effort: str | None = "low",
         timeout_seconds: float = 10.0,
-        max_input_chars: Optional[int] = DEFAULT_SAFEGUARD_MAX_INPUT_CHARS,
+        max_input_chars: int | None = DEFAULT_SAFEGUARD_MAX_INPUT_CHARS,
         **kwargs,
     ):
         self._use_vijil_inference = vijil_inference_url is not None
@@ -781,7 +780,7 @@ class StereotypeEEOCHybrid(StereotypeEEOCBase):
         score: float,
         prediction: dict,
         stage: str,
-    ) -> Dict:
+    ) -> dict:
         flagged = score >= self.score_threshold
         return {
             "type": type(self),
@@ -802,7 +801,7 @@ class StereotypeEEOCHybrid(StereotypeEEOCBase):
         dome_input: DomePayload,
         content: str,
         fast_score: float,
-    ) -> Dict:
+    ) -> dict:
         flagged = "unsafe" in content
         return {
             "type": type(self),
@@ -888,21 +887,21 @@ class StereotypeEEOCHybrid(StereotypeEEOCBase):
 
     async def _classify_vijil(
         self, client: httpx.AsyncClient, dome_input: DomePayload
-    ) -> Tuple[float, dict]:
+    ) -> tuple[float, dict]:
         """Classify a single input via Vijil's remote inference endpoint."""
         score = await self._vijil_client.classify(client, dome_input.query_string)
         return score, {}
 
     async def _classify_batch_vijil(
-        self, dome_inputs: List[DomePayload]
-    ) -> List[Tuple[float, dict]]:
+        self, dome_inputs: list[DomePayload]
+    ) -> list[tuple[float, dict]]:
         """Classify a batch via Vijil's remote inference endpoint."""
         async with httpx.AsyncClient(
             timeout=self._vijil_client.timeout_seconds
         ) as client:
             semaphore = asyncio.Semaphore(self.max_batch_concurrency)
 
-            async def _one(di: DomePayload) -> Tuple[float, dict]:
+            async def _one(di: DomePayload) -> tuple[float, dict]:
                 async with semaphore:
                     try:
                         score = await self._vijil_client.classify(
@@ -972,7 +971,7 @@ class StereotypeEEOCHybrid(StereotypeEEOCBase):
             return await self._escalate(client, dome_input, score, prediction)
 
     async def detect_batch(
-        self, inputs: List[Union[str, DomePayload]]
+        self, inputs: list[str | DomePayload]
     ) -> BatchDetectionResult:
         """Batched hybrid detection.
 
@@ -991,8 +990,8 @@ class StereotypeEEOCHybrid(StereotypeEEOCBase):
             )
 
         # Partition into "confident enough" vs "escalate".
-        results: List[Optional[DetectionResult]] = [None] * len(dome_inputs)
-        escalate_indices: List[int] = []
+        results: list[DetectionResult | None] = [None] * len(dome_inputs)
+        escalate_indices: list[int] = []
         for idx, (dome_input, (score, prediction)) in enumerate(zip(dome_inputs, scored)):
             confidence = max(score, 1.0 - score)
             if confidence >= self.confidence_threshold:

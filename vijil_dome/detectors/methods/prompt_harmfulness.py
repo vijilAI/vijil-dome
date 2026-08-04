@@ -47,7 +47,6 @@ Input format:
 
 import logging
 import os
-from typing import List, Optional, Union
 
 import httpx
 
@@ -61,11 +60,11 @@ except ImportError:
 from vijil_dome.detectors import (
     PROMPT_HARMFULNESS_FAST,
     PROMPT_HARMFULNESS_SAFEGUARD,
-    register_method,
+    BatchDetectionResult,
     DetectionCategory,
     DetectionMethod,
     DetectionResult,
-    BatchDetectionResult,
+    register_method,
 )
 from vijil_dome.detectors.utils.hf_model import HFBaseModel
 from vijil_dome.detectors.utils.sliding_window import chunk_text
@@ -174,7 +173,7 @@ class PromptHarmfulnessFast(HFBaseModel):
     def sync_detect(
         self,
         dome_input: DomePayload,
-        agent_id: Optional[str] = None,
+        agent_id: str | None = None,
     ) -> DetectionResult:
         dome_input = DomePayload.coerce(dome_input)
         query_string = self._extract_prompt_text(dome_input)
@@ -231,12 +230,12 @@ class PromptHarmfulnessFast(HFBaseModel):
         return self.sync_detect(dome_input)
 
     async def detect_batch(
-        self, inputs: List[Union[str, DomePayload]]
+        self, inputs: list[str | DomePayload]
     ) -> BatchDetectionResult:
         dome_inputs = [DomePayload.coerce(x) for x in inputs]
 
         # Phase 1: chunk each input, build flat list + per-input ranges
-        flat_chunks: List[str] = []
+        flat_chunks: list[str] = []
         ranges = []
         for di in dome_inputs:
             query_string = self._extract_prompt_text(di)
@@ -297,15 +296,15 @@ class PromptHarmfulnessSafeguard(DetectionMethod):
 
     def __init__(
         self,
-        api_key: Optional[str] = None,
+        api_key: str | None = None,
         api_key_name: str = DEFAULT_SAFEGUARD_API_KEY_NAME,
         base_url: str = DEFAULT_SAFEGUARD_BASE_URL,
         model: str = DEFAULT_SAFEGUARD_MODEL,
         temperature: float = DEFAULT_SAFEGUARD_TEMPERATURE,
         max_tokens: int = DEFAULT_SAFEGUARD_MAX_TOKENS,
-        reasoning_effort: Optional[str] = "low",
+        reasoning_effort: str | None = "low",
         timeout_seconds: float = 10.0,
-        max_input_chars: Optional[int] = DEFAULT_SAFEGUARD_MAX_INPUT_CHARS,
+        max_input_chars: int | None = DEFAULT_SAFEGUARD_MAX_INPUT_CHARS,
         **kwargs,
     ):
         self.api_key_name = api_key_name
@@ -404,7 +403,7 @@ class PromptHarmfulnessSafeguard(DetectionMethod):
             }
 
     async def detect_batch(
-        self, inputs: List[Union[str, DomePayload]]
+        self, inputs: list[str | DomePayload]
     ) -> BatchDetectionResult:
         return await self._gather_with_concurrency(
             [self.detect(DomePayload.coerce(item)) for item in inputs]

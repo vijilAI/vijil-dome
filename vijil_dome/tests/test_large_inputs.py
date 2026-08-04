@@ -20,25 +20,23 @@ and max_input_chars truncation for LLM detectors."""
 import pytest
 from transformers import AutoTokenizer
 
-from vijil_dome.detectors.utils.sliding_window import chunk_text, needs_chunking
-
-# Force registration of detector classes
-from vijil_dome.detectors.methods.pi_hf_deberta import *  # noqa: F403
-from vijil_dome.detectors.methods.pi_hf_mbert import *  # noqa: F403
-from vijil_dome.detectors.methods.toxicity_deberta import *  # noqa: F403
-from vijil_dome.detectors.methods.toxicity_mbert import *  # noqa: F403
-
 from vijil_dome.detectors import (
-    PI_DEBERTA_V3_BASE,
-    PI_MBERT,
     MODERATION_DEBERTA,
     MODERATION_MBERT,
-    DetectionFactory,
+    PI_DEBERTA_V3_BASE,
+    PI_MBERT,
     DetectionCategory,
+    DetectionFactory,
 )
-from vijil_dome.detectors.utils.llm_api_base import LlmBaseDetector
-from vijil_dome.types import DomePayload
 
+# Force registration of detector classes
+from vijil_dome.detectors.methods.pi_hf_deberta import *
+from vijil_dome.detectors.methods.pi_hf_mbert import *
+from vijil_dome.detectors.methods.toxicity_deberta import *
+from vijil_dome.detectors.methods.toxicity_mbert import *
+from vijil_dome.detectors.utils.llm_api_base import LlmBaseDetector
+from vijil_dome.detectors.utils.sliding_window import chunk_text, needs_chunking
+from vijil_dome.types import DomePayload
 
 # ---------------------------------------------------------------------------
 # Helpers

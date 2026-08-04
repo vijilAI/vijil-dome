@@ -15,20 +15,21 @@
 # vijil and vijil-dome are trademarks owned by Vijil Inc.
 
 import logging
-import torch
 import os
+
+import torch
+from torch.nn.functional import softmax
+from transformers import pipeline
+
 from vijil_dome.detectors import (
-    PI_DEBERTA_V3_BASE,
     PI_DEBERTA_FINETUNED_11122024,
+    PI_DEBERTA_V3_BASE,
     SECURITY_PROMPTGUARD,
-    register_method,
+    BatchDetectionResult,
     DetectionCategory,
     DetectionResult,
-    BatchDetectionResult,
+    register_method,
 )
-from typing import List, Optional, Union
-from transformers import pipeline
-from torch.nn.functional import softmax
 from vijil_dome.detectors.utils.hf_model import HFBaseModel
 from vijil_dome.detectors.utils.sliding_window import chunk_text
 from vijil_dome.types import DomePayload
@@ -92,15 +93,15 @@ class BaseDebertaPromptInjectionModel(HFBaseModel):
             self.run_in_executor = True
             logger.info("Initialized security model..")
         except Exception as e:
-            logger.error(f"Failed to initialize DeBERTa model: {str(e)}")
+            logger.error(f"Failed to initialize DeBERTa model: {e!s}")
             raise
 
     def sync_detect(
         self,
         dome_input: DomePayload,
-        agent_id: Optional[str] = None,
-        team_id: Optional[str] = None,
-        user_id: Optional[str] = None,
+        agent_id: str | None = None,
+        team_id: str | None = None,
+        user_id: str | None = None,
     ) -> DetectionResult:
         dome_input = DomePayload.coerce(dome_input)
         query_string = dome_input.query_string
@@ -140,10 +141,10 @@ class BaseDebertaPromptInjectionModel(HFBaseModel):
         logger.info(f"Detecting using {self.__class__.__name__}...")
         return self.sync_detect(dome_input)
 
-    async def detect_batch(self, inputs: List[Union[str, DomePayload]]) -> BatchDetectionResult:
+    async def detect_batch(self, inputs: list[str | DomePayload]) -> BatchDetectionResult:
         dome_inputs = [DomePayload.coerce(x) for x in inputs]
         # Phase 1: chunk each input, build flat list + per-input ranges
-        flat_chunks: List[str] = []
+        flat_chunks: list[str] = []
         ranges = []
         for di in dome_inputs:
             query_string = di.query_string
@@ -266,7 +267,7 @@ class PromptGuardSecurityModel(HFBaseModel):
             self.run_in_executor = True
             logger.info("Initialized security model..")
         except Exception as e:
-            logger.error(f"Failed to initialize DeBERTa model: {str(e)}")
+            logger.error(f"Failed to initialize DeBERTa model: {e!s}")
             raise
 
     def get_class_probabilities(self, text, temperature=1.0, device="cpu"):
@@ -327,9 +328,9 @@ class PromptGuardSecurityModel(HFBaseModel):
     def sync_detect(
         self,
         dome_input: DomePayload,
-        agent_id: Optional[str] = None,
-        team_id: Optional[str] = None,
-        user_id: Optional[str] = None,
+        agent_id: str | None = None,
+        team_id: str | None = None,
+        user_id: str | None = None,
     ) -> DetectionResult:
         dome_input = DomePayload.coerce(dome_input)
         query_string = dome_input.query_string
@@ -353,8 +354,7 @@ class PromptGuardSecurityModel(HFBaseModel):
         max_score = 0.0
         for chunk in chunks:
             score = self.get_jailbreak_score(chunk)
-            if score > max_score:
-                max_score = score
+            max_score = max(max_score, score)
             if score >= self.score_threshold:
                 break  # Early exit
 
