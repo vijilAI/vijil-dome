@@ -63,7 +63,7 @@ jobs:
       - name: Lint
         run: |
           export PYTHONPATH=$PWD
-          poetry add ruff mypy types-requests
+          poetry add ruff==0.15.17 mypy types-requests
           make lint
 
       - name: Configure AWS credentials (OIDC)
