@@ -74,24 +74,27 @@ jobs:
 
       - name: Sync detector models from S3
         run: |
-          sudo mkdir -p /models
-          sudo chown $USER /models
-          # Whole models/ prefix, not just models/vijil/. The fine-tuned
-          # detectors live under vijil/, but they load base tokenizers and
-          # encoders from other orgs (answerdotai/ModernBERT-base,
-          # sentence-transformers/all-MiniLM-L6-v2, google/flan-t5-base).
-          # Syncing only vijil/ left those to the HuggingFace Hub, which is
-          # why this job still needed an HF token. S3 is now the only source
-          # (resolve_model_path raises rather than falling back), so the base
-          # models have to come across too.
-          # Excludes are the large generative models — detectors never load them.
-          aws s3 sync s3://vijil-inference/models/ /models/ \
+          sudo mkdir -p /models/vijil
+          sudo chown $USER /models/vijil
+          # Scoped to models/vijil/ deliberately. An earlier revision of this
+          # branch widened it to the whole models/ prefix, to bring across base
+          # tokenizers the detectors were thought to need. Two things changed:
+          # the fine-tuned models turned out to ship their own tokenizers, and
+          # the CI role (github-actions-dome-ci) is authorized only for
+          # models/vijil/* — widening produced AccessDenied on every object
+          # under models/cooperleong00/.
+          #
+          # Excludes: the large generative models, which detectors never load,
+          # and .cache/huggingface/**, which is download bookkeeping rather
+          # than model content and is what the AccessDenied errors were on.
+          aws s3 sync s3://vijil-inference/models/vijil/ /models/vijil/ \
+            --exclude "*/.cache/*" \
             --exclude "*/gpt-oss-*" \
             --exclude "*/qwen*" \
             --exclude "*/glm*" \
             --exclude "*/gemma*"
           echo "Models synced:"
-          ls -la /models/*/
+          ls -la /models/vijil/
 
       - name: Run tests
         env:
