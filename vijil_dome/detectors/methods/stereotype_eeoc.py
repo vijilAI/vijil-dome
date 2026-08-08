@@ -159,14 +159,7 @@ class StereotypeEEOCBase(HFBaseModel):
         # upstream tokenizer produces the same token ids without the config
         # compatibility issue. This mirrors how pi_hf_mbert handles the
         # same situation.
-        # Kept pinned, unlike the sibling mBERT detectors. This model's own
-        # tokenizer_config.json declares tokenizer_class=TokenizersBackend,
-        # which the pinned transformers cannot load. Rewriting it to
-        # PreTrainedTokenizerFast does load, but scored a textbook
-        # stereotype at 0.49 against a 0.90 threshold — a substituted
-        # tokenizer is not equivalent to the trained one. So this base
-        # repo must exist in S3; see VIJIL-1290.
-        tokenizer_name: str = "answerdotai/ModernBERT-base",
+        tokenizer_name: Optional[str] = None,
         # Default threshold tuned for production prevalence (2-11%).
         # At 0.90 on calibrated scores: 59% recall, 1.54% FPR, ~49% PPV
         # at 2.4% prevalence. Customers can lower this for higher recall
