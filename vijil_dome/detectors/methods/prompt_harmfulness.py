@@ -68,6 +68,7 @@ from vijil_dome.detectors import (
     BatchDetectionResult,
 )
 from vijil_dome.detectors.utils.hf_model import HFBaseModel
+from vijil_dome.detectors.utils.hf_model import positive_class_score
 from vijil_dome.detectors.utils.sliding_window import chunk_text
 from vijil_dome.types import DomePayload
 
@@ -112,7 +113,7 @@ class PromptHarmfulnessFast(HFBaseModel):
     def __init__(
         self,
         model_name: str = "vijil/prompt-harmfulness-detector",
-        tokenizer_name: str = "answerdotai/ModernBERT-base",
+        tokenizer_name: Optional[str] = None,
         score_threshold: float = 0.95,
         max_length: int = 512,
         window_stride: int = 256,
@@ -147,9 +148,7 @@ class PromptHarmfulnessFast(HFBaseModel):
 
     def _extract_harmful_score(self, item: dict) -> float:
         """Extract the harmful-class probability from classifier output."""
-        if item["label"] in (1, "1", "LABEL_1", "biased", "harmful"):
-            return item["score"]
-        return 1.0 - item["score"]
+        return positive_class_score(item, self.model.config)
 
     @staticmethod
     def _extract_prompt_text(dome_input: DomePayload) -> str:

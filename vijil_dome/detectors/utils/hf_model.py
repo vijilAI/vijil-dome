@@ -59,22 +59,67 @@ def resolve_model_path(model_name: str) -> str:
     one until the network call fails, and it makes the supply chain for
     detector weights ambient rather than declared.
 
-    The convention: an HF-style repo id (``vijil/stereotype-eeoc-detector``)
-    resolves to ``$VIJIL_MODEL_DIR/vijil/stereotype-eeoc-detector``, which is
-    the layout ``aws s3 sync s3://vijil-inference/models/ $VIJIL_MODEL_DIR``
-    produces.
+    An HF-style repo id (``vijil/stereotype-eeoc-detector``) resolves under
+    ``$VIJIL_MODEL_DIR``. The bucket stores each model **nested one level
+    deeper, under its commit SHA**::
+
+        models/vijil/stereotype-eeoc-detector/5a55be4dd419.../config.json
+
+    so the weights are at ``<repo-id>/<revision>/``, not ``<repo-id>/``.
+    Several models carry two revisions, and the current one is marked by a
+    ``.version`` file inside it. Selection order:
+
+    1. ``<repo-id>/config.json`` — a flat layout, if some caller produces one.
+    2. The revision directory containing ``.version``.
+    3. The only revision directory, when there is exactly one.
+
+    Anything else — two unmarked revisions — is ambiguous and raises rather
+    than picking one, because silently loading the wrong revision of a
+    detector changes its verdicts without changing anything visible.
 
     Raises:
-        ModelNotAvailableError: no directory with a ``config.json`` exists at
-            the resolved path.
+        ModelNotAvailableError: nothing resolvable at the path, or the
+            revision is ambiguous.
     """
     if os.path.isabs(model_name) or os.path.isdir(model_name):
         return model_name  # already a concrete path
 
     candidate = Path(MODEL_CACHE_DIR) / model_name
-    if candidate.is_dir() and (candidate / "config.json").exists():
+
+    if (candidate / "config.json").is_file():
         logger.info("Resolved model to local path: %s (from %s)", candidate, model_name)
         return str(candidate)
+
+    revisions = (
+        sorted(d for d in candidate.iterdir() if (d / "config.json").is_file())
+        if candidate.is_dir()
+        else []
+    )
+
+    if revisions:
+        marked = [d for d in revisions if (d / ".version").is_file()]
+        if len(marked) == 1:
+            logger.info(
+                "Resolved %s to revision %s (.version-marked)",
+                model_name,
+                marked[0].name,
+            )
+            return str(marked[0])
+        if not marked and len(revisions) == 1:
+            logger.info(
+                "Resolved %s to revision %s (only revision present)",
+                model_name,
+                revisions[0].name,
+            )
+            return str(revisions[0])
+        raise ModelNotAvailableError(
+            f"Model {model_name!r} has an ambiguous revision at {candidate}: "
+            f"{len(revisions)} revisions present "
+            f"({', '.join(d.name for d in revisions)}) and "
+            f"{len(marked)} marked with .version. Exactly one revision must "
+            f"carry a .version file. Re-sync from {_S3_MODEL_SOURCE} or delete "
+            f"the stale revision directories."
+        )
 
     raise ModelNotAvailableError(
         f"Model {model_name!r} is not present at {candidate}. Detector weights "
@@ -83,6 +128,54 @@ def resolve_model_path(model_name: str) -> str:
         f"    aws s3 sync {_S3_MODEL_SOURCE} {MODEL_CACHE_DIR}/\n"
         f"or point VIJIL_MODEL_DIR (currently {MODEL_CACHE_DIR!r}) at an "
         f"existing sync."
+    )
+
+
+class UnknownLabelError(RuntimeError):
+    """A classifier emitted a label its own config does not declare.
+
+    Raised rather than guessing. The alternative — treating an unrecognized
+    label as the negative class — turns a broken detector into one that
+    reports "safe" for everything, which is the worst failure a guard has.
+    """
+
+
+def positive_class_score(item: dict, config: object) -> float:
+    """Return P(positive class) from one ``text-classification`` prediction.
+
+    These detectors are binary, and index 1 is the flagged class by
+    convention (injection, toxic, biased, harmful). What the pipeline *calls*
+    that class depends entirely on the loaded config: ``id2label`` gives
+    ``'injection'`` when the model card is well-formed and ``'LABEL_1'`` when
+    it declares no mapping at all.
+
+    Deriving the label from the config rather than matching a hardcoded list
+    is the point. A hardcoded list has to be kept in sync by hand with every
+    model any detector might load, and when it falls out of sync the failure
+    is silent: an unmatched positive label falls through to ``1.0 - score``
+    and inverts the detector. That is exactly how the prompt-injection guard
+    came to report 0.0 for an input its own classifier scored 1.0.
+
+    Raises:
+        UnknownLabelError: the emitted label matches neither class.
+    """
+    label = item["label"]
+    id2label = getattr(config, "id2label", None) or {}
+    # Keys arrive as int or str depending on whether the config came from
+    # JSON or from a live model object.
+    normalized = {str(k): v for k, v in id2label.items()}
+    positive = normalized.get("1", "LABEL_1")
+    negative = normalized.get("0", "LABEL_0")
+
+    if label == positive:
+        return float(item["score"])
+    if label == negative:
+        return 1.0 - float(item["score"])
+    raise UnknownLabelError(
+        f"Classifier emitted label {label!r}, which is neither the positive "
+        f"class ({positive!r}) nor the negative class ({negative!r}) declared "
+        f"by the model's config. Refusing to guess: treating it as negative "
+        f"would make this detector silently report safe for every input."
     )
 
 

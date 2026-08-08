@@ -30,6 +30,8 @@ import pytest
 from vijil_dome.detectors.utils import hf_model
 from vijil_dome.detectors.utils.hf_model import (
     ModelNotAvailableError,
+    UnknownLabelError,
+    positive_class_score,
     resolve_model_path,
 )
 
@@ -99,3 +101,58 @@ class TestRefusesToReachTheHub:
         with pytest.raises(ModelNotAvailableError) as exc:
             resolve_model_path("vijil/not-synced")
         assert "HuggingFace" in str(exc.value)
+
+
+class TestPositiveClassScore:
+    """Label handling derives from the model's own config, and fails closed.
+
+    The bug this pins: a hardcoded positive-label tuple that a model's real
+    label ('injection') did not appear in, so every prediction fell through
+    to `1.0 - score` and the prompt-injection guard reported 0.0 for an input
+    its classifier scored 1.0.
+    """
+
+    class _Config:
+        def __init__(self, id2label):
+            self.id2label = id2label
+
+    SEMANTIC = _Config({"0": "benign", "1": "injection"})
+    NUMERIC = _Config({"0": 0, "1": 1})
+    ABSENT = _Config(None)
+
+    def test_semantic_positive_label_is_not_inverted(self):
+        # The regression. 'injection' is the positive class; a hardcoded
+        # (1, "1", "LABEL_1") tuple misses it and returns 1.0 - 1.0 = 0.0.
+        score = positive_class_score(
+            {"label": "injection", "score": 1.0}, self.SEMANTIC
+        )
+        assert score == 1.0
+
+    def test_semantic_negative_label_is_inverted(self):
+        score = positive_class_score({"label": "benign", "score": 0.99}, self.SEMANTIC)
+        assert score == pytest.approx(0.01)
+
+    def test_numeric_label_config_still_works(self):
+        # The malformed HuggingFace card shape. It has to keep working, since
+        # that is what a Hub-loaded model emits.
+        assert positive_class_score({"label": 1, "score": 0.8}, self.NUMERIC) == 0.8
+
+    def test_missing_id2label_falls_back_to_transformers_default(self):
+        # No mapping in the config means transformers emits LABEL_0/LABEL_1.
+        assert (
+            positive_class_score({"label": "LABEL_1", "score": 0.7}, self.ABSENT) == 0.7
+        )
+        assert positive_class_score(
+            {"label": "LABEL_0", "score": 0.7}, self.ABSENT
+        ) == pytest.approx(0.3)
+
+    def test_unknown_label_raises_rather_than_reporting_safe(self):
+        # Fail closed. Treating an unrecognised label as the negative class is
+        # what makes a broken detector look like a clean scan.
+        with pytest.raises(UnknownLabelError):
+            positive_class_score({"label": "toxic", "score": 1.0}, self.SEMANTIC)
+
+    def test_unknown_label_error_names_both_classes(self):
+        with pytest.raises(UnknownLabelError) as exc:
+            positive_class_score({"label": "weird", "score": 1.0}, self.SEMANTIC)
+        assert "injection" in str(exc.value) and "benign" in str(exc.value)

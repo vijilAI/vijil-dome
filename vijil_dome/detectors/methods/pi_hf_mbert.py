@@ -48,6 +48,7 @@ from vijil_dome.detectors import (
     BatchDetectionResult,
 )
 from vijil_dome.detectors.utils.hf_model import HFBaseModel
+from vijil_dome.detectors.utils.hf_model import positive_class_score
 from vijil_dome.detectors.utils.sliding_window import chunk_text
 from vijil_dome.types import DomePayload
 
@@ -125,7 +126,6 @@ class MBertPromptInjectionModel(HFBaseModel):
         try:
             super().__init__(
                 model_name="vijil/vijil_dome_prompt_injection_detection",
-                tokenizer_name="answerdotai/ModernBERT-base",
             )
 
             self.score_threshold = score_threshold
@@ -147,9 +147,7 @@ class MBertPromptInjectionModel(HFBaseModel):
             raise
 
     def _extract_injection_score(self, item):
-        if item["label"] in (1, "1", "LABEL_1"):
-            return item["score"]
-        return 1.0 - item["score"]
+        return positive_class_score(item, self.model.config)
 
     # ------------------------------------------------------------------
     # Score-only classification (used by Hybrid)

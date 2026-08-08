@@ -89,6 +89,7 @@ from vijil_dome.detectors import (
     BatchDetectionResult,
 )
 from vijil_dome.detectors.utils.hf_model import HFBaseModel
+from vijil_dome.detectors.utils.hf_model import positive_class_score
 from vijil_dome.types import DomePayload
 
 logger = logging.getLogger("vijil.dome")
@@ -158,6 +159,13 @@ class StereotypeEEOCBase(HFBaseModel):
         # upstream tokenizer produces the same token ids without the config
         # compatibility issue. This mirrors how pi_hf_mbert handles the
         # same situation.
+        # Kept pinned, unlike the sibling mBERT detectors. This model's own
+        # tokenizer_config.json declares tokenizer_class=TokenizersBackend,
+        # which the pinned transformers cannot load. Rewriting it to
+        # PreTrainedTokenizerFast does load, but scored a textbook
+        # stereotype at 0.49 against a 0.90 threshold — a substituted
+        # tokenizer is not equivalent to the trained one. So this base
+        # repo must exist in S3; see VIJIL-1290.
         tokenizer_name: str = "answerdotai/ModernBERT-base",
         # Default threshold tuned for production prevalence (2-11%).
         # At 0.90 on calibrated scores: 59% recall, 1.54% FPR, ~49% PPV
@@ -219,11 +227,7 @@ class StereotypeEEOCBase(HFBaseModel):
 
     def _extract_stereotype_score(self, item: dict) -> float:
         """Extract and calibrate the bias probability from classifier output."""
-        if item["label"] in (1, "1", "LABEL_1", "biased", "stereotyped"):
-            raw = item["score"]
-        else:
-            raw = 1.0 - item["score"]
-        return self._calibrate(raw)
+        return self._calibrate(positive_class_score(item, self.model.config))
 
     @staticmethod
     def _split_payload(dome_input: DomePayload) -> Tuple[str, str]:
