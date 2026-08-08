@@ -35,7 +35,7 @@ vijil_dome/
 │   │   ├── hhem_hallucination.py # Hallucination detection
 │   │   └── ...
 │   └── utils/                 # Detector utilities
-│       ├── hf_model.py        # HuggingFace model loading + S3 resolver
+│       ├── hf_model.py        # S3-only model resolver (no HF Hub fallback)
 │       ├── llm_api_base.py    # LLM API base class
 │       └── embeddings_base.py # Embedding utilities
 │
@@ -189,8 +189,7 @@ poetry run ruff check vijil_dome/ demo/
 | `GROQ_API_KEY` | — | Groq API (stereotype/harmfulness safeguard mode) |
 | `GOOGLE_API_KEY` | — | Perspective API |
 | `ANTHROPIC_API_KEY` | — | Claude-based detection |
-| `HF_TOKEN` | — | Gated HuggingFace models |
-| `VIJIL_MODEL_DIR` | `/models` | Local model directory (S3-synced in production) |
+| `VIJIL_MODEL_DIR` | `/models` | Detector model directory. Synced from `s3://vijil-inference/models/`. **The only source of detector weights** — there is no HuggingFace Hub fallback; a missing model raises `ModelNotAvailableError`. |
 | `VIJIL_CONSOLE_URL` | — | Console URL for constraints and manifest signing |
 | `VIJIL_API_KEY` | — | Console API key |
 

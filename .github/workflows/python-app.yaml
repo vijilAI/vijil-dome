@@ -72,18 +72,26 @@ jobs:
           role-to-assume: arn:aws:iam::266735823956:role/github-actions-dome-ci
           aws-region: us-west-2
 
-      - name: Sync Vijil models from S3
+      - name: Sync detector models from S3
         run: |
-          sudo mkdir -p /models/vijil
-          sudo chown $USER /models/vijil
-          # Sync only the small detector models (~570MB each), not LLMs
-          aws s3 sync s3://vijil-inference/models/vijil/ /models/vijil/ \
+          sudo mkdir -p /models
+          sudo chown $USER /models
+          # Whole models/ prefix, not just models/vijil/. The fine-tuned
+          # detectors live under vijil/, but they load base tokenizers and
+          # encoders from other orgs (answerdotai/ModernBERT-base,
+          # sentence-transformers/all-MiniLM-L6-v2, google/flan-t5-base).
+          # Syncing only vijil/ left those to the HuggingFace Hub, which is
+          # why this job still needed an HF token. S3 is now the only source
+          # (resolve_model_path raises rather than falling back), so the base
+          # models have to come across too.
+          # Excludes are the large generative models — detectors never load them.
+          aws s3 sync s3://vijil-inference/models/ /models/ \
             --exclude "*/gpt-oss-*" \
             --exclude "*/qwen*" \
             --exclude "*/glm*" \
             --exclude "*/gemma*"
           echo "Models synced:"
-          ls -la /models/vijil/
+          ls -la /models/*/
 
       - name: Run tests
         env:
@@ -93,7 +101,9 @@ jobs:
           VIJIL_LLM_MODEL_SECRET: ${{ secrets.VIJIL_LLM_MODEL }}
           TOGETHERAI_API_KEY: ${{ secrets.TOGETHER_API_KEY }}
           PERSPECTIVE_API_KEY: ${{ secrets.PERSPECTIVE_API_KEY }}
-          HUGGINGFACE_TOKEN: ${{ secrets.HUGGINGFACE_TOKEN }}
+          # HUGGINGFACE_TOKEN removed: detector weights come from S3 only.
+          # If a test starts failing for a missing model, the fix is to add it
+          # to the bucket, not to restore this token.
         run: |
           # Only export OPENAI_BASE_URL / VIJIL_LLM_MODEL when the matching
           # secret is non-empty. Binding them directly via the env block sets

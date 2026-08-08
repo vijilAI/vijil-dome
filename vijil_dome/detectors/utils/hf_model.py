@@ -22,6 +22,7 @@ from typing import Optional
 
 try:
     from transformers import AutoTokenizer, AutoModelForSequenceClassification
+
     _HAS_TRANSFORMERS = True
 except ImportError:
     _HAS_TRANSFORMERS = False
@@ -32,33 +33,57 @@ from vijil_dome.types import DomePayload
 logger = logging.getLogger("vijil.dome")
 
 # Base directory where the K8s init container (or a local setup script)
-# syncs model weights from S3.  Detectors check this path first and fall
-# back to the HuggingFace Hub when the local copy is absent.
+# syncs model weights from S3 (``s3://vijil-inference/models/``).  This is
+# the ONLY source of detector weights — see resolve_model_path.
 MODEL_CACHE_DIR = os.environ.get("VIJIL_MODEL_DIR", "/models")
+
+_S3_MODEL_SOURCE = "s3://vijil-inference/models/"
+
+
+class ModelNotAvailableError(RuntimeError):
+    """A detector's weights are absent from the local model directory.
+
+    Raised instead of silently reaching out to the HuggingFace Hub. The
+    message names the path that was checked and the sync that populates it,
+    because the failure a caller sees would otherwise be a network or
+    model-card error naming neither.
+    """
 
 
 def resolve_model_path(model_name: str) -> str:
-    """Return a local path if the model exists on disk, else the original
-    HF Hub identifier so ``from_pretrained`` downloads it.
+    """Resolve a model id to a concrete local path under ``MODEL_CACHE_DIR``.
 
-    The convention: if ``model_name`` looks like an HF repo ID (contains
-    a ``/`` but is not an absolute path), check whether a matching
-    directory exists under ``MODEL_CACHE_DIR``.  For example,
-    ``vijil/stereotype-eeoc-detector`` resolves to
-    ``/models/vijil/stereotype-eeoc-detector`` when that directory
-    contains a ``config.json``.
+    Weights come from S3 and nowhere else. There is deliberately **no
+    HuggingFace Hub fallback**: a fallback makes an air-gapped or
+    egress-restricted deployment indistinguishable from a correctly-synced
+    one until the network call fails, and it makes the supply chain for
+    detector weights ambient rather than declared.
+
+    The convention: an HF-style repo id (``vijil/stereotype-eeoc-detector``)
+    resolves to ``$VIJIL_MODEL_DIR/vijil/stereotype-eeoc-detector``, which is
+    the layout ``aws s3 sync s3://vijil-inference/models/ $VIJIL_MODEL_DIR``
+    produces.
+
+    Raises:
+        ModelNotAvailableError: no directory with a ``config.json`` exists at
+            the resolved path.
     """
     if os.path.isabs(model_name) or os.path.isdir(model_name):
         return model_name  # already a concrete path
 
     candidate = Path(MODEL_CACHE_DIR) / model_name
     if candidate.is_dir() and (candidate / "config.json").exists():
-        logger.info(
-            "Resolved model to local path: %s (from %s)", candidate, model_name
-        )
+        logger.info("Resolved model to local path: %s (from %s)", candidate, model_name)
         return str(candidate)
 
-    return model_name  # fall back to HF Hub download
+    raise ModelNotAvailableError(
+        f"Model {model_name!r} is not present at {candidate}. Detector weights "
+        f"are served from {_S3_MODEL_SOURCE} and are never fetched from the "
+        f"HuggingFace Hub. Populate the directory with:\n"
+        f"    aws s3 sync {_S3_MODEL_SOURCE} {MODEL_CACHE_DIR}/\n"
+        f"or point VIJIL_MODEL_DIR (currently {MODEL_CACHE_DIR!r}) at an "
+        f"existing sync."
+    )
 
 
 class HFBaseModel(DetectionMethod, ABC):
@@ -78,25 +103,23 @@ class HFBaseModel(DetectionMethod, ABC):
                 f"{self.__class__.__name__} requires 'torch' and 'transformers'. "
                 "Install with: pip install vijil-dome[local]"
             )
+        # resolve_model_path returns a concrete local path or raises, so every
+        # load is offline by construction. local_files_only is pinned True
+        # rather than derived: it is the assertion that no code path here can
+        # reach an external host, and the `local_files_only` argument is kept
+        # only for API compatibility with existing callers.
         resolved = resolve_model_path(model_name)
-        # When loading from a local S3-synced path, force local_files_only
-        # so the model never falls back to HuggingFace Hub. This keeps
-        # production pods offline — they never reach external hosts.
-        is_local = os.path.isdir(resolved)
-        effective_local_only = local_files_only or is_local
-        logger.info(
-            "Initializing Hugging Face model: %s (local=%s)", resolved, is_local
-        )
+        logger.info("Initializing Hugging Face model from %s", resolved)
         self.model = AutoModelForSequenceClassification.from_pretrained(
             resolved,
-            local_files_only=effective_local_only,
+            local_files_only=True,
             trust_remote_code=trust_remote_code,
         )
         model_tokenizer_name = tokenizer_name or model_name
         resolved_tokenizer = resolve_model_path(model_tokenizer_name)
         self.tokenizer = AutoTokenizer.from_pretrained(
             resolved_tokenizer,
-            local_files_only=effective_local_only,
+            local_files_only=True,
             trust_remote_code=trust_remote_code,
         )
 
