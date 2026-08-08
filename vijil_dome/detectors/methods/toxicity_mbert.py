@@ -25,7 +25,6 @@ Toxicity / moderation detection using Vijil's ModernBERT fine-tune — three mod
 import asyncio
 import logging
 import os
-from typing import Dict, List, Optional, Tuple, Union
 
 import httpx
 
@@ -38,14 +37,14 @@ except ImportError:
 
 from vijil_dome.detectors import (
     MODERATION_MBERT,
-    MODERATION_MBERT_SAFEGUARD,
     MODERATION_MBERT_HYBRID,
     MODERATION_MBERT_REMOTE,
-    register_method,
+    MODERATION_MBERT_SAFEGUARD,
+    BatchDetectionResult,
     DetectionCategory,
     DetectionMethod,
     DetectionResult,
-    BatchDetectionResult,
+    register_method,
 )
 from vijil_dome.detectors.utils.hf_model import HFBaseModel
 from vijil_dome.detectors.utils.hf_model import positive_class_score
@@ -99,8 +98,8 @@ class MBertToxicContentModel(HFBaseModel):
         self,
         score_threshold: float = 0.5,
         truncation: bool = True,
-        max_length: int = 8192,
-        window_stride: int = 4096,
+        max_length: int = 1024,
+        window_stride: int = 960,
     ):
         """
         Parameters
@@ -110,12 +109,11 @@ class MBertToxicContentModel(HFBaseModel):
         truncation:
             Whether to truncate inputs exceeding *max_length*.
         max_length:
-            Maximum tokens per window. ModernBERT natively supports up
-            to 8192 tokens, so sliding windows only activate for very
-            long inputs.
+            Maximum tokens per window. Default 1024 tokens; sliding
+            windows activate for longer inputs.
         window_stride:
             Step size in tokens between sliding windows for inputs that
-            exceed *max_length*. Default 4096 (half of *max_length*).
+            exceed *max_length*. Default 960 (64-token overlap).
         """
         if not _HAS_TORCH:
             raise ImportError(
@@ -143,7 +141,7 @@ class MBertToxicContentModel(HFBaseModel):
             logger.info("Initialized Vijil MBert toxic content model..")
         except Exception as e:
             logger.error(
-                f"Failed to initialize MBert toxic content model: {str(e)}"
+                f"Failed to initialize MBert toxic content model: {e!s}"
             )
             raise
 
@@ -154,7 +152,7 @@ class MBertToxicContentModel(HFBaseModel):
     # Score-only classification (used by Hybrid)
     # ------------------------------------------------------------------
 
-    def _classify(self, dome_input: DomePayload) -> Tuple[float, dict]:
+    def _classify(self, dome_input: DomePayload) -> tuple[float, dict]:
         """Run ModernBERT classification on a single DomePayload.
 
         Returns ``(toxic_score, best_prediction_item)`` before any
@@ -181,14 +179,14 @@ class MBertToxicContentModel(HFBaseModel):
         return best_score, best_item
 
     def _classify_batch(
-        self, dome_inputs: List[DomePayload]
-    ) -> List[Tuple[float, dict]]:
+        self, dome_inputs: list[DomePayload]
+    ) -> list[tuple[float, dict]]:
         """Run ModernBERT classification on many DomePayloads in one call.
 
         All chunks from all payloads are flattened into a single pipeline
         call for efficient batching, then re-aggregated per payload.
         """
-        flat_chunks: List[str] = []
+        flat_chunks: list[str] = []
         ranges = []
         for di in dome_inputs:
             query_string = di.query_string
@@ -222,9 +220,9 @@ class MBertToxicContentModel(HFBaseModel):
     def sync_detect(
         self,
         dome_input: DomePayload,
-        agent_id: Optional[str] = None,
-        team_id: Optional[str] = None,
-        user_id: Optional[str] = None,
+        agent_id: str | None = None,
+        team_id: str | None = None,
+        user_id: str | None = None,
     ) -> DetectionResult:
         dome_input = DomePayload.coerce(dome_input)
         query_string = dome_input.query_string
@@ -251,8 +249,7 @@ class MBertToxicContentModel(HFBaseModel):
         for window_pred in all_preds:
             item = window_pred[0] if isinstance(window_pred, list) else window_pred
             score = self._extract_toxic_score(item)
-            if score > max_score:
-                max_score = score
+            max_score = max(max_score, score)
 
         flagged = max_score >= self.score_threshold
         return flagged, {
@@ -268,10 +265,10 @@ class MBertToxicContentModel(HFBaseModel):
         logger.info(f"Detecting using {self.__class__.__name__}...")
         return self.sync_detect(dome_input)
 
-    async def detect_batch(self, inputs: List[Union[str, DomePayload]]) -> BatchDetectionResult:
+    async def detect_batch(self, inputs: list[str | DomePayload]) -> BatchDetectionResult:
         dome_inputs = [DomePayload.coerce(x) for x in inputs]
         # Phase 1: chunk each input, build flat list + per-input ranges
-        flat_chunks: List[str] = []
+        flat_chunks: list[str] = []
         ranges = []
         for di in dome_inputs:
             query_string = di.query_string
@@ -295,8 +292,7 @@ class MBertToxicContentModel(HFBaseModel):
             for pred in chunk_preds:
                 item = pred[0] if isinstance(pred, list) else pred
                 score = self._extract_toxic_score(item)
-                if score > max_score:
-                    max_score = score
+                max_score = max(max_score, score)
             flagged = max_score >= self.score_threshold
             results.append((flagged, {
                 "type": type(self),
@@ -327,15 +323,15 @@ class ModerationMbertSafeguard(DetectionMethod):
 
     def __init__(
         self,
-        api_key: Optional[str] = None,
+        api_key: str | None = None,
         api_key_name: str = DEFAULT_SAFEGUARD_API_KEY_NAME,
         base_url: str = DEFAULT_SAFEGUARD_BASE_URL,
         model: str = DEFAULT_SAFEGUARD_MODEL,
         temperature: float = DEFAULT_SAFEGUARD_TEMPERATURE,
         max_tokens: int = DEFAULT_SAFEGUARD_MAX_TOKENS,
-        reasoning_effort: Optional[str] = "low",
+        reasoning_effort: str | None = "low",
         timeout_seconds: float = 10.0,
-        max_input_chars: Optional[int] = DEFAULT_SAFEGUARD_MAX_INPUT_CHARS,
+        max_input_chars: int | None = DEFAULT_SAFEGUARD_MAX_INPUT_CHARS,
         **kwargs,
     ):
         self.api_key_name = api_key_name
@@ -425,7 +421,7 @@ class ModerationMbertSafeguard(DetectionMethod):
             }
 
     async def detect_batch(
-        self, inputs: List[Union[str, DomePayload]]
+        self, inputs: list[str | DomePayload]
     ) -> BatchDetectionResult:
         return await self._gather_with_concurrency(
             [self.detect(DomePayload.coerce(item)) for item in inputs]
@@ -452,8 +448,8 @@ class MBertToxicContentRemote(DetectionMethod):
     def __init__(
         self,
         vijil_inference_url: str,
-        vijil_inference_model: Optional[str] = None,
-        vijil_inference_api_key: Optional[str] = None,
+        vijil_inference_model: str | None = None,
+        vijil_inference_api_key: str | None = None,
         score_threshold: float = 0.5,
         timeout_seconds: float = 10.0,
     ):
@@ -502,7 +498,7 @@ class MBertToxicContentRemote(DetectionMethod):
             }
 
     async def detect_batch(
-        self, inputs: List[Union[str, DomePayload]]
+        self, inputs: list[str | DomePayload]
     ) -> BatchDetectionResult:
         return await self._gather_with_concurrency(
             [self.detect(DomePayload.coerce(item)) for item in inputs]
@@ -527,19 +523,19 @@ class ModerationMbertHybrid(MBertToxicContentModel):
 
     def __init__(
         self,
-        vijil_inference_url: Optional[str] = None,
-        vijil_inference_model: Optional[str] = None,
-        vijil_inference_api_key: Optional[str] = None,
+        vijil_inference_url: str | None = None,
+        vijil_inference_model: str | None = None,
+        vijil_inference_api_key: str | None = None,
         confidence_threshold: float = 0.85,
-        api_key: Optional[str] = None,
+        api_key: str | None = None,
         api_key_name: str = DEFAULT_SAFEGUARD_API_KEY_NAME,
         base_url: str = DEFAULT_SAFEGUARD_BASE_URL,
         model: str = DEFAULT_SAFEGUARD_MODEL,
         temperature: float = DEFAULT_SAFEGUARD_TEMPERATURE,
         max_tokens: int = DEFAULT_SAFEGUARD_MAX_TOKENS,
-        reasoning_effort: Optional[str] = "low",
+        reasoning_effort: str | None = "low",
         timeout_seconds: float = 10.0,
-        max_input_chars: Optional[int] = DEFAULT_SAFEGUARD_MAX_INPUT_CHARS,
+        max_input_chars: int | None = DEFAULT_SAFEGUARD_MAX_INPUT_CHARS,
         **kwargs,
     ):
         self._use_vijil_inference = vijil_inference_url is not None
@@ -596,7 +592,7 @@ class ModerationMbertHybrid(MBertToxicContentModel):
         score: float,
         prediction: dict,
         stage: str,
-    ) -> Dict:
+    ) -> dict:
         flagged = score >= self.score_threshold
         return {
             "type": type(self),
@@ -617,7 +613,7 @@ class ModerationMbertHybrid(MBertToxicContentModel):
         dome_input: DomePayload,
         content: str,
         fast_score: float,
-    ) -> Dict:
+    ) -> dict:
         flagged = "unsafe" in content
         return {
             "type": type(self),
@@ -698,21 +694,21 @@ class ModerationMbertHybrid(MBertToxicContentModel):
 
     async def _classify_vijil(
         self, client: httpx.AsyncClient, dome_input: DomePayload
-    ) -> Tuple[float, dict]:
+    ) -> tuple[float, dict]:
         """Classify a single input via Vijil's remote inference endpoint."""
         score = await self._vijil_client.classify(client, dome_input.query_string)
         return score, {}
 
     async def _classify_batch_vijil(
-        self, dome_inputs: List[DomePayload]
-    ) -> List[Tuple[float, dict]]:
+        self, dome_inputs: list[DomePayload]
+    ) -> list[tuple[float, dict]]:
         """Classify a batch via Vijil's remote inference endpoint."""
         async with httpx.AsyncClient(
             timeout=self._vijil_client.timeout_seconds
         ) as client:
             semaphore = asyncio.Semaphore(self.max_batch_concurrency)
 
-            async def _one(di: DomePayload) -> Tuple[float, dict]:
+            async def _one(di: DomePayload) -> tuple[float, dict]:
                 async with semaphore:
                     try:
                         score = await self._vijil_client.classify(
@@ -786,7 +782,7 @@ class ModerationMbertHybrid(MBertToxicContentModel):
             return await self._escalate(client, dome_input, score, prediction)
 
     async def detect_batch(
-        self, inputs: List[Union[str, DomePayload]]
+        self, inputs: list[str | DomePayload]
     ) -> BatchDetectionResult:
         """Batched hybrid detection.
 
@@ -805,8 +801,8 @@ class ModerationMbertHybrid(MBertToxicContentModel):
             )
 
         # Partition into "confident enough" vs "escalate".
-        results: List[Optional[DetectionResult]] = [None] * len(dome_inputs)
-        escalate_indices: List[int] = []
+        results: list[DetectionResult | None] = [None] * len(dome_inputs)
+        escalate_indices: list[int] = []
         for idx, (dome_input, (score, prediction)) in enumerate(
             zip(dome_inputs, scored)
         ):

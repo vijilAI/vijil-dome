@@ -15,20 +15,21 @@
 # vijil and vijil-dome are trademarks owned by Vijil Inc.
 
 import logging
-import torch
 import os
+
+import torch
+from transformers import pipeline
+
 from vijil_dome.detectors import (
     MODERATION_DEBERTA,
-    register_method,
+    BatchDetectionResult,
     DetectionCategory,
     DetectionResult,
-    BatchDetectionResult,
+    register_method,
 )
 from vijil_dome.detectors.utils.hf_model import HFBaseModel
 from vijil_dome.detectors.utils.sliding_window import chunk_text
 from vijil_dome.types import DomePayload
-from transformers import pipeline
-from typing import List, Optional, Union
 
 logger = logging.getLogger("vijil.dome")
 
@@ -43,8 +44,8 @@ class ToxicityDeberta(HFBaseModel):
         self,
         truncation=True,
         max_length=208,
-        window_stride: int = 104,
-        device: Optional[str] = None,
+        window_stride: int = 144,
+        device: str | None = None,
     ):
         """
         Parameters
@@ -57,9 +58,7 @@ class ToxicityDeberta(HFBaseModel):
             non-trivial inputs.
         window_stride:
             Step size in tokens between sliding windows for inputs that
-            exceed *max_length*. Default 104 (half of *max_length*).
-            A smaller stride increases overlap and detection
-            thoroughness at the cost of speed.
+            exceed *max_length*. Default 144 (64-token overlap).
         device:
             Torch device string (e.g. ``"cpu"``, ``"cuda:0"``). If
             *None*, CUDA is used when available.
@@ -88,15 +87,15 @@ class ToxicityDeberta(HFBaseModel):
             self.run_in_executor = True
             logger.info("Initialized Toxicity Model")
         except Exception as e:
-            logger.error(f"Failed to initialize Deberta toxicity model: {str(e)}")
+            logger.error(f"Failed to initialize Deberta toxicity model: {e!s}")
             raise
 
     def sync_detect(
         self,
         dome_input: DomePayload,
-        agent_id: Optional[str] = None,
-        team_id: Optional[str] = None,
-        user_id: Optional[str] = None,
+        agent_id: str | None = None,
+        team_id: str | None = None,
+        user_id: str | None = None,
     ) -> DetectionResult:
         dome_input = DomePayload.coerce(dome_input)
         query_string = dome_input.query_string
@@ -140,10 +139,10 @@ class ToxicityDeberta(HFBaseModel):
         logger.info("Detecting using Deberta Toxicity Model...")
         return self.sync_detect(dome_input)
 
-    async def detect_batch(self, inputs: List[Union[str, DomePayload]]) -> BatchDetectionResult:
+    async def detect_batch(self, inputs: list[str | DomePayload]) -> BatchDetectionResult:
         dome_inputs = [DomePayload.coerce(x) for x in inputs]
         # Phase 1: chunk each input, build flat list + per-input ranges
-        flat_chunks: List[str] = []
+        flat_chunks: list[str] = []
         ranges = []
         for di in dome_inputs:
             query_string = di.query_string

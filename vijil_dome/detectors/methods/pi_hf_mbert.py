@@ -25,7 +25,6 @@ Prompt-injection detection using Vijil's ModernBERT fine-tune — three modes:
 import asyncio
 import logging
 import os
-from typing import Dict, List, Optional, Tuple, Union
 
 import httpx
 
@@ -38,14 +37,14 @@ except ImportError:
 
 from vijil_dome.detectors import (
     PI_MBERT,
-    PI_MBERT_SAFEGUARD,
     PI_MBERT_HYBRID,
     PI_MBERT_REMOTE,
-    register_method,
+    PI_MBERT_SAFEGUARD,
+    BatchDetectionResult,
     DetectionCategory,
     DetectionMethod,
     DetectionResult,
-    BatchDetectionResult,
+    register_method,
 )
 from vijil_dome.detectors.utils.hf_model import HFBaseModel
 from vijil_dome.detectors.utils.hf_model import positive_class_score
@@ -82,7 +81,7 @@ DEFAULT_SAFEGUARD_BASE_URL = "https://api.groq.com/openai/v1"
 DEFAULT_SAFEGUARD_MODEL = "openai/gpt-oss-safeguard-20b"
 
 # Default model name on Vijil's inference endpoint (matches HuggingFace).
-DEFAULT_VIJIL_INFERENCE_PI_MODEL = "vijil/vijil_dome_prompt_injection_detection"
+DEFAULT_VIJIL_INFERENCE_PI_MODEL = "vijil/prompt-injection-08042026"
 
 
 # ----------------------------------------------------------------------
@@ -98,25 +97,26 @@ class MBertPromptInjectionModel(HFBaseModel):
 
     def __init__(
         self,
-        score_threshold: float = 0.5,
+        score_threshold: float = 0.75,
         truncation: bool = True,
-        max_length: int = 8192,
-        window_stride: int = 4096,
+        max_length: int = 1024,
+        window_stride: int = 960,
     ):
         """
         Parameters
         ----------
         score_threshold:
             Injection probability above which input is flagged.
+            Default 0.75 — calibrated for vijil/prompt-injection-08042026
+            (real injections score >0.82, benign long text peaks ~0.55).
         truncation:
             Whether to truncate inputs exceeding *max_length*.
         max_length:
-            Maximum tokens per window. ModernBERT natively supports up
-            to 8192 tokens, so sliding windows only activate for very
-            long inputs.
+            Maximum tokens per window. Default 1024 tokens; sliding
+            windows activate for longer inputs.
         window_stride:
             Step size in tokens between sliding windows for inputs that
-            exceed *max_length*. Default 4096 (half of *max_length*).
+            exceed *max_length*. Default 960 (64-token overlap).
         """
         if not _HAS_TORCH:
             raise ImportError(
@@ -125,7 +125,7 @@ class MBertPromptInjectionModel(HFBaseModel):
             )
         try:
             super().__init__(
-                model_name="vijil/vijil_dome_prompt_injection_detection",
+                model_name="vijil/prompt-injection-08042026",
             )
 
             self.score_threshold = score_threshold
@@ -143,7 +143,7 @@ class MBertPromptInjectionModel(HFBaseModel):
             self.run_in_executor = True
             logger.info("Initialized Vijil Mbert model..")
         except Exception as e:
-            logger.error(f"Failed to initialize MBert model: {str(e)}")
+            logger.error(f"Failed to initialize MBert model: {e!s}")
             raise
 
     def _extract_injection_score(self, item):
@@ -153,7 +153,7 @@ class MBertPromptInjectionModel(HFBaseModel):
     # Score-only classification (used by Hybrid)
     # ------------------------------------------------------------------
 
-    def _classify(self, dome_input: DomePayload) -> Tuple[float, dict]:
+    def _classify(self, dome_input: DomePayload) -> tuple[float, dict]:
         """Run ModernBERT classification on a single DomePayload.
 
         Returns ``(injection_score, best_prediction_item)`` before any
@@ -168,26 +168,28 @@ class MBertPromptInjectionModel(HFBaseModel):
             item = pred[0]
             return self._extract_injection_score(item), item
 
-        all_preds = self.classifier(chunks, batch_size=self.max_batch_concurrency)
         best_score = 0.0
         best_item: dict = {}
-        for window_pred in all_preds:
-            item = window_pred[0] if isinstance(window_pred, list) else window_pred  # type: ignore[assignment]
+        for chunk in chunks:
+            pred = self.classifier(chunk)
+            item = pred[0]
             score = self._extract_injection_score(item)
             if score > best_score:
                 best_score = score
                 best_item = item
+            if best_score >= self.score_threshold:
+                break
         return best_score, best_item
 
     def _classify_batch(
-        self, dome_inputs: List[DomePayload]
-    ) -> List[Tuple[float, dict]]:
+        self, dome_inputs: list[DomePayload]
+    ) -> list[tuple[float, dict]]:
         """Run ModernBERT classification on many DomePayloads in one call.
 
         All chunks from all payloads are flattened into a single pipeline
         call for efficient batching, then re-aggregated per payload.
         """
-        flat_chunks: List[str] = []
+        flat_chunks: list[str] = []
         ranges = []
         for di in dome_inputs:
             query_string = di.query_string
@@ -221,9 +223,9 @@ class MBertPromptInjectionModel(HFBaseModel):
     def sync_detect(
         self,
         dome_input: DomePayload,
-        agent_id: Optional[str] = None,
-        team_id: Optional[str] = None,
-        user_id: Optional[str] = None,
+        agent_id: str | None = None,
+        team_id: str | None = None,
+        user_id: str | None = None,
     ) -> DetectionResult:
         dome_input = DomePayload.coerce(dome_input)
         query_string = dome_input.query_string
@@ -244,14 +246,19 @@ class MBertPromptInjectionModel(HFBaseModel):
                 "num_windows": 1,
             }
 
-        # Multi-window: batch all chunks, any-positive with max score
-        all_preds = self.classifier(chunks, batch_size=self.max_batch_concurrency)
+        # Multi-window: process chunks one-at-a-time for early exit.
+        # On CPU, single-item inference is faster than padded batches,
+        # and any-positive aggregation lets us stop at the first hit.
         max_score = 0.0
-        for window_pred in all_preds:
-            item = window_pred[0] if isinstance(window_pred, list) else window_pred  # type: ignore[assignment]
+        all_preds = []
+        for chunk in chunks:
+            pred = self.classifier(chunk)
+            item = pred[0] if isinstance(pred, list) else pred
+            all_preds.append(item)
             score = self._extract_injection_score(item)
-            if score > max_score:
-                max_score = score
+            max_score = max(max_score, score)
+            if max_score >= self.score_threshold:
+                break
 
         flagged = max_score >= self.score_threshold
         return flagged, {
@@ -260,6 +267,7 @@ class MBertPromptInjectionModel(HFBaseModel):
             "predictions": all_preds,
             "response_string": self.response_string if flagged else query_string,
             "num_windows": num_windows,
+            "windows_scanned": len(all_preds),
         }
 
     async def detect(self, dome_input: DomePayload) -> DetectionResult:
@@ -267,10 +275,10 @@ class MBertPromptInjectionModel(HFBaseModel):
         logger.info(f"Detecting using {self.__class__.__name__}...")
         return self.sync_detect(dome_input)
 
-    async def detect_batch(self, inputs: List[Union[str, DomePayload]]) -> BatchDetectionResult:
+    async def detect_batch(self, inputs: list[str | DomePayload]) -> BatchDetectionResult:
         dome_inputs = [DomePayload.coerce(x) for x in inputs]
         # Phase 1: chunk each input, build flat list + per-input ranges
-        flat_chunks: List[str] = []
+        flat_chunks: list[str] = []
         ranges = []
         for di in dome_inputs:
             query_string = di.query_string
@@ -294,8 +302,7 @@ class MBertPromptInjectionModel(HFBaseModel):
             for pred in chunk_preds:
                 item = pred[0] if isinstance(pred, list) else pred
                 score = self._extract_injection_score(item)
-                if score > max_score:
-                    max_score = score
+                max_score = max(max_score, score)
             flagged = max_score >= self.score_threshold
             results.append((flagged, {
                 "type": type(self),
@@ -326,15 +333,15 @@ class PImbertSafeguard(DetectionMethod):
 
     def __init__(
         self,
-        api_key: Optional[str] = None,
+        api_key: str | None = None,
         api_key_name: str = DEFAULT_SAFEGUARD_API_KEY_NAME,
         base_url: str = DEFAULT_SAFEGUARD_BASE_URL,
         model: str = DEFAULT_SAFEGUARD_MODEL,
         temperature: float = DEFAULT_SAFEGUARD_TEMPERATURE,
         max_tokens: int = DEFAULT_SAFEGUARD_MAX_TOKENS,
-        reasoning_effort: Optional[str] = "low",
+        reasoning_effort: str | None = "low",
         timeout_seconds: float = 10.0,
-        max_input_chars: Optional[int] = DEFAULT_SAFEGUARD_MAX_INPUT_CHARS,
+        max_input_chars: int | None = DEFAULT_SAFEGUARD_MAX_INPUT_CHARS,
         **kwargs,
     ):
         self.api_key_name = api_key_name
@@ -424,7 +431,7 @@ class PImbertSafeguard(DetectionMethod):
             }
 
     async def detect_batch(
-        self, inputs: List[Union[str, DomePayload]]
+        self, inputs: list[str | DomePayload]
     ) -> BatchDetectionResult:
         return await self._gather_with_concurrency(
             [self.detect(DomePayload.coerce(item)) for item in inputs]
@@ -451,9 +458,9 @@ class MBertPromptInjectionRemote(DetectionMethod):
     def __init__(
         self,
         vijil_inference_url: str,
-        vijil_inference_model: Optional[str] = None,
-        vijil_inference_api_key: Optional[str] = None,
-        score_threshold: float = 0.5,
+        vijil_inference_model: str | None = None,
+        vijil_inference_api_key: str | None = None,
+        score_threshold: float = 0.75,
         timeout_seconds: float = 10.0,
     ):
         from vijil_dome.detectors.utils.vijil_inference import VijilInferenceClient
@@ -501,7 +508,7 @@ class MBertPromptInjectionRemote(DetectionMethod):
             }
 
     async def detect_batch(
-        self, inputs: List[Union[str, DomePayload]]
+        self, inputs: list[str | DomePayload]
     ) -> BatchDetectionResult:
         return await self._gather_with_concurrency(
             [self.detect(DomePayload.coerce(item)) for item in inputs]
@@ -526,19 +533,19 @@ class PImbertHybrid(MBertPromptInjectionModel):
 
     def __init__(
         self,
-        vijil_inference_url: Optional[str] = None,
-        vijil_inference_model: Optional[str] = None,
-        vijil_inference_api_key: Optional[str] = None,
+        vijil_inference_url: str | None = None,
+        vijil_inference_model: str | None = None,
+        vijil_inference_api_key: str | None = None,
         confidence_threshold: float = 0.85,
-        api_key: Optional[str] = None,
+        api_key: str | None = None,
         api_key_name: str = DEFAULT_SAFEGUARD_API_KEY_NAME,
         base_url: str = DEFAULT_SAFEGUARD_BASE_URL,
         model: str = DEFAULT_SAFEGUARD_MODEL,
         temperature: float = DEFAULT_SAFEGUARD_TEMPERATURE,
         max_tokens: int = DEFAULT_SAFEGUARD_MAX_TOKENS,
-        reasoning_effort: Optional[str] = "low",
+        reasoning_effort: str | None = "low",
         timeout_seconds: float = 10.0,
-        max_input_chars: Optional[int] = DEFAULT_SAFEGUARD_MAX_INPUT_CHARS,
+        max_input_chars: int | None = DEFAULT_SAFEGUARD_MAX_INPUT_CHARS,
         **kwargs,
     ):
         self._use_vijil_inference = vijil_inference_url is not None
@@ -546,7 +553,7 @@ class PImbertHybrid(MBertPromptInjectionModel):
         if self._use_vijil_inference:
             from vijil_dome.detectors.utils.vijil_inference import VijilInferenceClient
             assert vijil_inference_url is not None
-            self.score_threshold = kwargs.get("score_threshold", 0.5)
+            self.score_threshold = kwargs.get("score_threshold", 0.75)
             self._vijil_client = VijilInferenceClient(
                 base_url=vijil_inference_url,
                 model=vijil_inference_model or DEFAULT_VIJIL_INFERENCE_PI_MODEL,
@@ -595,7 +602,7 @@ class PImbertHybrid(MBertPromptInjectionModel):
         score: float,
         prediction: dict,
         stage: str,
-    ) -> Dict:
+    ) -> dict:
         flagged = score >= self.score_threshold
         return {
             "type": type(self),
@@ -616,7 +623,7 @@ class PImbertHybrid(MBertPromptInjectionModel):
         dome_input: DomePayload,
         content: str,
         fast_score: float,
-    ) -> Dict:
+    ) -> dict:
         flagged = "unsafe" in content
         return {
             "type": type(self),
@@ -699,21 +706,21 @@ class PImbertHybrid(MBertPromptInjectionModel):
 
     async def _classify_vijil(
         self, client: httpx.AsyncClient, dome_input: DomePayload
-    ) -> Tuple[float, dict]:
+    ) -> tuple[float, dict]:
         """Classify a single input via Vijil's remote inference endpoint."""
         score = await self._vijil_client.classify(client, dome_input.query_string)
         return score, {}
 
     async def _classify_batch_vijil(
-        self, dome_inputs: List[DomePayload]
-    ) -> List[Tuple[float, dict]]:
+        self, dome_inputs: list[DomePayload]
+    ) -> list[tuple[float, dict]]:
         """Classify a batch via Vijil's remote inference endpoint."""
         async with httpx.AsyncClient(
             timeout=self._vijil_client.timeout_seconds
         ) as client:
             semaphore = asyncio.Semaphore(self.max_batch_concurrency)
 
-            async def _one(di: DomePayload) -> Tuple[float, dict]:
+            async def _one(di: DomePayload) -> tuple[float, dict]:
                 async with semaphore:
                     try:
                         score = await self._vijil_client.classify(
@@ -787,7 +794,7 @@ class PImbertHybrid(MBertPromptInjectionModel):
             return await self._escalate(client, dome_input, score, prediction)
 
     async def detect_batch(
-        self, inputs: List[Union[str, DomePayload]]
+        self, inputs: list[str | DomePayload]
     ) -> BatchDetectionResult:
         """Batched hybrid detection.
 
@@ -806,8 +813,8 @@ class PImbertHybrid(MBertPromptInjectionModel):
             )
 
         # Partition into "confident enough" vs "escalate".
-        results: List[Optional[DetectionResult]] = [None] * len(dome_inputs)
-        escalate_indices: List[int] = []
+        results: list[DetectionResult | None] = [None] * len(dome_inputs)
+        escalate_indices: list[int] = []
         for idx, (dome_input, (score, prediction)) in enumerate(
             zip(dome_inputs, scored)
         ):

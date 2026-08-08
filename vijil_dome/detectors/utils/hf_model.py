@@ -18,11 +18,13 @@ import logging
 import os
 from abc import ABC, abstractmethod
 from pathlib import Path
-from typing import Optional
 
 try:
-    from transformers import AutoTokenizer, AutoModelForSequenceClassification
-
+    from transformers import (
+        AutoModelForSequenceClassification,
+        AutoTokenizer,
+        PreTrainedTokenizerFast,
+    )
     _HAS_TRANSFORMERS = True
 except ImportError:
     _HAS_TRANSFORMERS = False
@@ -187,7 +189,7 @@ class HFBaseModel(DetectionMethod, ABC):
     def __init__(
         self,
         model_name: str,
-        tokenizer_name: Optional[str] = None,
+        tokenizer_name: str | None = None,
         local_files_only: bool = False,
         trust_remote_code: bool = False,
     ):
@@ -210,11 +212,46 @@ class HFBaseModel(DetectionMethod, ABC):
         )
         model_tokenizer_name = tokenizer_name or model_name
         resolved_tokenizer = resolve_model_path(model_tokenizer_name)
-        self.tokenizer = AutoTokenizer.from_pretrained(
-            resolved_tokenizer,
-            local_files_only=True,
-            trust_remote_code=trust_remote_code,
-        )
+        try:
+            self.tokenizer = AutoTokenizer.from_pretrained(
+                resolved_tokenizer,
+                local_files_only=True,
+                trust_remote_code=trust_remote_code,
+            )
+        except ValueError:
+            # Some models ship tokenizer_config.json with a custom
+            # tokenizer_class (e.g. "TokenizersBackend") that AutoTokenizer
+            # cannot resolve. Fall back to loading tokenizer.json directly.
+            #
+            # Kept from #299 as defence in depth, though the artifact that
+            # motivated it — stereotype-eeoc-detector — has since been
+            # corrected in S3, and pipeline/validate.py in vijil-inference
+            # now refuses to publish an unconstructible tokenizer_class.
+            # The upstream fix is the real one; this catches anything that
+            # slips past it.
+            #
+            # #299's branch downloaded tokenizer.json from the Hub when the
+            # local file was absent. That is removed: this module no longer
+            # reaches the network by any path, which is the property
+            # air-gapped deployments depend on. A missing tokenizer.json is
+            # now a hard failure naming the sync that fixes it.
+            tokenizer_json = Path(resolved_tokenizer) / "tokenizer.json"
+            if not tokenizer_json.exists():
+                raise ModelNotAvailableError(
+                    f"{resolved_tokenizer} declares a tokenizer_class "
+                    f"AutoTokenizer cannot construct, and has no tokenizer.json "
+                    f"to fall back to. Re-sync from {_S3_MODEL_SOURCE}."
+                ) from None
+            logger.info(
+                "AutoTokenizer failed; loading tokenizer.json via "
+                "PreTrainedTokenizerFast: %s",
+                tokenizer_json,
+            )
+            self.tokenizer = PreTrainedTokenizerFast(
+                tokenizer_file=str(tokenizer_json),
+            )
+            if self.tokenizer.pad_token_id is None:
+                self.tokenizer.pad_token_id = self.model.config.pad_token_id
 
     @abstractmethod
     async def detect(self, dome_input: DomePayload) -> DetectionResult:
@@ -228,7 +265,6 @@ class HFBaseModel(DetectionMethod, ABC):
             DetectionResult: A tuple containing a boolean indicating whether the input was flagged,
                              and a dictionary with additional details about the detection.
         """
-        pass
 
 
 class HFBaseModelWithContext(HFBaseModel):
@@ -239,8 +275,8 @@ class HFBaseModelWithContext(HFBaseModel):
     def __init__(
         self,
         model_name: str,
-        tokenizer_name: Optional[str] = None,
-        context: Optional[str] = None,
+        tokenizer_name: str | None = None,
+        context: str | None = None,
         local_files_only: bool = False,
         trust_remote_code: bool = False,
     ):
