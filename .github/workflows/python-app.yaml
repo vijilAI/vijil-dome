@@ -74,27 +74,27 @@ jobs:
 
       - name: Sync detector models from S3
         run: |
-          sudo mkdir -p /models/vijil
-          sudo chown $USER /models/vijil
-          # Scoped to models/vijil/ deliberately. An earlier revision of this
-          # branch widened it to the whole models/ prefix, to bring across base
-          # tokenizers the detectors were thought to need. Two things changed:
-          # the fine-tuned models turned out to ship their own tokenizers, and
-          # the CI role (github-actions-dome-ci) is authorized only for
-          # models/vijil/* — widening produced AccessDenied on every object
-          # under models/cooperleong00/.
+          sudo mkdir -p /models
+          sudo chown $USER /models
+          # Whole models/ prefix. The detectors load from several orgs, not
+          # just vijil/: protectai (deberta prompt-injection),
+          # sentence-transformers (jailbreak embeddings), google/flan-t5-base
+          # and vectara (hallucination), Dzeniks (factcheck), cooperleong00
+          # (deberta toxicity). All are now mirrored into the bucket, so S3 is
+          # a complete source and no detector needs the Hub.
           #
-          # Excludes: the large generative models, which detectors never load,
-          # and .cache/huggingface/**, which is download bookkeeping rather
-          # than model content and is what the AccessDenied errors were on.
-          aws s3 sync s3://vijil-inference/models/vijil/ /models/vijil/ \
+          # Excludes are the large generative models — no detector loads them
+          # and they would dominate the transfer — plus .cache/**, which is
+          # HuggingFace download bookkeeping rather than model content.
+          aws s3 sync s3://vijil-inference/models/ /models/ \
             --exclude "*/.cache/*" \
             --exclude "*/gpt-oss-*" \
             --exclude "*/qwen*" \
             --exclude "*/glm*" \
-            --exclude "*/gemma*"
+            --exclude "*/gemma*" \
+            --exclude "*/llama-3*"
           echo "Models synced:"
-          ls -la /models/vijil/
+          ls -la /models/
 
       - name: Run tests
         env:
