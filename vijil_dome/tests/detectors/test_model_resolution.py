@@ -30,6 +30,7 @@ import pytest
 from vijil_dome.detectors.utils import hf_model
 from vijil_dome.detectors.utils.hf_model import (
     ModelNotAvailableError,
+    label_config,
     UnknownLabelError,
     positive_class_score,
     resolve_model_path,
@@ -156,3 +157,46 @@ class TestPositiveClassScore:
         with pytest.raises(UnknownLabelError) as exc:
             positive_class_score({"label": "weird", "score": 1.0}, self.SEMANTIC)
         assert "injection" in str(exc.value) and "benign" in str(exc.value)
+
+
+class TestLabelConfig:
+    """The config comes from the pipeline, not the detector attribute.
+
+    The Hybrid subclasses rebind self.model to their safeguard LLM's *name*
+    after super().__init__ has loaded the real one, so reading
+    self.model.config raises AttributeError on a str for exactly those
+    classes — which is how this shipped red.
+    """
+
+    class _Config:
+        id2label = {"0": "benign", "1": "injection"}
+
+    class _Model:
+        config = None
+
+    def test_reads_from_the_classifier(self):
+        detector = type("D", (), {})()
+        model = self._Model()
+        model.config = self._Config()
+        detector.classifier = type("P", (), {"model": model})()
+        # The Hybrid failure mode: self.model rebound to a plain string.
+        detector.model = "openai/gpt-oss-safeguard-20b"
+        assert label_config(detector) is model.config
+
+    def test_falls_back_to_the_model_attribute(self):
+        # A detector that classifies without a pipeline.
+        detector = type("D", (), {})()
+        model = self._Model()
+        model.config = self._Config()
+        detector.model = model
+        assert label_config(detector) is model.config
+
+    def test_returns_none_when_there_is_no_usable_config(self):
+        # positive_class_score fails closed on this rather than guessing.
+        detector = type("D", (), {})()
+        detector.model = "just-a-name"
+        assert label_config(detector) is None
+
+    def test_none_config_still_fails_closed_on_a_semantic_label(self):
+        with pytest.raises(UnknownLabelError):
+            positive_class_score({"label": "injection", "score": 1.0}, None)

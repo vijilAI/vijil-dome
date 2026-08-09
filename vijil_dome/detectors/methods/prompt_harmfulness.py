@@ -69,7 +69,7 @@ from vijil_dome.detectors import (
     register_method,
 )
 from vijil_dome.detectors.utils.hf_model import HFBaseModel
-from vijil_dome.detectors.utils.hf_model import positive_class_score
+from vijil_dome.detectors.utils.hf_model import label_config, positive_class_score
 from vijil_dome.detectors.utils.sliding_window import chunk_text
 from vijil_dome.types import DomePayload
 
@@ -149,7 +149,7 @@ class PromptHarmfulnessFast(HFBaseModel):
 
     def _extract_harmful_score(self, item: dict) -> float:
         """Extract the harmful-class probability from classifier output."""
-        return positive_class_score(item, self.model.config)
+        return positive_class_score(item, label_config(self))
 
     @staticmethod
     def _extract_prompt_text(dome_input: DomePayload) -> str:

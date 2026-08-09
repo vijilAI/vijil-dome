@@ -181,6 +181,28 @@ def positive_class_score(item: dict, config: object) -> float:
     )
 
 
+def label_config(detector: object) -> object:
+    """Return the config of the model that actually produced the prediction.
+
+    Read from ``classifier.model`` rather than ``detector.model``. The Hybrid
+    subclasses (PImbertHybrid, StereotypeEEOCHybrid) call super().__init__ to
+    load the local model and build the pipeline, then rebind ``self.model`` to
+    the *name* of their safeguard LLM — so ``self.model.config`` is an
+    AttributeError on a str for exactly those classes.
+
+    Reading from the pipeline is also the more honest source: the labels being
+    interpreted belong to whichever model emitted the item, and that is the
+    one the pipeline holds.
+    """
+    classifier = getattr(detector, "classifier", None)
+    model = getattr(classifier, "model", None)
+    if model is not None:
+        return model.config
+    # Fall back to the attribute for detectors that classify without a
+    # pipeline. positive_class_score fails closed on an unusable config.
+    return getattr(getattr(detector, "model", None), "config", None)
+
+
 class HFBaseModel(DetectionMethod, ABC):
     """
     Abstract base class for detection models using Hugging Face transformers.

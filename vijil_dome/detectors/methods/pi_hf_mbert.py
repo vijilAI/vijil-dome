@@ -47,7 +47,7 @@ from vijil_dome.detectors import (
     register_method,
 )
 from vijil_dome.detectors.utils.hf_model import HFBaseModel
-from vijil_dome.detectors.utils.hf_model import positive_class_score
+from vijil_dome.detectors.utils.hf_model import label_config, positive_class_score
 from vijil_dome.detectors.utils.sliding_window import chunk_text
 from vijil_dome.types import DomePayload
 
@@ -147,7 +147,7 @@ class MBertPromptInjectionModel(HFBaseModel):
             raise
 
     def _extract_injection_score(self, item):
-        return positive_class_score(item, self.model.config)
+        return positive_class_score(item, label_config(self))
 
     # ------------------------------------------------------------------
     # Score-only classification (used by Hybrid)

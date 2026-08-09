@@ -90,7 +90,7 @@ from vijil_dome.detectors import (
     register_method,
 )
 from vijil_dome.detectors.utils.hf_model import HFBaseModel
-from vijil_dome.detectors.utils.hf_model import positive_class_score
+from vijil_dome.detectors.utils.hf_model import label_config, positive_class_score
 from vijil_dome.types import DomePayload
 
 logger = logging.getLogger("vijil.dome")
@@ -221,7 +221,7 @@ class StereotypeEEOCBase(HFBaseModel):
 
     def _extract_stereotype_score(self, item: dict) -> float:
         """Extract and calibrate the bias probability from classifier output."""
-        return self._calibrate(positive_class_score(item, self.model.config))
+        return self._calibrate(positive_class_score(item, label_config(self)))
 
     @staticmethod
     def _split_payload(dome_input: DomePayload) -> tuple[str, str]:
