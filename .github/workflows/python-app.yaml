@@ -76,25 +76,33 @@ jobs:
         run: |
           sudo mkdir -p /models
           sudo chown $USER /models
-          # Whole models/ prefix. The detectors load from several orgs, not
-          # just vijil/: protectai (deberta prompt-injection),
-          # sentence-transformers (jailbreak embeddings), google/flan-t5-base
-          # and vectara (hallucination), Dzeniks (factcheck), cooperleong00
-          # (deberta toxicity). All are now mirrored into the bucket, so S3 is
-          # a complete source and no detector needs the Hub.
+          # Allowlist, not a denylist. An earlier revision synced the whole
+          # models/ prefix minus the big generative models; that pulled 16.5GB
+          # and would have admitted every future experiment into CI by default.
+          # These are exactly the models a detector can load — adding a
+          # detector dependency should be a deliberate edit here.
           #
-          # Excludes are the large generative models — no detector loads them
-          # and they would dominate the transfer — plus .cache/**, which is
-          # HuggingFace download bookkeeping rather than model content.
-          aws s3 sync s3://vijil-inference/models/ /models/ \
-            --exclude "*/.cache/*" \
-            --exclude "*/gpt-oss-*" \
-            --exclude "*/qwen*" \
-            --exclude "*/glm*" \
-            --exclude "*/gemma*" \
-            --exclude "*/llama-3*"
+          # .cache/** is HuggingFace download bookkeeping, not model content.
+          for m in \
+            vijil/prompt-injection-08042026 \
+            vijil/vijil_dome_prompt_injection_detection \
+            vijil/vijil_dome_toxic_content_detection \
+            vijil/stereotype-eeoc-detector \
+            vijil/prompt-harmfulness-detector \
+            vijil/pi_deberta_finetuned_11122024 \
+            protectai/deberta-v3-base-prompt-injection-v2 \
+            cooperleong00/deberta-v3-large_toxicity-scorer \
+            sentence-transformers/all-MiniLM-L6-v2 \
+            google/flan-t5-base \
+            vectara/hallucination_evaluation_model \
+            Dzeniks/roberta-fact-check \
+          ; do
+            echo "  syncing $m"
+            aws s3 sync "s3://vijil-inference/models/$m/" "/models/$m/" \
+              --exclude "*/.cache/*" --quiet
+          done
           echo "Models synced:"
-          ls -la /models/
+          du -sh /models/*/* 2>/dev/null || ls -la /models/
 
       - name: Run tests
         env:
