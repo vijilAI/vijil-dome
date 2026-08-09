@@ -96,6 +96,7 @@ jobs:
             google/flan-t5-base \
             vectara/hallucination_evaluation_model \
             Dzeniks/roberta-fact-check \
+            meta-llama/Prompt-Guard-86M \
           ; do
             echo "  syncing $m"
             aws s3 sync "s3://vijil-inference/models/$m/" "/models/$m/" \

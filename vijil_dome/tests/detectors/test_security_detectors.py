@@ -41,8 +41,8 @@ from vijil_dome.detectors import (
     SECURITY_PROMPTGUARD,
 )
 
-# Promptguard is a gated model, so it requires a login token to access.
-from huggingface_hub import login
+# PromptGuard used to be fetched from the Hub as a gated model, which needed
+# a login token. Weights now come from the S3 mirror (VIJIL-1290).
 
 
 @pytest.mark.asyncio
@@ -86,7 +86,6 @@ async def test_security_detection():
 @pytest.mark.asyncio
 async def test_security_detection_prompt_guard():
     # Prompt Injection Detection via Prompt Guard
-    login(os.getenv("HUGGINGFACE_TOKEN"))
     prompt_injection_promptGuard = await DetectionFactory.get_detect_with_time(
         DetectionCategory.Security, SECURITY_PROMPTGUARD
     )
