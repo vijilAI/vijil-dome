@@ -63,11 +63,22 @@ def resolve_model_path(model_name: str) -> str:
 
     An HF-style repo id (``vijil/stereotype-eeoc-detector``) resolves under
     ``$VIJIL_MODEL_DIR``. The bucket stores each model **nested one level
-    deeper, under its commit SHA**::
+    deeper, under an opaque revision id**::
 
         models/vijil/stereotype-eeoc-detector/5a55be4dd419.../config.json
 
     so the weights are at ``<repo-id>/<revision>/``, not ``<repo-id>/``.
+
+    **Do not read the revision id as a HuggingFace commit SHA.** It is one
+    only when the revision is a straight mirror of an HF snapshot; a revision
+    we corrected locally carries a locally-generated id that exists in no HF
+    history. ``stereotype-eeoc-detector`` has both: ``d59c561f9a34...`` is
+    HF's current commit (it still carries ``.gitattributes``, ``README.md``
+    and ``training_args.bin`` from ``snapshot_download``), while the
+    ``.version``-marked ``5a55be4dd419...`` holds the same weights with a
+    corrected ``tokenizer_config.json``. Treat the id as opaque and trust
+    ``.version``, never the name.
+
     Several models carry two revisions, and the current one is marked by a
     ``.version`` file inside it. Selection order:
 
