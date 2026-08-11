@@ -52,7 +52,6 @@ PI_MBERT_HYBRID = "prompt-injection-mbert-hybrid"
 PI_MBERT_REMOTE = "prompt-injection-mbert-remote"
 SECURITY_LLM = "security-llm"
 SECURITY_EMBEDDINGS = "security-embeddings"
-SECURITY_PROMPTGUARD = "security-promptguard"
 ENCODING_HEURISTICS = "encoding-heuristics"
 
 HHEM = "hhem-hallucination"

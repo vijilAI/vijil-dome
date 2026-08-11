@@ -35,33 +35,183 @@ from vijil_dome.types import DomePayload
 logger = logging.getLogger("vijil.dome")
 
 # Base directory where the K8s init container (or a local setup script)
-# syncs model weights from S3.  Detectors check this path first and fall
-# back to the HuggingFace Hub when the local copy is absent.
+# syncs model weights from S3 (``s3://vijil-inference/models/``).  This is
+# the ONLY source of detector weights — see resolve_model_path.
 MODEL_CACHE_DIR = os.environ.get("VIJIL_MODEL_DIR", "/models")
+
+_S3_MODEL_SOURCE = "s3://vijil-inference/models/"
+
+
+class ModelNotAvailableError(RuntimeError):
+    """A detector's weights are absent from the local model directory.
+
+    Raised instead of silently reaching out to the HuggingFace Hub. The
+    message names the path that was checked and the sync that populates it,
+    because the failure a caller sees would otherwise be a network or
+    model-card error naming neither.
+    """
 
 
 def resolve_model_path(model_name: str) -> str:
-    """Return a local path if the model exists on disk, else the original
-    HF Hub identifier so ``from_pretrained`` downloads it.
+    """Resolve a model id to a concrete local path under ``MODEL_CACHE_DIR``.
 
-    The convention: if ``model_name`` looks like an HF repo ID (contains
-    a ``/`` but is not an absolute path), check whether a matching
-    directory exists under ``MODEL_CACHE_DIR``.  For example,
-    ``vijil/stereotype-eeoc-detector`` resolves to
-    ``/models/vijil/stereotype-eeoc-detector`` when that directory
-    contains a ``config.json``.
+    Weights come from S3 and nowhere else. There is deliberately **no
+    HuggingFace Hub fallback**: a fallback makes an air-gapped or
+    egress-restricted deployment indistinguishable from a correctly-synced
+    one until the network call fails, and it makes the supply chain for
+    detector weights ambient rather than declared.
+
+    An HF-style repo id (``vijil/stereotype-eeoc-detector``) resolves under
+    ``$VIJIL_MODEL_DIR``. The bucket stores each model **nested one level
+    deeper, under an opaque revision id**::
+
+        models/vijil/stereotype-eeoc-detector/5a55be4dd419.../config.json
+
+    so the weights are at ``<repo-id>/<revision>/``, not ``<repo-id>/``.
+
+    **Do not read the revision id as a HuggingFace commit SHA.** It is one
+    only when the revision is a straight mirror of an HF snapshot; a revision
+    we corrected locally carries a locally-generated id that exists in no HF
+    history. ``stereotype-eeoc-detector`` has both: ``d59c561f9a34...`` is
+    HF's current commit (it still carries ``.gitattributes``, ``README.md``
+    and ``training_args.bin`` from ``snapshot_download``), while the
+    ``.version``-marked ``5a55be4dd419...`` holds the same weights with a
+    corrected ``tokenizer_config.json``. Treat the id as opaque and trust
+    ``.version``, never the name.
+
+    Several models carry two revisions, and the current one is marked by a
+    ``.version`` file inside it. Selection order:
+
+    1. ``<repo-id>/config.json`` — a flat layout, if some caller produces one.
+    2. The revision directory containing ``.version``.
+    3. The only revision directory, when there is exactly one.
+
+    Anything else — two unmarked revisions — is ambiguous and raises rather
+    than picking one, because silently loading the wrong revision of a
+    detector changes its verdicts without changing anything visible.
+
+    Raises:
+        ModelNotAvailableError: nothing resolvable at the path, or the
+            revision is ambiguous.
     """
     if os.path.isabs(model_name) or os.path.isdir(model_name):
         return model_name  # already a concrete path
 
     candidate = Path(MODEL_CACHE_DIR) / model_name
-    if candidate.is_dir() and (candidate / "config.json").exists():
-        logger.info(
-            "Resolved model to local path: %s (from %s)", candidate, model_name
-        )
+
+    if (candidate / "config.json").is_file():
+        logger.info("Resolved model to local path: %s (from %s)", candidate, model_name)
         return str(candidate)
 
-    return model_name  # fall back to HF Hub download
+    revisions = (
+        sorted(d for d in candidate.iterdir() if (d / "config.json").is_file())
+        if candidate.is_dir()
+        else []
+    )
+
+    if revisions:
+        marked = [d for d in revisions if (d / ".version").is_file()]
+        if len(marked) == 1:
+            logger.info(
+                "Resolved %s to revision %s (.version-marked)",
+                model_name,
+                marked[0].name,
+            )
+            return str(marked[0])
+        if not marked and len(revisions) == 1:
+            logger.info(
+                "Resolved %s to revision %s (only revision present)",
+                model_name,
+                revisions[0].name,
+            )
+            return str(revisions[0])
+        raise ModelNotAvailableError(
+            f"Model {model_name!r} has an ambiguous revision at {candidate}: "
+            f"{len(revisions)} revisions present "
+            f"({', '.join(d.name for d in revisions)}) and "
+            f"{len(marked)} marked with .version. Exactly one revision must "
+            f"carry a .version file. Re-sync from {_S3_MODEL_SOURCE} or delete "
+            f"the stale revision directories."
+        )
+
+    raise ModelNotAvailableError(
+        f"Model {model_name!r} is not present at {candidate}. Detector weights "
+        f"are served from {_S3_MODEL_SOURCE} and are never fetched from the "
+        f"HuggingFace Hub. Populate the directory with:\n"
+        f"    aws s3 sync {_S3_MODEL_SOURCE} {MODEL_CACHE_DIR}/\n"
+        f"or point VIJIL_MODEL_DIR (currently {MODEL_CACHE_DIR!r}) at an "
+        f"existing sync."
+    )
+
+
+class UnknownLabelError(RuntimeError):
+    """A classifier emitted a label its own config does not declare.
+
+    Raised rather than guessing. The alternative — treating an unrecognized
+    label as the negative class — turns a broken detector into one that
+    reports "safe" for everything, which is the worst failure a guard has.
+    """
+
+
+def positive_class_score(item: dict, config: object) -> float:
+    """Return P(positive class) from one ``text-classification`` prediction.
+
+    These detectors are binary, and index 1 is the flagged class by
+    convention (injection, toxic, biased, harmful). What the pipeline *calls*
+    that class depends entirely on the loaded config: ``id2label`` gives
+    ``'injection'`` when the model card is well-formed and ``'LABEL_1'`` when
+    it declares no mapping at all.
+
+    Deriving the label from the config rather than matching a hardcoded list
+    is the point. A hardcoded list has to be kept in sync by hand with every
+    model any detector might load, and when it falls out of sync the failure
+    is silent: an unmatched positive label falls through to ``1.0 - score``
+    and inverts the detector. That is exactly how the prompt-injection guard
+    came to report 0.0 for an input its own classifier scored 1.0.
+
+    Raises:
+        UnknownLabelError: the emitted label matches neither class.
+    """
+    label = item["label"]
+    id2label = getattr(config, "id2label", None) or {}
+    # Keys arrive as int or str depending on whether the config came from
+    # JSON or from a live model object.
+    normalized = {str(k): v for k, v in id2label.items()}
+    positive = normalized.get("1", "LABEL_1")
+    negative = normalized.get("0", "LABEL_0")
+
+    if label == positive:
+        return float(item["score"])
+    if label == negative:
+        return 1.0 - float(item["score"])
+    raise UnknownLabelError(
+        f"Classifier emitted label {label!r}, which is neither the positive "
+        f"class ({positive!r}) nor the negative class ({negative!r}) declared "
+        f"by the model's config. Refusing to guess: treating it as negative "
+        f"would make this detector silently report safe for every input."
+    )
+
+
+def label_config(detector: object) -> object:
+    """Return the config of the model that actually produced the prediction.
+
+    Read from ``classifier.model`` rather than ``detector.model``. The Hybrid
+    subclasses (PImbertHybrid, StereotypeEEOCHybrid) call super().__init__ to
+    load the local model and build the pipeline, then rebind ``self.model`` to
+    the *name* of their safeguard LLM — so ``self.model.config`` is an
+    AttributeError on a str for exactly those classes.
+
+    Reading from the pipeline is also the more honest source: the labels being
+    interpreted belong to whichever model emitted the item, and that is the
+    one the pipeline holds.
+    """
+    classifier = getattr(detector, "classifier", None)
+    model = getattr(classifier, "model", None)
+    if model is not None:
+        return model.config
+    # Fall back to the attribute for detectors that classify without a
+    # pipeline. positive_class_score fails closed on an unusable config.
+    return getattr(getattr(detector, "model", None), "config", None)
 
 
 class HFBaseModel(DetectionMethod, ABC):
@@ -81,18 +231,16 @@ class HFBaseModel(DetectionMethod, ABC):
                 f"{self.__class__.__name__} requires 'torch' and 'transformers'. "
                 "Install with: pip install vijil-dome[local]"
             )
+        # resolve_model_path returns a concrete local path or raises, so every
+        # load is offline by construction. local_files_only is pinned True
+        # rather than derived: it is the assertion that no code path here can
+        # reach an external host, and the `local_files_only` argument is kept
+        # only for API compatibility with existing callers.
         resolved = resolve_model_path(model_name)
-        # When loading from a local S3-synced path, force local_files_only
-        # so the model never falls back to HuggingFace Hub. This keeps
-        # production pods offline — they never reach external hosts.
-        is_local = os.path.isdir(resolved)
-        effective_local_only = local_files_only or is_local
-        logger.info(
-            "Initializing Hugging Face model: %s (local=%s)", resolved, is_local
-        )
+        logger.info("Initializing Hugging Face model from %s", resolved)
         self.model = AutoModelForSequenceClassification.from_pretrained(
             resolved,
-            local_files_only=effective_local_only,
+            local_files_only=True,
             trust_remote_code=trust_remote_code,
         )
         model_tokenizer_name = tokenizer_name or model_name
@@ -100,22 +248,33 @@ class HFBaseModel(DetectionMethod, ABC):
         try:
             self.tokenizer = AutoTokenizer.from_pretrained(
                 resolved_tokenizer,
-                local_files_only=effective_local_only,
+                local_files_only=True,
                 trust_remote_code=trust_remote_code,
             )
         except ValueError:
             # Some models ship tokenizer_config.json with a custom
             # tokenizer_class (e.g. "TokenizersBackend") that AutoTokenizer
-            # cannot resolve. Fall back to loading the tokenizer.json
-            # directly via PreTrainedTokenizerFast.
+            # cannot resolve. Fall back to loading tokenizer.json directly.
+            #
+            # Kept from #299 as defence in depth, though the artifact that
+            # motivated it — stereotype-eeoc-detector — has since been
+            # corrected in S3, and pipeline/validate.py in vijil-inference
+            # now refuses to publish an unconstructible tokenizer_class.
+            # The upstream fix is the real one; this catches anything that
+            # slips past it.
+            #
+            # #299's branch downloaded tokenizer.json from the Hub when the
+            # local file was absent. That is removed: this module no longer
+            # reaches the network by any path, which is the property
+            # air-gapped deployments depend on. A missing tokenizer.json is
+            # now a hard failure naming the sync that fixes it.
             tokenizer_json = Path(resolved_tokenizer) / "tokenizer.json"
             if not tokenizer_json.exists():
-                if effective_local_only:
-                    raise
-                from huggingface_hub import hf_hub_download
-                tokenizer_json = Path(
-                    hf_hub_download(model_tokenizer_name, "tokenizer.json")
-                )
+                raise ModelNotAvailableError(
+                    f"{resolved_tokenizer} declares a tokenizer_class "
+                    f"AutoTokenizer cannot construct, and has no tokenizer.json "
+                    f"to fall back to. Re-sync from {_S3_MODEL_SOURCE}."
+                ) from None
             logger.info(
                 "AutoTokenizer failed; loading tokenizer.json via "
                 "PreTrainedTokenizerFast: %s",

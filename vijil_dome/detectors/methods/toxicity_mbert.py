@@ -47,6 +47,7 @@ from vijil_dome.detectors import (
     register_method,
 )
 from vijil_dome.detectors.utils.hf_model import HFBaseModel
+from vijil_dome.detectors.utils.hf_model import label_config, positive_class_score
 from vijil_dome.detectors.utils.sliding_window import chunk_text
 from vijil_dome.types import DomePayload
 
@@ -122,7 +123,6 @@ class MBertToxicContentModel(HFBaseModel):
         try:
             super().__init__(
                 model_name="vijil/vijil_dome_toxic_content_detection",
-                tokenizer_name="answerdotai/ModernBERT-base",
             )
 
             self.score_threshold = score_threshold
@@ -146,9 +146,7 @@ class MBertToxicContentModel(HFBaseModel):
             raise
 
     def _extract_toxic_score(self, item):
-        if item["label"] in ("toxic", "LABEL_1", 1, "1"):
-            return item["score"]
-        return 1.0 - item["score"]
+        return positive_class_score(item, label_config(self))
 
     # ------------------------------------------------------------------
     # Score-only classification (used by Hybrid)

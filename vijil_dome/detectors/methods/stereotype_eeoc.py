@@ -76,6 +76,8 @@ try:
 except ImportError:
     _HAS_TORCH = False
 
+from typing import Optional
+
 from vijil_dome.detectors import (
     STEREOTYPE_EEOC_FAST,
     STEREOTYPE_EEOC_HYBRID,
@@ -88,6 +90,7 @@ from vijil_dome.detectors import (
     register_method,
 )
 from vijil_dome.detectors.utils.hf_model import HFBaseModel
+from vijil_dome.detectors.utils.hf_model import label_config, positive_class_score
 from vijil_dome.types import DomePayload
 
 logger = logging.getLogger("vijil.dome")
@@ -157,7 +160,7 @@ class StereotypeEEOCBase(HFBaseModel):
         # upstream tokenizer produces the same token ids without the config
         # compatibility issue. This mirrors how pi_hf_mbert handles the
         # same situation.
-        tokenizer_name: str = "answerdotai/ModernBERT-base",
+        tokenizer_name: Optional[str] = None,
         # Default threshold tuned for production prevalence (2-11%).
         # At 0.90 on calibrated scores: 59% recall, 1.54% FPR, ~49% PPV
         # at 2.4% prevalence. Customers can lower this for higher recall
@@ -218,11 +221,7 @@ class StereotypeEEOCBase(HFBaseModel):
 
     def _extract_stereotype_score(self, item: dict) -> float:
         """Extract and calibrate the bias probability from classifier output."""
-        if item["label"] in (1, "1", "LABEL_1", "biased", "stereotyped"):
-            raw = item["score"]
-        else:
-            raw = 1.0 - item["score"]
-        return self._calibrate(raw)
+        return self._calibrate(positive_class_score(item, label_config(self)))
 
     @staticmethod
     def _split_payload(dome_input: DomePayload) -> tuple[str, str]:

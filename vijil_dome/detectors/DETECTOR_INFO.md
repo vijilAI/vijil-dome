@@ -119,20 +119,6 @@ fast-only classification instead of failing.
 - **Model**: [vijil/vijil_dome_prompt_injection_detection](https://huggingface.co/vijil/vijil_dome_prompt_injection_detection)
 - **Requires**: the env var named by `api_key_name` (defaults to `GROQ_API_KEY`); optional — falls back to fast-only if absent
 
-### `security-promptguard`
-
-Meta Prompt Guard model for jailbreak and prompt injection detection.
-
-| Parameter | Type | Default | Description |
-|-----------|------|---------|-------------|
-| `score_threshold` | `float` | `0.5` | Jailbreak probability threshold |
-| `truncation` | `bool` | `True` | Truncate inputs exceeding `max_length` |
-| `max_length` | `int` | `512` | Maximum tokens per window |
-| `window_stride` | `int` | `256` | Token step size between sliding windows |
-
-- **Class**: `PromptGuardSecurityModel`
-- **Model**: [meta-llama/Prompt-Guard-86M](https://huggingface.co/meta-llama/Prompt-Guard-86M)
-
 ### `security-llm`
 
 LLM-based security classification via LiteLLM.
@@ -599,7 +585,7 @@ Policy-based content classification using GPT-OSS-Safeguard.
 
 ## Sliding Window Behaviour
 
-HuggingFace-based detectors (DeBERTa, ModernBERT, PromptGuard) use a sliding
+HuggingFace-based detectors (DeBERTa, ModernBERT) use a sliding
 window to handle inputs longer than their `max_length`. Key points:
 
 - **Fast path**: inputs that fit in a single window are processed unchanged.

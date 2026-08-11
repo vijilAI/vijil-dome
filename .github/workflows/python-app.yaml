@@ -72,18 +72,37 @@ jobs:
           role-to-assume: arn:aws:iam::266735823956:role/github-actions-dome-ci
           aws-region: us-west-2
 
-      - name: Sync Vijil models from S3
+      - name: Sync detector models from S3
         run: |
-          sudo mkdir -p /models/vijil
-          sudo chown $USER /models/vijil
-          # Sync only the small detector models (~570MB each), not LLMs
-          aws s3 sync s3://vijil-inference/models/vijil/ /models/vijil/ \
-            --exclude "*/gpt-oss-*" \
-            --exclude "*/qwen*" \
-            --exclude "*/glm*" \
-            --exclude "*/gemma*"
+          sudo mkdir -p /models
+          sudo chown $USER /models
+          # Allowlist, not a denylist. An earlier revision synced the whole
+          # models/ prefix minus the big generative models; that pulled 16.5GB
+          # and would have admitted every future experiment into CI by default.
+          # These are exactly the models a detector can load — adding a
+          # detector dependency should be a deliberate edit here.
+          #
+          # .cache/** is HuggingFace download bookkeeping, not model content.
+          for m in \
+            vijil/prompt-injection-08042026 \
+            vijil/vijil_dome_prompt_injection_detection \
+            vijil/vijil_dome_toxic_content_detection \
+            vijil/stereotype-eeoc-detector \
+            vijil/prompt-harmfulness-detector \
+            vijil/pi_deberta_finetuned_11122024 \
+            protectai/deberta-v3-base-prompt-injection-v2 \
+            cooperleong00/deberta-v3-large_toxicity-scorer \
+            sentence-transformers/all-MiniLM-L6-v2 \
+            google/flan-t5-base \
+            vectara/hallucination_evaluation_model \
+            Dzeniks/roberta-fact-check \
+          ; do
+            echo "  syncing $m"
+            aws s3 sync "s3://vijil-inference/models/$m/" "/models/$m/" \
+              --exclude "*/.cache/*" --quiet
+          done
           echo "Models synced:"
-          ls -la /models/vijil/
+          du -sh /models/*/* 2>/dev/null || ls -la /models/
 
       - name: Run tests
         env:
@@ -93,7 +112,9 @@ jobs:
           VIJIL_LLM_MODEL_SECRET: ${{ secrets.VIJIL_LLM_MODEL }}
           TOGETHERAI_API_KEY: ${{ secrets.TOGETHER_API_KEY }}
           PERSPECTIVE_API_KEY: ${{ secrets.PERSPECTIVE_API_KEY }}
-          HUGGINGFACE_TOKEN: ${{ secrets.HUGGINGFACE_TOKEN }}
+          # HUGGINGFACE_TOKEN removed: detector weights come from S3 only.
+          # If a test starts failing for a missing model, the fix is to add it
+          # to the bucket, not to restore this token.
         run: |
           # Only export OPENAI_BASE_URL / VIJIL_LLM_MODEL when the matching
           # secret is non-empty. Binding them directly via the env block sets

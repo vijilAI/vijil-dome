@@ -2,3 +2,8 @@
 *.pyc
 *.env
 .env
+
+# graphify substrate — regenerable from source, and graph.json alone is ~98k lines.
+# Committing it buries a real diff (this PR was 307 files / 102k insertions for a
+# 539-line change). Regenerate with the graphify skill rather than tracking it.
+graphify-out/
