@@ -88,27 +88,31 @@ _REPLAYABLE_TOKENIZER_CONFIG_KEYS = frozenset({
 })
 
 
-def _read_tokenizer_config(resolved_tokenizer: str, local_only: bool) -> dict[str, Any]:
+def _read_tokenizer_config(
+    tokenizer_dir: Path, repo_id: str, local_only: bool
+) -> dict[str, Any]:
     """Return the repo's ``tokenizer_config.json`` as a dict, or ``{}``.
+
+    *tokenizer_dir* is the directory the caller's ``tokenizer.json`` came from,
+    so config and vocabulary always describe the same artifact; *repo_id* is
+    the Hub repo to download from when that directory has no config.
 
     Never raises: a missing or unreadable config only means the caller falls
     back to transformers' defaults, which is what happened before this existed.
     """
-    candidate = Path(resolved_tokenizer) / "tokenizer_config.json"
+    candidate = tokenizer_dir / "tokenizer_config.json"
     if not candidate.exists():
         if local_only:
             return {}
         try:
             from huggingface_hub import hf_hub_download
 
-            candidate = Path(
-                hf_hub_download(resolved_tokenizer, "tokenizer_config.json")
-            )
+            candidate = Path(hf_hub_download(repo_id, "tokenizer_config.json"))
         except Exception as exc:  # network, auth, missing file — all non-fatal
-            logger.info("No tokenizer_config.json for %s: %s", resolved_tokenizer, exc)
+            logger.info("No tokenizer_config.json for %s: %s", repo_id, exc)
             return {}
     try:
-        with open(candidate) as handle:
+        with open(candidate, encoding="utf-8") as handle:
             config = json.load(handle)
     except Exception as exc:
         logger.warning("Could not read %s: %s", candidate, exc)
@@ -188,7 +192,12 @@ class HFBaseModel(DetectionMethod, ABC):
                 tokenizer_json = Path(
                     hf_hub_download(model_tokenizer_name, "tokenizer.json")
                 )
-            config = _read_tokenizer_config(resolved_tokenizer, effective_local_only)
+            # Read the config from wherever tokenizer.json came from, so a
+            # local vocabulary is never described by a Hub config (or the
+            # reverse) when only one of the two is present locally.
+            config = _read_tokenizer_config(
+                tokenizer_json.parent, model_tokenizer_name, effective_local_only
+            )
             replayed = _replayable_tokenizer_kwargs(config)
             logger.info(
                 "AutoTokenizer failed (tokenizer_class=%s); loading tokenizer.json "

@@ -95,30 +95,66 @@ class TestReadTokenizerConfig:
     def test_reads_local_config(self, tmp_path):
         (tmp_path / "tokenizer_config.json").write_text(json.dumps(_V5_TOKENIZER_CONFIG))
 
-        config = _read_tokenizer_config(str(tmp_path), local_only=True)
+        config = _read_tokenizer_config(tmp_path, "vijil/some-model", local_only=True)
 
         assert config["model_max_length"] == 8192
 
     def test_missing_config_local_only_returns_empty(self, tmp_path):
-        assert _read_tokenizer_config(str(tmp_path), local_only=True) == {}
+        assert _read_tokenizer_config(tmp_path, "vijil/some-model", local_only=True) == {}
 
     def test_malformed_config_returns_empty(self, tmp_path):
         (tmp_path / "tokenizer_config.json").write_text("{not json")
 
-        assert _read_tokenizer_config(str(tmp_path), local_only=True) == {}
+        assert _read_tokenizer_config(tmp_path, "vijil/some-model", local_only=True) == {}
+
+    def test_reads_non_ascii_config(self, tmp_path):
+        """Written UTF-8; a platform-default decode would raise here."""
+        (tmp_path / "tokenizer_config.json").write_text(
+            json.dumps({"unk_token": "<unk>", "mask_token": "▁マスク"}, ensure_ascii=False),
+            encoding="utf-8",
+        )
+
+        config = _read_tokenizer_config(tmp_path, "vijil/some-model", local_only=True)
+
+        assert config["mask_token"] == "▁マスク"
+
+    def test_reads_config_from_the_tokenizer_json_directory(self, tmp_path):
+        """The config must come from the dir tokenizer.json came from, not
+        from a same-named dir elsewhere."""
+        vocab_dir = tmp_path / "from-here"
+        vocab_dir.mkdir()
+        (vocab_dir / "tokenizer_config.json").write_text(
+            json.dumps({"model_max_length": 1234})
+        )
+        other = tmp_path / "not-here"
+        other.mkdir()
+        (other / "tokenizer_config.json").write_text(
+            json.dumps({"model_max_length": 9999})
+        )
+
+        config = _read_tokenizer_config(vocab_dir, "vijil/some-model", local_only=True)
+
+        assert config["model_max_length"] == 1234
 
 
 def _model_available(model_id: str) -> bool:
-    """True if the model is on disk (S3-synced or HF cached). No network calls."""
-    local = Path(MODEL_CACHE_DIR) / model_id
-    if local.is_dir() and (local / "config.json").exists():
-        return True
-    hf_cache = (
-        Path.home() / ".cache" / "huggingface" / "hub"
-        / f"models--{model_id.replace('/', '--')}"
-    )
-    snapshots = hf_cache / "snapshots"
-    return snapshots.is_dir() and any(snapshots.iterdir())
+    """True if the model is on disk (S3-synced or HF cached). No network calls.
+
+    Runs at collection time via ``skipif``, so an unreadable cache directory
+    must report "not available" rather than error the whole session out.
+    """
+    try:
+        local = Path(MODEL_CACHE_DIR) / model_id
+        if local.is_dir() and (local / "config.json").exists():
+            return True
+        hf_cache = (
+            Path.home() / ".cache" / "huggingface" / "hub"
+            / f"models--{model_id.replace('/', '--')}"
+        )
+        snapshots = hf_cache / "snapshots"
+        return snapshots.is_dir() and any(snapshots.iterdir())
+    except OSError:
+        return False
 
 
 _skip_no_pi_model = pytest.mark.skipif(
