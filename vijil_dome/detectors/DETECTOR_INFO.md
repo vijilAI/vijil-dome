@@ -42,18 +42,19 @@ Vijil-finetuned DeBERTa model for prompt injection detection.
 
 ### `prompt-injection-mbert`
 
-Vijil ModernBERT model for prompt injection detection. Supports up to 8,192
-tokens natively, so sliding windows only activate for very long inputs.
+Vijil ModernBERT model for prompt injection detection. The model handles 8,192
+tokens natively; Dome windows at 1,024 tokens, so sliding windows activate for
+long inputs.
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
 | `score_threshold` | `float` | `0.5` | Injection probability above which input is flagged |
 | `truncation` | `bool` | `True` | Truncate inputs exceeding `max_length` |
-| `max_length` | `int` | `8192` | Maximum tokens per window |
-| `window_stride` | `int` | `4096` | Token step size between sliding windows |
+| `max_length` | `int` | `1024` | Maximum tokens per window |
+| `window_stride` | `int` | `960` | Token step size between sliding windows |
 
 - **Class**: `MBertPromptInjectionModel`
-- **Model**: [vijil/vijil_dome_prompt_injection_detection](https://huggingface.co/vijil/vijil_dome_prompt_injection_detection)
+- **Model**: [vijil/prompt-injection-v4-b2-20260815](https://huggingface.co/vijil/prompt-injection-v4-b2-20260815)
 
 ### `prompt-injection-mbert-safeguard`
 
