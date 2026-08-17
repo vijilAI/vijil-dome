@@ -198,7 +198,8 @@ class TestPromptInjectionTokenizerIsFullyConfigured:
         assert tokenizer.mask_token == "<mask>"
 
     def test_pad_token_agrees_with_the_model(self, detector):
-        """A pad-id mismatch silently corrupts every batched score."""
+        """No pad token at all makes every batched call raise; the fallback
+        fills one in from the model config, so the two must agree here."""
         assert detector.tokenizer.pad_token_id == detector.model.config.pad_token_id
 
     @pytest.mark.asyncio

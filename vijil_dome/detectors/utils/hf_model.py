@@ -211,24 +211,35 @@ class HFBaseModel(DetectionMethod, ABC):
                 **replayed,
             )
 
-        # The tokenizer must agree with the model on padding, or batched
-        # inference pads with the wrong id and silently corrupts every score
-        # in the batch. Prefer the tokenizer's own pad token; fill it in from
-        # the model config only when the tokenizer has none.
+        # A tokenizer with no pad token at all cannot pad, so every batched
+        # call raises — fill that in from the model config when the tokenizer
+        # itself defines none (the fallback path above loses it whenever the
+        # repo ships no tokenizer_config.json to replay).
+        #
+        # A *mismatched* pad id is a different matter: these classifiers are
+        # always called with an attention mask, so padded positions are masked
+        # out of the result either way. Measured on the PI detector — scoring
+        # the same prompts single and batched with the pad id forced to a
+        # wrong token left every score bit-identical. So the mismatch is
+        # logged as the tokenizer/model pairing smell it is, not treated as a
+        # scoring hazard, and never "corrected" by overwriting the tokenizer's
+        # own pad token with a model-config id that may map to another token.
         model_pad_id = getattr(self.model.config, "pad_token_id", None)
         if self.tokenizer.pad_token_id is None:
             if model_pad_id is None:
                 logger.warning(
                     "Neither tokenizer nor model config defines a pad token for %s; "
-                    "batched inference may fail.",
+                    "batched inference will fail.",
                     resolved,
                 )
             else:
                 self.tokenizer.pad_token_id = model_pad_id
         elif model_pad_id is not None and self.tokenizer.pad_token_id != model_pad_id:
-            logger.warning(
+            logger.info(
                 "Pad token mismatch for %s: tokenizer id=%s (%r) vs model config "
-                "id=%s. Batched scores may differ from single-item scores.",
+                "id=%s. Harmless while inputs carry an attention mask, but it "
+                "usually means the tokenizer and the weights came from "
+                "different revisions.",
                 resolved,
                 self.tokenizer.pad_token_id,
                 self.tokenizer.pad_token,
