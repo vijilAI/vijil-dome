@@ -80,7 +80,7 @@ DEFAULT_SAFEGUARD_BASE_URL = "https://api.groq.com/openai/v1"
 DEFAULT_SAFEGUARD_MODEL = "openai/gpt-oss-safeguard-20b"
 
 # Default model name on Vijil's inference endpoint (matches HuggingFace).
-DEFAULT_VIJIL_INFERENCE_PI_MODEL = "vijil/prompt-injection-08042026"
+DEFAULT_VIJIL_INFERENCE_PI_MODEL = "vijil/prompt-injection-v4-b2-20260815"
 
 
 # ----------------------------------------------------------------------
@@ -96,7 +96,7 @@ class MBertPromptInjectionModel(HFBaseModel):
 
     def __init__(
         self,
-        score_threshold: float = 0.75,
+        score_threshold: float = 0.5,
         truncation: bool = True,
         max_length: int = 1024,
         window_stride: int = 960,
@@ -106,8 +106,10 @@ class MBertPromptInjectionModel(HFBaseModel):
         ----------
         score_threshold:
             Injection probability above which input is flagged.
-            Default 0.75 — calibrated for vijil/prompt-injection-08042026
-            (real injections score >0.82, benign long text peaks ~0.55).
+            Default 0.5 — vijil/prompt-injection-v4-b2-20260815 separates
+            the classes cleanly (benign product traffic peaks ~0.07,
+            injections land >0.95), so the extra margin the previous
+            model needed buys nothing here.
         truncation:
             Whether to truncate inputs exceeding *max_length*.
         max_length:
@@ -124,7 +126,7 @@ class MBertPromptInjectionModel(HFBaseModel):
             )
         try:
             super().__init__(
-                model_name="vijil/prompt-injection-08042026",
+                model_name=DEFAULT_VIJIL_INFERENCE_PI_MODEL,
             )
 
             self.score_threshold = score_threshold
@@ -461,7 +463,7 @@ class MBertPromptInjectionRemote(DetectionMethod):
         vijil_inference_url: str,
         vijil_inference_model: str | None = None,
         vijil_inference_api_key: str | None = None,
-        score_threshold: float = 0.75,
+        score_threshold: float = 0.5,
         timeout_seconds: float = 10.0,
     ):
         from vijil_dome.detectors.utils.vijil_inference import VijilInferenceClient
@@ -554,7 +556,7 @@ class PImbertHybrid(MBertPromptInjectionModel):
         if self._use_vijil_inference:
             from vijil_dome.detectors.utils.vijil_inference import VijilInferenceClient
             assert vijil_inference_url is not None
-            self.score_threshold = kwargs.get("score_threshold", 0.75)
+            self.score_threshold = kwargs.get("score_threshold", 0.5)
             self._vijil_client = VijilInferenceClient(
                 base_url=vijil_inference_url,
                 model=vijil_inference_model or DEFAULT_VIJIL_INFERENCE_PI_MODEL,
