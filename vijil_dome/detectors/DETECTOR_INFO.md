@@ -54,7 +54,7 @@ long inputs.
 | `window_stride` | `int` | `960` | Token step size between sliding windows |
 
 - **Class**: `MBertPromptInjectionModel`
-- **Model**: [vijil/prompt-injection-v4-b2-20260815](https://huggingface.co/vijil/prompt-injection-v4-b2-20260815)
+- **Model**: [vijil/prompt-injection-v5-20260827](https://huggingface.co/vijil/prompt-injection-v5-20260827)
 
 ### `prompt-injection-mbert-safeguard`
 
