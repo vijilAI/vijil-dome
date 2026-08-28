@@ -48,13 +48,18 @@ long inputs.
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
-| `score_threshold` | `float` | `0.5` | Injection probability above which input is flagged |
+| `score_threshold` | `float` | `0.5` | Uncalibrated model score at or above which input is flagged (not a probability — see below) |
 | `truncation` | `bool` | `True` | Truncate inputs exceeding `max_length` |
 | `max_length` | `int` | `1024` | Maximum tokens per window |
 | `window_stride` | `int` | `960` | Token step size between sliding windows |
 
 - **Class**: `MBertPromptInjectionModel`
 - **Model**: [vijil/prompt-injection-v5-20260827](https://huggingface.co/vijil/prompt-injection-v5-20260827)
+
+`score_threshold` compares against a raw softmax output, not a calibrated
+probability. No fixed benign/attack score range holds across input
+distributions; choose an operating point from a threshold sweep on traffic that
+resembles yours.
 
 ### `prompt-injection-mbert-safeguard`
 
@@ -99,7 +104,7 @@ parameters from both `prompt-injection-mbert` and
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
 | `confidence_threshold` | `float` | `0.85` | Fast-stage confidence below which the input is escalated to Safeguard |
-| `score_threshold` | `float` | `0.5` | Injection probability threshold (fast stage) |
+| `score_threshold` | `float` | `0.5` | Uncalibrated model score threshold (fast stage) |
 | `truncation` | `bool` | `True` | Truncate inputs exceeding `max_length` |
 | `max_length` | `int` | `8192` | Maximum tokens per window (fast stage) |
 | `window_stride` | `int` | `4096` | Token step size between sliding windows |

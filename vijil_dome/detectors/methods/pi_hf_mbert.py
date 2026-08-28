@@ -105,14 +105,18 @@ class MBertPromptInjectionModel(HFBaseModel):
         Parameters
         ----------
         score_threshold:
-            Injection probability above which input is flagged.
+            Model score at or above which input is flagged.
 
             The score is a raw softmax output, **not a calibrated
-            probability**. Training uses label smoothing, so scores
-            saturate below 1.0 and no fixed benign/attack range holds
-            across input distributions. Pick an operating point from a
-            threshold sweep run against traffic that resembles yours,
-            rather than from a documented score range.
+            probability**: it does not estimate how likely the input is
+            to be an injection, and it can be overconfident under
+            distribution shift. Training uses label smoothing, which
+            discourages extreme logits — on the v5 held-out set no score
+            exceeded ~0.98 — but that is observed behaviour, not a
+            guaranteed bound. No fixed benign/attack score range holds
+            across input distributions, so pick an operating point from
+            a threshold sweep run against traffic that resembles yours
+            rather than from a documented range.
         truncation:
             Whether to truncate inputs exceeding *max_length*.
         max_length:
