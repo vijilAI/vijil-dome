@@ -45,6 +45,21 @@ from vijil_dome.detectors import (
 from huggingface_hub import login
 
 
+# Legacy security detectors, each backed by a Hub model that CI does not sync
+# from S3 and that the ModernBERT finetunes have superseded:
+#
+#   PI_DEBERTA_V3_BASE          protectai/deberta-v3-base-prompt-injection-v2  ~0.7 GB
+#   SECURITY_PROMPTGUARD        meta-llama/Prompt-Guard-86M (gated)            ~0.4 GB
+#   JB_*_PERPLEXITY             gpt2-large                                     ~3.1 GB
+#
+# Downloading them on every PR is what pushed the runner over its disk and
+# memory budget. Set VIJIL_TEST_LEGACY_MODELS=1 to run them locally.
+_skip_legacy_models = pytest.mark.skipif(
+    not os.environ.get("VIJIL_TEST_LEGACY_MODELS"),
+    reason="downloads a legacy Hub model; set VIJIL_TEST_LEGACY_MODELS=1 to run",
+)
+
+
 @pytest.mark.asyncio
 async def test_security_detection_vijil_mbert():
     # Prompt Injection Detection via Vijil's MBert model
@@ -153,6 +168,7 @@ async def test_pi_mbert_still_flags_injections(pi_mbert_detector):
 
 
 @pytest.mark.asyncio
+@_skip_legacy_models
 async def test_security_detection():
     # Prompt Injection Detection
     prompt_injection_deberta = await DetectionFactory.get_detect_with_time(
@@ -172,6 +188,7 @@ async def test_security_detection():
 
 
 @pytest.mark.asyncio
+@_skip_legacy_models
 async def test_security_detection_prompt_guard():
     # Prompt Injection Detection via Prompt Guard
     login(os.getenv("HUGGINGFACE_TOKEN"))
@@ -211,6 +228,7 @@ async def test_security_detection_llm():
 
 
 @pytest.mark.asyncio
+@_skip_legacy_models
 async def test_security_detection_jailbreak():
     # Jailbreak Detection via Length/Perplexity heuristic
     jailbreak_length_perplexity = await DetectionFactory.get_detect_with_time(
@@ -229,6 +247,7 @@ async def test_security_detection_jailbreak():
 
 
 @pytest.mark.asyncio
+@_skip_legacy_models
 async def test_security_detection_jailbreak_prefix_suffix():
     # Jailbreak Detection via Prefix-Suffix Perplexity Heuristic
 

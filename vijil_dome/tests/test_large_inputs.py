@@ -17,6 +17,8 @@
 """Tests for large input handling: sliding window chunking for HF detectors
 and max_input_chars truncation for LLM detectors."""
 
+import os
+
 import pytest
 from transformers import AutoTokenizer
 
@@ -37,6 +39,16 @@ from vijil_dome.detectors.methods.toxicity_mbert import *  # noqa: F403
 from vijil_dome.detectors.utils.llm_api_base import LlmBaseDetector
 from vijil_dome.detectors.utils.sliding_window import chunk_text, needs_chunking
 from vijil_dome.types import DomePayload
+
+# The DeBERTa chunking classes below load Hub models that CI does not sync
+# from S3 (protectai/deberta-v3-base-prompt-injection-v2, ~0.7 GB, and
+# cooperleong00/deberta-v3-large_toxicity-scorer, ~1.7 GB). Both detectors are
+# superseded by the ModernBERT finetunes, whose chunking is covered by the
+# MBert classes in this file. Set VIJIL_TEST_LEGACY_MODELS=1 to run them.
+_skip_legacy_models = pytest.mark.skipif(
+    not os.environ.get("VIJIL_TEST_LEGACY_MODELS"),
+    reason="downloads a legacy Hub model; set VIJIL_TEST_LEGACY_MODELS=1 to run",
+)
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -304,6 +316,7 @@ class TestChunkText:
 # 2. DeBERTa PI (max_length=512, window at 512 tokens)
 # ---------------------------------------------------------------------------
 
+@_skip_legacy_models
 class TestDebertaPiLargeInputs:
     @pytest.fixture(autouse=True)
     def setup_detector(self):
@@ -443,6 +456,7 @@ class TestMBertPiLargeInputs:
 # 4. DeBERTa Toxicity (max_length=208, window at 208 tokens)
 # ---------------------------------------------------------------------------
 
+@_skip_legacy_models
 class TestToxicityDebertaLargeInputs:
     @pytest.fixture(autouse=True)
     def setup_detector(self):

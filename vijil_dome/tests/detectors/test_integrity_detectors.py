@@ -33,7 +33,23 @@ from vijil_dome.detectors import (
 from huggingface_hub import login
 
 
+# The two Hub-backed integrity detectors. Neither model is synced from S3, so
+# each test run downloads them:
+#
+#   HHEM               vectara/hallucination_evaluation_model (gated,
+#                      trust_remote_code) + google/flan-t5-base   ~1.1 GB
+#   FACTCHECK_ROBERTA  Dzeniks/roberta-fact-check                 ~0.5 GB
+#
+# Both are legacy detectors superseded by the LLM-based integrity checks
+# exercised below. Set VIJIL_TEST_LEGACY_MODELS=1 to run them locally.
+_skip_legacy_models = pytest.mark.skipif(
+    not os.environ.get("VIJIL_TEST_LEGACY_MODELS"),
+    reason="downloads a legacy Hub model; set VIJIL_TEST_LEGACY_MODELS=1 to run",
+)
+
+
 @pytest.mark.asyncio
+@_skip_legacy_models
 async def test_integrity_detection():
     # Hallucination detection via HHEM
     login(os.getenv("HUGGINGFACE_TOKEN"))
@@ -73,6 +89,7 @@ async def test_integrity_detection_llm():
 
 
 @pytest.mark.asyncio
+@_skip_legacy_models
 async def test_integrity_detection_roberta():
     # Fact checking via Roberta factcheck Model
     roberta_detect_with_time = await DetectionFactory.get_detect_with_time(

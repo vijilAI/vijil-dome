@@ -76,14 +76,19 @@ jobs:
         run: |
           sudo mkdir -p /models/vijil
           sudo chown $USER /models/vijil
-          # Sync only the small detector models (~570MB each), not LLMs
-          aws s3 sync s3://vijil-inference/models/vijil/ /models/vijil/ \
-            --exclude "*/gpt-oss-*" \
-            --exclude "*/qwen*" \
-            --exclude "*/glm*" \
-            --exclude "*/gemma*"
-          echo "Models synced:"
-          ls -la /models/vijil/
+          # Pulls only the four ModernBERT classifiers that have mandatory
+          # tests (~2.8 GB), at the flat path resolve_model_path() expects.
+          # The previous blanket sync of models/vijil/ fetched the whole
+          # bucket (~220 GB): its --exclude patterns are matched against the
+          # path *relative* to the source prefix, so "*/qwen*" never matched
+          # "qwen2.5-72b-adversarial/".
+          #
+          # Nothing else is fetched. The legacy Hub-backed detectors (DeBERTa
+          # PI and toxicity, Prompt-Guard-86M, gpt2-large perplexity, HHEM,
+          # roberta-fact-check) would each pull their own weights at test
+          # time, so their tests are gated behind VIJIL_TEST_LEGACY_MODELS,
+          # which this workflow deliberately leaves unset.
+          scripts/sync_test_models.sh /models
 
       - name: Run tests
         env:
