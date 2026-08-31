@@ -16,7 +16,7 @@
 
 """Tokenizer loading for HuggingFace-backed detectors.
 
-``vijil/prompt-injection-v4-b2-20260815`` ships a tokenizer_config.json written by
+``vijil/prompt-injection-v5-20260827`` ships a tokenizer_config.json written by
 transformers 5.x: ``tokenizer_class: "TokenizersBackend"``, which transformers
 4.x cannot resolve, and ``extra_special_tokens`` as a list, which 4.x cannot
 consume. AutoTokenizer therefore raises and ``HFBaseModel`` falls back to
@@ -30,6 +30,9 @@ from pathlib import Path
 
 import pytest
 
+from vijil_dome.detectors.methods.pi_hf_mbert import (
+    DEFAULT_VIJIL_INFERENCE_PI_MODEL,
+)
 from vijil_dome.detectors.utils.hf_model import (
     MODEL_CACHE_DIR,
     _read_tokenizer_config,
@@ -157,9 +160,11 @@ def _model_available(model_id: str) -> bool:
         return False
 
 
+# The model the fixture below actually loads: guarding on anything else lets
+# these tests skip green on a runner that has the current detector default.
 _skip_no_pi_model = pytest.mark.skipif(
-    not _model_available("vijil/prompt-injection-v4-b2-20260815"),
-    reason="vijil/prompt-injection-v4-b2-20260815 not available locally",
+    not _model_available(DEFAULT_VIJIL_INFERENCE_PI_MODEL),
+    reason=f"{DEFAULT_VIJIL_INFERENCE_PI_MODEL} not available locally",
 )
 
 
