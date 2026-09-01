@@ -67,8 +67,8 @@ PARALLEL_CONFIG = {
     "moderation-output-guard": {
         "type": "moderation",
         "early-exit": False,
-        "run-parallel": True,  # ✅ Run detectors in parallel (DeBERTa needs thread pool)
-        "methods": ["moderation-deberta", "moderation-flashtext"],
+        "run-parallel": True,  # ✅ Run detectors in parallel (the HF model needs a thread pool)
+        "methods": ["moderation-mbert", "moderation-flashtext"],
     },
     "privacy-input-guard": {
         "type": "privacy",

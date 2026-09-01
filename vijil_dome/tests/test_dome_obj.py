@@ -26,7 +26,7 @@ TEST_CONFIG = {
     "prompt-injection": {
         "type": "security",
         "early-exit": False,
-        "methods": ["prompt-injection-deberta-v3-base", "security-llm"],
+        "methods": ["prompt-injection-mbert", "security-llm"],
         "security-llm": {"model_name": "gpt-4o"},
     },
     "input-toxicity": {"type": "moderation", "methods": ["moderations-oai-api"]},

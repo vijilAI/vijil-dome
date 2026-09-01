@@ -169,10 +169,32 @@ class HFBaseModel(DetectionMethod, ABC):
         )
         model_tokenizer_name = tokenizer_name or model_name
         resolved_tokenizer = resolve_model_path(model_tokenizer_name)
+        # A detector may name a tokenizer that lives in a *different* repo from
+        # its weights — the ModernBERT finetunes all pass
+        # tokenizer_name="answerdotai/ModernBERT-base". Each of them also ships
+        # its own copy of that tokenizer beside the weights, so when the model
+        # came from disk and the named tokenizer repo did not, read the
+        # tokenizer out of the model directory. Without this, syncing a model
+        # to disk actively breaks it: is_local flips local_files_only on, and
+        # that offline flag is then applied to a base repo that was never
+        # synced, so an air-gapped pod fails to initialize the detector on a
+        # file it already has.
+        if is_local and not os.path.isdir(resolved_tokenizer):
+            if (Path(resolved) / "tokenizer.json").exists():
+                logger.info(
+                    "Tokenizer repo %s is not on disk; using the tokenizer "
+                    "shipped with the local model at %s",
+                    model_tokenizer_name,
+                    resolved,
+                )
+                resolved_tokenizer = resolved
+        # Offline-ness follows the tokenizer, not the model: a local model must
+        # never force a Hub-only tokenizer into local_files_only mode.
+        tokenizer_local_only = local_files_only or os.path.isdir(resolved_tokenizer)
         try:
             self.tokenizer = AutoTokenizer.from_pretrained(
                 resolved_tokenizer,
-                local_files_only=effective_local_only,
+                local_files_only=tokenizer_local_only,
                 trust_remote_code=trust_remote_code,
             )
         except ValueError:
@@ -186,7 +208,7 @@ class HFBaseModel(DetectionMethod, ABC):
             # become VERY_LARGE_INTEGER and cls/sep/bos/eos would be None).
             tokenizer_json = Path(resolved_tokenizer) / "tokenizer.json"
             if not tokenizer_json.exists():
-                if effective_local_only:
+                if tokenizer_local_only:
                     raise
                 from huggingface_hub import hf_hub_download
                 tokenizer_json = Path(
@@ -196,7 +218,7 @@ class HFBaseModel(DetectionMethod, ABC):
             # local vocabulary is never described by a Hub config (or the
             # reverse) when only one of the two is present locally.
             config = _read_tokenizer_config(
-                tokenizer_json.parent, model_tokenizer_name, effective_local_only
+                tokenizer_json.parent, model_tokenizer_name, tokenizer_local_only
             )
             replayed = _replayable_tokenizer_kwargs(config)
             logger.info(

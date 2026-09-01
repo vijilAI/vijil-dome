@@ -80,7 +80,7 @@ DEFAULT_SAFEGUARD_BASE_URL = "https://api.groq.com/openai/v1"
 DEFAULT_SAFEGUARD_MODEL = "openai/gpt-oss-safeguard-20b"
 
 # Default model name on Vijil's inference endpoint (matches HuggingFace).
-DEFAULT_VIJIL_INFERENCE_PI_MODEL = "vijil/prompt-injection-v4-b2-20260815"
+DEFAULT_VIJIL_INFERENCE_PI_MODEL = "vijil/prompt-injection-v5-20260827"
 
 
 # ----------------------------------------------------------------------
@@ -105,11 +105,18 @@ class MBertPromptInjectionModel(HFBaseModel):
         Parameters
         ----------
         score_threshold:
-            Injection probability above which input is flagged.
-            Default 0.5 — vijil/prompt-injection-v4-b2-20260815 separates
-            the classes cleanly (benign product traffic peaks ~0.07,
-            injections land >0.95), so the extra margin the previous
-            model needed buys nothing here.
+            Model score at or above which input is flagged.
+
+            The score is a raw softmax output, **not a calibrated
+            probability**: it does not estimate how likely the input is
+            to be an injection, and it can be overconfident under
+            distribution shift. Training uses label smoothing, which
+            discourages extreme logits — on the v5 held-out set no score
+            exceeded ~0.98 — but that is observed behaviour, not a
+            guaranteed bound. No fixed benign/attack score range holds
+            across input distributions, so pick an operating point from
+            a threshold sweep run against traffic that resembles yours
+            rather than from a documented range.
         truncation:
             Whether to truncate inputs exceeding *max_length*.
         max_length:

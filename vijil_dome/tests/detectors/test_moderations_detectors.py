@@ -88,6 +88,15 @@ _skip_no_harmfulness_model = pytest.mark.skipif(
     reason="vijil/prompt-harmfulness-detector not available locally",
 )
 
+# The DeBERTa toxicity scorer (cooperleong00/deberta-v3-large_toxicity-scorer,
+# ~1.7 GB) is not synced from S3 and is superseded by MODERATION_MBERT.
+# Set VIJIL_TEST_LEGACY_MODELS=1 to run it locally.
+_skip_legacy_models = pytest.mark.skipif(
+    not os.environ.get("VIJIL_TEST_LEGACY_MODELS"),
+    reason="downloads a legacy Hub model; set VIJIL_TEST_LEGACY_MODELS=1 to run",
+)
+
+
 _skip_no_mbert_model = pytest.mark.skipif(
     not _model_available("vijil/vijil_dome_toxic_content_detection"),
     reason="vijil/vijil_dome_toxic_content_detection not available locally",
@@ -142,6 +151,7 @@ async def test_moderation_detection_llm():
 
 
 @pytest.mark.asyncio
+@_skip_legacy_models
 async def test_moderation_detection_deberta():
     # Moderation via DeBERTa toxicity model
     deberta_detect_with_time = await DetectionFactory.get_detect_with_time(

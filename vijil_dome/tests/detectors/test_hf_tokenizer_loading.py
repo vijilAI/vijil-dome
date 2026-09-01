@@ -16,7 +16,7 @@
 
 """Tokenizer loading for HuggingFace-backed detectors.
 
-``vijil/prompt-injection-v4-b2-20260815`` ships a tokenizer_config.json written by
+``vijil/prompt-injection-v5-20260827`` ships a tokenizer_config.json written by
 transformers 5.x: ``tokenizer_class: "TokenizersBackend"``, which transformers
 4.x cannot resolve, and ``extra_special_tokens`` as a list, which 4.x cannot
 consume. AutoTokenizer therefore raises and ``HFBaseModel`` falls back to
@@ -27,9 +27,13 @@ tokenizer_config is replayed rather than dropped.
 
 import json
 from pathlib import Path
+from unittest.mock import MagicMock, patch
 
 import pytest
 
+from vijil_dome.detectors.methods.pi_hf_mbert import (
+    DEFAULT_VIJIL_INFERENCE_PI_MODEL,
+)
 from vijil_dome.detectors.utils.hf_model import (
     MODEL_CACHE_DIR,
     _read_tokenizer_config,
@@ -137,6 +141,102 @@ class TestReadTokenizerConfig:
         assert config["model_max_length"] == 1234
 
 
+class TestTokenizerFromADifferentRepo:
+    """A detector may name a tokenizer that lives in another repo.
+
+    The ModernBERT finetunes all pass tokenizer_name="answerdotai/ModernBERT-base"
+    while shipping their own copy of that tokenizer beside the weights. Syncing
+    such a model to disk used to break it: the model resolving locally flipped
+    local_files_only on, and that offline flag was then applied to a base repo
+    nothing had synced, so every load raised OfflineModeIsEnabled on a file the
+    model directory already had.
+    """
+
+    @staticmethod
+    def _local_model(tmp_path, *, with_tokenizer: bool):
+        model_dir = tmp_path / "vijil" / "some-detector"
+        model_dir.mkdir(parents=True)
+        (model_dir / "config.json").write_text("{}")
+        if with_tokenizer:
+            (model_dir / "tokenizer.json").write_text("{}")
+        return model_dir
+
+    @staticmethod
+    def _build(monkeypatch, tmp_path, **kwargs):
+        """Instantiate HFBaseModel with both from_pretrained calls mocked."""
+        from vijil_dome.detectors.utils import hf_model
+
+        monkeypatch.setattr(hf_model, "MODEL_CACHE_DIR", str(tmp_path))
+
+        class _Concrete(hf_model.HFBaseModel):
+            async def detect(self, dome_input):  # pragma: no cover - never called
+                raise NotImplementedError
+
+        with patch.object(
+            hf_model, "AutoModelForSequenceClassification"
+        ) as model_cls, patch.object(hf_model, "AutoTokenizer") as tokenizer_cls:
+            model_cls.from_pretrained.return_value = MagicMock()
+            tokenizer_cls.from_pretrained.return_value = MagicMock()
+            _Concrete(**kwargs)
+            return tokenizer_cls.from_pretrained.call_args
+
+    def test_local_model_supplies_the_tokenizer_its_repo_lacks(
+        self, monkeypatch, tmp_path
+    ):
+        model_dir = self._local_model(tmp_path, with_tokenizer=True)
+
+        args, kwargs = self._build(
+            monkeypatch,
+            tmp_path,
+            model_name="vijil/some-detector",
+            tokenizer_name="answerdotai/ModernBERT-base",
+        )
+
+        assert args[0] == str(model_dir)
+        assert kwargs["local_files_only"] is True
+
+    def test_hub_tokenizer_is_not_forced_offline_by_a_local_model(
+        self, monkeypatch, tmp_path
+    ):
+        """No tokenizer.json beside the weights: the named repo is still the
+        only source, so it must be allowed to reach the Hub."""
+        self._local_model(tmp_path, with_tokenizer=False)
+
+        args, kwargs = self._build(
+            monkeypatch,
+            tmp_path,
+            model_name="vijil/some-detector",
+            tokenizer_name="answerdotai/ModernBERT-base",
+        )
+
+        assert args[0] == "answerdotai/ModernBERT-base"
+        assert kwargs["local_files_only"] is False
+
+    def test_explicit_local_files_only_is_still_honoured(self, monkeypatch, tmp_path):
+        self._local_model(tmp_path, with_tokenizer=False)
+
+        _, kwargs = self._build(
+            monkeypatch,
+            tmp_path,
+            model_name="vijil/some-detector",
+            tokenizer_name="answerdotai/ModernBERT-base",
+            local_files_only=True,
+        )
+
+        assert kwargs["local_files_only"] is True
+
+    def test_tokenizer_defaults_to_the_model_repo(self, monkeypatch, tmp_path):
+        """With no tokenizer_name, nothing changes: the model dir is used."""
+        model_dir = self._local_model(tmp_path, with_tokenizer=True)
+
+        args, kwargs = self._build(
+            monkeypatch, tmp_path, model_name="vijil/some-detector"
+        )
+
+        assert args[0] == str(model_dir)
+        assert kwargs["local_files_only"] is True
+
+
 def _model_available(model_id: str) -> bool:
     """True if the model is on disk (S3-synced or HF cached). No network calls.
 
@@ -157,9 +257,11 @@ def _model_available(model_id: str) -> bool:
         return False
 
 
+# The model the fixture below actually loads: guarding on anything else lets
+# these tests skip green on a runner that has the current detector default.
 _skip_no_pi_model = pytest.mark.skipif(
-    not _model_available("vijil/prompt-injection-v4-b2-20260815"),
-    reason="vijil/prompt-injection-v4-b2-20260815 not available locally",
+    not _model_available(DEFAULT_VIJIL_INFERENCE_PI_MODEL),
+    reason=f"{DEFAULT_VIJIL_INFERENCE_PI_MODEL} not available locally",
 )
 
 
