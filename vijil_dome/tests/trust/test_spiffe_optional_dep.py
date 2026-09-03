@@ -106,10 +106,14 @@ def test_pyproject_declares_spiffe_optional_in_identity_extra() -> None:
     )
 
 
-def test_poetry_lock_pins_spiffe_below_cap() -> None:
+def test_poetry_lock_pins_spiffe_above_floor() -> None:
     lock = _load_toml("poetry.lock")
     spiffe = next((p for p in lock["package"] if p["name"] == "spiffe"), None)
     assert spiffe is not None, "spiffe not resolved into poetry.lock"
     parts = tuple(int(x) for x in spiffe["version"].split(".")[:3])
-    # Capped < 0.2.4 (0.2.4+ protobuf gencode conflicts with the OTEL pins; DOME-168).
-    assert parts < (0, 2, 4), f"spiffe {spiffe['version']} violates the < 0.2.4 cap"
+    # Was capped < 0.2.4 (0.2.4+ protobuf gencode conflicted with the OTEL
+    # stack's protobuf < 6.0 pin; DOME-168). The 2026-09 security bump moved
+    # the OTEL stack to protobuf 6.x-compatible releases, so the cap was
+    # lifted in favor of a floor at 0.3.0 (cryptography >= 46, no upper
+    # bound, needed to clear GHSA-g6cj-pr64-35w5 / -jwv3-5hgf-82ww).
+    assert parts >= (0, 3, 0), f"spiffe {spiffe['version']} is below the 0.3.0 floor"
