@@ -23,7 +23,7 @@ from vijil_dome.detectors import (
 )
 from vijil_dome.types import DomePayload
 import torch
-from transformers import GPT2LMHeadModel, GPT2TokenizerFast
+from transformers import AutoModelForCausalLM, AutoTokenizer
 
 # Heuristic-based detectors for jailbreaks using GPT-2 perplexity
 # See: https://docs.nvidia.com/nemo/guardrails/user_guides/guardrails-library.html#length-per-perplexity
@@ -45,8 +45,11 @@ class PerplexityBaseModel(DetectionMethod):
         elif torch.backends.mps.is_available():
             self.device = "mps"
 
-        self.model = GPT2LMHeadModel.from_pretrained(model_id).to(self.device)
-        self.tokenizer = GPT2TokenizerFast.from_pretrained(model_id)
+        # transformers 5.x mistypes PreTrainedModel.to via functools._Wrapped
+        # (binds `self` as a positional device/dtype arg instead of the
+        # implicit receiver); runtime behavior is correct, this is a stub bug.
+        self.model = AutoModelForCausalLM.from_pretrained(model_id).to(self.device)  # type: ignore[arg-type]
+        self.tokenizer = AutoTokenizer.from_pretrained(model_id)
         self.stride_length = stride_length
 
     def get_perplexity(self, input_string: str):

@@ -25,7 +25,7 @@ HuggingFace pipeline.
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING, List
+from typing import TYPE_CHECKING, List, cast
 
 if TYPE_CHECKING:
     from transformers import PreTrainedTokenizerBase
@@ -104,7 +104,10 @@ def chunk_text(
     while start < len(token_ids):
         end = min(start + usable, len(token_ids))
         window_ids = token_ids[start:end]
-        chunk = tokenizer.decode(window_ids, skip_special_tokens=True)
+        # window_ids is a single (non-batched) id sequence, so decode()
+        # always returns str at runtime; the transformers 5.x stub widened
+        # the return type to str | list[str] to also cover batched input.
+        chunk = cast(str, tokenizer.decode(window_ids, skip_special_tokens=True))
         chunks.append(chunk)
         if end >= len(token_ids):
             break

@@ -66,6 +66,7 @@ Input format and chunking:
 import asyncio
 import logging
 import os
+from typing import cast
 
 import httpx
 
@@ -241,7 +242,10 @@ class StereotypeEEOCBase(HFBaseModel):
         """Decode a list of token ids, returning an empty string when empty."""
         if not ids:
             return ""
-        return self.tokenizer.decode(ids, skip_special_tokens=True)
+        # ids is a single (non-batched) id sequence, so decode() always
+        # returns str at runtime; the transformers 5.x stub widened the
+        # return type to str | list[str] to also cover batched input.
+        return cast(str, self.tokenizer.decode(ids, skip_special_tokens=True))
 
     def _build_chunks(
         self, prompt_text: str, response_text: str
