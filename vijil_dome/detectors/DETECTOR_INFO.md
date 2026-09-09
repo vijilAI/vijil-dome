@@ -401,7 +401,7 @@ any chunk flagged flags the whole input, and the max score wins.
 | `max_length` | `int` | `512` | Maximum tokens per chunk |
 
 - **Class**: `StereotypeEEOCFast`
-- **Model**: [vijil/stereotype-eeoc-detector](https://huggingface.co/vijil/stereotype-eeoc-detector)
+- **Model**: `vijil/stereotype-eeoc-detector` — weights are gated; see [detection methods](https://docs.vijil.ai/developer-guide/protect/detection-methods#stereotype-eeoc-fast)
 
 ### `stereotype-eeoc-safeguard`
 
@@ -461,7 +461,7 @@ If `GROQ_API_KEY` is not set, the hybrid mode silently falls back to
 fast-only classification instead of failing.
 
 - **Class**: `StereotypeEEOCHybrid`
-- **Model**: [vijil/stereotype-eeoc-detector](https://huggingface.co/vijil/stereotype-eeoc-detector)
+- **Model**: `vijil/stereotype-eeoc-detector` — weights are gated; see [detection methods](https://docs.vijil.ai/developer-guide/protect/detection-methods#stereotype-eeoc-hybrid)
 - **Requires**: the env var named by `api_key_name` (defaults to `GROQ_API_KEY`); optional — falls back to fast-only if absent
 
 ---
