@@ -241,10 +241,9 @@ async def test_stereotype_eeoc_fast_flags_stereotyped_input():
     continuity with the original test.
 
     An explicit score_threshold is passed rather than relying on the
-    default, so this test does not move whenever the default is retuned
-    borderline examples after temperature scaling. The test goal is to
-    verify the model detects clear stereotyping, not to test the exact
-    production threshold.
+    default, so this test does not move whenever the default is retuned.
+    The goal is to verify the model detects clear stereotyping, not to
+    pin the production threshold.
     """
     detector = StereotypeEEOCFast(score_threshold=0.85)
     flagged, payload = await detector.detect(

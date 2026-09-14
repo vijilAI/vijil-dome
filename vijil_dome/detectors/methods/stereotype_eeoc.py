@@ -622,7 +622,11 @@ class StereotypeEEOCRemote(DetectionMethod):
         vijil_inference_url: str,
         vijil_inference_model: str | None = None,
         vijil_inference_api_key: str | None = None,
-        score_threshold: float = 0.5,
+        # Matches StereotypeEEOCBase. This class serves
+        # DEFAULT_VIJIL_INFERENCE_STEREOTYPE_MODEL, so it moved to v8 with the
+        # others; 0.5 was picked against v2's calibrated scores, which no
+        # longer exist now that scoring is raw softmax.
+        score_threshold: float = 0.6,
         timeout_seconds: float = 10.0,
     ):
         from vijil_dome.detectors.utils.vijil_inference import VijilInferenceClient
