@@ -49,8 +49,8 @@ def resolve_model_path(model_name: str) -> str:
     The convention: if ``model_name`` looks like an HF repo ID (contains
     a ``/`` but is not an absolute path), check whether a matching
     directory exists under ``MODEL_CACHE_DIR``.  For example,
-    ``vijil/stereotype-eeoc-detector`` resolves to
-    ``/models/vijil/stereotype-eeoc-detector`` when that directory
+    ``vijil/stereotype-detector-v8-20260911`` resolves to
+    ``/models/vijil/stereotype-detector-v8-20260911`` when that directory
     contains a ``config.json``.
     """
     if os.path.isabs(model_name) or os.path.isdir(model_name):

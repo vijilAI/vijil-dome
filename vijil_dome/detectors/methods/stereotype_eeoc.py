@@ -17,7 +17,7 @@
 """
 EEOC Stereotype Detection — Three modes:
 
-  fast:      ModernBERT binary classifier (<5ms, F1=0.923)
+  fast:      ModernBERT binary classifier (<5ms, PolyGuard workplace AUC 0.976)
   safeguard: GPT-OSS-Safeguard-20B via Groq API (~200ms, ~100% accuracy)
   hybrid:    ModernBERT first, Safeguard on low-confidence (~5ms avg)
 
@@ -126,11 +126,6 @@ _SEP_STRING_TOKEN_BUDGET = 6
 # Model special-token overhead (CLS + SEP emitted by the tokenizer).
 _SPECIAL_TOKEN_OVERHEAD = 2
 
-# Temperature scaling constant, fit on the v2 validation set via NLL
-# minimization. T > 1 softens overconfident scores so that the 0.90
-# threshold delivers ~50% PPV at 2.4% production prevalence.
-# See vijil-distillation/docs/base-rate-analysis.md for the derivation.
-_CALIBRATION_TEMPERATURE = 1.237
 
 # The safeguard endpoint is OpenAI-compatible. Groq is the default, but
 # callers can point at any OpenAI-compatible `/chat/completions` endpoint
@@ -141,7 +136,7 @@ DEFAULT_SAFEGUARD_BASE_URL = "https://api.groq.com/openai/v1"
 DEFAULT_SAFEGUARD_MODEL = "openai/gpt-oss-safeguard-20b"
 
 # Default model name on Vijil's inference endpoint (matches HuggingFace).
-DEFAULT_VIJIL_INFERENCE_STEREOTYPE_MODEL = "vijil/stereotype-eeoc-detector"
+DEFAULT_VIJIL_INFERENCE_STEREOTYPE_MODEL = "vijil/stereotype-detector-v8-20260911"
 
 
 class StereotypeEEOCBase(HFBaseModel):
@@ -149,21 +144,21 @@ class StereotypeEEOCBase(HFBaseModel):
 
     def __init__(
         self,
-        model_name: str = "vijil/stereotype-eeoc-detector",
+        model_name: str = "vijil/stereotype-detector-v8-20260911",
         # Load the tokenizer from the upstream ModernBERT repo rather than
-        # from the fine-tuned weights. The v2 model's tokenizer_config.json
-        # references a wrapper class ("TokenizersBackend") that transformers
-        # cannot resolve at load time. The vocabulary is identical to
+        # from the fine-tuned weights. v8 ships a valid tokenizer (v2's
+        # tokenizer_config.json referenced an unresolvable wrapper class), but
+        # this is the path v8 was validated against, so keep it. Vocabulary is identical to
         # answerdotai/ModernBERT-base (we fine-tuned on top), so loading the
         # upstream tokenizer produces the same token ids without the config
         # compatibility issue. This mirrors how pi_hf_mbert handles the
         # same situation.
         tokenizer_name: str = "answerdotai/ModernBERT-base",
-        # Default threshold tuned for production prevalence (2-11%).
-        # At 0.90 on calibrated scores: 59% recall, 1.54% FPR, ~49% PPV
-        # at 2.4% prevalence. Customers can lower this for higher recall
-        # (more false positives) or raise it for higher precision.
-        score_threshold: float = 0.90,
+        # From the v8 threshold sweep on the frozen eval set (raw scores):
+        # 0.5 -> 0.866 recall / 0.145 FPR; 0.6 -> 0.847 / 0.124;
+        # 0.7 -> 0.824 / 0.102; 0.9 -> 0.697 / 0.050. 0.6 keeps recall high
+        # while trimming false positives, and every regression case clears it.
+        score_threshold: float = 0.6,
         max_length: int = 1024,
     ):
         if not _HAS_TORCH:
@@ -196,34 +191,16 @@ class StereotypeEEOCBase(HFBaseModel):
     # Scoring helpers
     # ------------------------------------------------------------------
 
-    @staticmethod
-    def _calibrate(raw_score: float) -> float:
-        """Apply temperature scaling to a raw bias probability.
-
-        The v2 model is mildly overconfident (scores cluster closer to 0
-        and 1 than warranted). Dividing the logit by T=1.237 pulls the
-        extremes inward, which nearly halves the false positive rate at
-        high thresholds without retraining.
-
-        This is a monotonic transform — it preserves the ranking of
-        examples (AUC is unchanged) and only adjusts the *meaning* of
-        the score so that thresholds produce the expected PPV at
-        production prevalence.
-        """
-        import math
-        eps = 1e-7
-        clamped = max(eps, min(1 - eps, raw_score))
-        logit = math.log(clamped / (1 - clamped))
-        calibrated_logit = logit / _CALIBRATION_TEMPERATURE
-        return 1.0 / (1.0 + math.exp(-calibrated_logit))
-
     def _extract_stereotype_score(self, item: dict) -> float:
-        """Extract and calibrate the bias probability from classifier output."""
+        """Bias probability from classifier output, as a raw softmax score.
+
+        No temperature scaling: the old T=1.237 was fitted to the v2 model's
+        score distribution and distorts v8's. Pick an operating point from the
+        threshold sweep on the model card instead.
+        """
         if item["label"] in (1, "1", "LABEL_1", "biased", "stereotyped"):
-            raw = item["score"]
-        else:
-            raw = 1.0 - item["score"]
-        return self._calibrate(raw)
+            return item["score"]
+        return 1.0 - item["score"]
 
     @staticmethod
     def _split_payload(dome_input: DomePayload) -> tuple[str, str]:
@@ -427,7 +404,7 @@ class StereotypeEEOCBase(HFBaseModel):
 class StereotypeEEOCFast(StereotypeEEOCBase):
     """
     Fast EEOC stereotype detection using distilled ModernBERT.
-    <5ms latency, F1=0.923, zero API cost. Self-hosted.
+    <5ms latency, zero API cost. Self-hosted.
     """
 
     def __init__(self, **kwargs):

@@ -79,8 +79,8 @@ def _model_available(model_id: str) -> bool:
 
 
 _skip_no_stereotype_model = pytest.mark.skipif(
-    not _model_available("vijil/stereotype-eeoc-detector"),
-    reason="vijil/stereotype-eeoc-detector not available locally",
+    not _model_available("vijil/stereotype-detector-v8-20260911"),
+    reason="vijil/stereotype-detector-v8-20260911 not available locally",
 )
 
 _skip_no_harmfulness_model = pytest.mark.skipif(
