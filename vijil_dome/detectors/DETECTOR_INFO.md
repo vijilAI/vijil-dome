@@ -382,7 +382,10 @@ Vijil ModernBERT classifier for stereotypes and harmful generalizations about
 EEOC protected classes (Race/Color, Sex/Gender/Sexual Orientation, Religion,
 National Origin, Age 40+, Disability). Distilled from GPT-OSS-Safeguard-20B
 against a custom EEOC discrimination policy. Self-hosted, <5ms latency,
-F1=0.923, zero API cost.
+zero API cost. On the frozen v8 eval set: PolyGuard workplace AUC 0.976,
+HateCheck recall 0.863, and all 46 hand-written regression cases flagged with
+no false flags. Known limitation: HateCheck non-hateful FPR is 0.208, so it
+over-flags counter-speech and reclaimed slurs.
 
 Detects stereotyping within a *single* prompt or response. Does **not**
 detect counterfactual bias (whether varying only the protected class in a
@@ -397,11 +400,11 @@ any chunk flagged flags the whole input, and the max score wins.
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
-| `score_threshold` | `float` | `0.5` | Stereotype probability threshold |
-| `max_length` | `int` | `512` | Maximum tokens per chunk |
+| `score_threshold` | `float` | `0.6` | Stereotype probability threshold (raw softmax; see the model card's sweep) |
+| `max_length` | `int` | `1024` | Maximum tokens per chunk |
 
 - **Class**: `StereotypeEEOCFast`
-- **Model**: [vijil/stereotype-eeoc-detector](https://huggingface.co/vijil/stereotype-eeoc-detector)
+- **Model**: [vijil/stereotype-detector-v8-20260911](https://huggingface.co/vijil/stereotype-detector-v8-20260911)
 
 ### `stereotype-eeoc-safeguard`
 
@@ -445,8 +448,8 @@ parameters from both `stereotype-eeoc-fast` and `stereotype-eeoc-safeguard`.
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
 | `confidence_threshold` | `float` | `0.85` | Fast-stage confidence below which the input is escalated to Safeguard |
-| `score_threshold` | `float` | `0.5` | Stereotype probability threshold (fast stage) |
-| `max_length` | `int` | `512` | Maximum tokens per chunk (fast stage) |
+| `score_threshold` | `float` | `0.6` | Stereotype probability threshold (fast stage; raw softmax) |
+| `max_length` | `int` | `1024` | Maximum tokens per chunk (fast stage) |
 | `api_key` | `str` | `None` | API key; falls back to the env var named by `api_key_name` |
 | `api_key_name` | `str` | `"GROQ_API_KEY"` | Name of the env var to read the API key from when `api_key` is not supplied |
 | `base_url` | `str` | `"https://api.groq.com/openai/v1"` | OpenAI-compatible base URL (`/chat/completions` is appended) |
@@ -461,7 +464,7 @@ If `GROQ_API_KEY` is not set, the hybrid mode silently falls back to
 fast-only classification instead of failing.
 
 - **Class**: `StereotypeEEOCHybrid`
-- **Model**: [vijil/stereotype-eeoc-detector](https://huggingface.co/vijil/stereotype-eeoc-detector)
+- **Model**: [vijil/stereotype-detector-v8-20260911](https://huggingface.co/vijil/stereotype-detector-v8-20260911)
 - **Requires**: the env var named by `api_key_name` (defaults to `GROQ_API_KEY`); optional — falls back to fast-only if absent
 
 ---
