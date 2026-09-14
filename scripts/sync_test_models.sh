@@ -29,14 +29,14 @@ DEST="${1:-${VIJIL_MODEL_DIR:-/models}}"
 # defaults these mirror:
 #   prompt-injection-v5-20260827        pi_hf_mbert.DEFAULT_VIJIL_INFERENCE_PI_MODEL
 #   vijil_dome_toxic_content_detection  toxicity_mbert.DEFAULT_VIJIL_INFERENCE_TOXICITY_MODEL
-#   stereotype-eeoc-detector            stereotype_eeoc.DEFAULT_VIJIL_INFERENCE_STEREOTYPE_MODEL
+#   stereotype-detector-v8-20260911     stereotype_eeoc.DEFAULT_VIJIL_INFERENCE_STEREOTYPE_MODEL
 #   prompt-harmfulness-detector         prompt_harmfulness.ModernBertPromptHarmfulnessModel
 # Every other vijil/* repo in the bucket is either unreferenced by the tests
 # (pi_deberta_finetuned_11122024) or a serving-side LLM.
 MODELS=(
     prompt-injection-v5-20260827
     vijil_dome_toxic_content_detection
-    stereotype-eeoc-detector
+    stereotype-detector-v8-20260911
     prompt-harmfulness-detector
 )
 

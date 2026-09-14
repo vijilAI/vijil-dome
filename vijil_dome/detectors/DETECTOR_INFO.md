@@ -448,8 +448,8 @@ parameters from both `stereotype-eeoc-fast` and `stereotype-eeoc-safeguard`.
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
 | `confidence_threshold` | `float` | `0.85` | Fast-stage confidence below which the input is escalated to Safeguard |
-| `score_threshold` | `float` | `0.5` | Stereotype probability threshold (fast stage) |
-| `max_length` | `int` | `512` | Maximum tokens per chunk (fast stage) |
+| `score_threshold` | `float` | `0.6` | Stereotype probability threshold (fast stage; raw softmax) |
+| `max_length` | `int` | `1024` | Maximum tokens per chunk (fast stage) |
 | `api_key` | `str` | `None` | API key; falls back to the env var named by `api_key_name` |
 | `api_key_name` | `str` | `"GROQ_API_KEY"` | Name of the env var to read the API key from when `api_key` is not supplied |
 | `base_url` | `str` | `"https://api.groq.com/openai/v1"` | OpenAI-compatible base URL (`/chat/completions` is appended) |

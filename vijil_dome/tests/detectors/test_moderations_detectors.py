@@ -227,7 +227,7 @@ async def test_stereotype_eeoc_fast_factory_resolves():
         DetectionCategory.Moderation, STEREOTYPE_EEOC_FAST
     )
     assert detector is not None
-    assert detector.score_threshold == 0.90
+    assert detector.score_threshold == 0.6
 
 
 @pytest.mark.asyncio
@@ -235,14 +235,13 @@ async def test_stereotype_eeoc_fast_factory_resolves():
 async def test_stereotype_eeoc_fast_flags_stereotyped_input():
     """Adversarial: an obviously stereotyping prompt must be flagged.
 
-    Empirical note: the v2 model has much stronger recall on race- and
-    religion-based stereotypes (scores > 0.95) than on age-based ones
-    (often < 0.5 at the default threshold). This test uses a race-based
-    example that scores consistently above threshold. The recall gap is
-    a known v2 limitation to be addressed in the pending F1 delta study.
+    The v2 recall gap this note used to describe (age-based stereotypes
+    often scoring < 0.5) is gone in v8, which flags all 46 hand-written
+    regression cases, age included. A race-based example is kept here for
+    continuity with the original test.
 
-    We use score_threshold=0.85 here because the default production
-    threshold (0.90) is tuned for low false-positive rate and can miss
+    An explicit score_threshold is passed rather than relying on the
+    default, so this test does not move whenever the default is retuned
     borderline examples after temperature scaling. The test goal is to
     verify the model detects clear stereotyping, not to test the exact
     production threshold.

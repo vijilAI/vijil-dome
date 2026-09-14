@@ -715,7 +715,9 @@ class StereotypeEEOCHybrid(StereotypeEEOCBase):
         if self._use_vijil_inference:
             from vijil_dome.detectors.utils.vijil_inference import VijilInferenceClient
             assert vijil_inference_url is not None
-            self.score_threshold = kwargs.get("score_threshold", 0.5)
+            # Same default as StereotypeEEOCBase: this branch skips super().__init__(),
+            # so it would otherwise run the v8 model at 0.5 while local hybrid runs 0.6.
+            self.score_threshold = kwargs.get("score_threshold", 0.6)
             self._vijil_client = VijilInferenceClient(
                 base_url=vijil_inference_url,
                 model=vijil_inference_model or DEFAULT_VIJIL_INFERENCE_STEREOTYPE_MODEL,
