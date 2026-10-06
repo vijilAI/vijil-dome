@@ -113,6 +113,7 @@ def _ensure_builtins_loaded() -> None:
     # Import modules to trigger their @register_evaluator decorators
     import vijil_dome.controls.evaluators.regex  # noqa: F401
     import vijil_dome.controls.evaluators.list_eval  # noqa: F401
+    import vijil_dome.controls.evaluators.policy_rule_judge  # noqa: F401
 
     try:
         import vijil_dome.controls.evaluators.json_eval  # noqa: F401
