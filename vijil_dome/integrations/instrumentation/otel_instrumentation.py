@@ -218,7 +218,8 @@ def _set_dome_control_span_attributes(
     if violated_rule_ids:
         _safe_set_attribute(span, "rule.ids", list(violated_rule_ids))
         if isinstance(rule_verdicts, dict):
-            worst = rule_verdicts.get(violated_rule_ids[0], {})
+            worst_id = _pick_worst_violated_rule(violated_rule_ids, rule_verdicts)
+            worst = rule_verdicts.get(worst_id, {})
             consequence = worst.get("consequence")
             if isinstance(consequence, dict):
                 _safe_set_attribute(span, "consequence.action", consequence.get("action"))
@@ -228,8 +229,62 @@ def _set_dome_control_span_attributes(
         # Every rule the judge checked, not just the violated ones -- kept
         # as a JSON blob rather than N separate attributes since the rule
         # count per Control is open-ended.
-        serialized = json.dumps(rule_verdicts, default=str)
-        _safe_set_attribute(span, "rule.verdicts", serialized[:2048])
+        _safe_set_attribute(
+            span,
+            "rule.verdicts",
+            _bounded_rule_verdicts_json(rule_verdicts, violated_rule_ids or []),
+        )
+
+
+_SEVERITY_RANK = {"info": 0, "low": 1, "medium": 2, "high": 3, "critical": 4}
+
+
+def _pick_worst_violated_rule(
+    violated_rule_ids: list[str], rule_verdicts: dict[str, Any]
+) -> str:
+    """Highest-severity violated rule, not just the first in configured order.
+
+    Configured (bucket) order has nothing to do with severity -- a low
+    rule listed before a critical one in the same bucket would otherwise
+    make the span report consequence.severity=low, so severity-based
+    queries would miss the critical violation entirely.
+    """
+    def rank(rule_id: str) -> int:
+        verdict = rule_verdicts.get(rule_id) or {}
+        consequence = verdict.get("consequence") or {}
+        severity = consequence.get("severity") if isinstance(consequence, dict) else None
+        return _SEVERITY_RANK.get(severity, -1) if isinstance(severity, str) else -1
+
+    return max(violated_rule_ids, key=rank)
+
+
+def _bounded_rule_verdicts_json(
+    rule_verdicts: dict[str, Any],
+    violated_rule_ids: list[str],
+    max_len: int = 2048,
+) -> str:
+    """Serialize rule_verdicts as valid JSON within ~max_len, never by
+    slicing the serialized string (which can cut a JSON document in half
+    and leave consumers unable to parse the audit payload at all).
+
+    Violated rules are kept first -- they're what an audit actually needs
+    -- with any entries that don't fit replaced by an explicit
+    ``_omitted_rule_ids`` marker rather than silently vanishing.
+    """
+    ordered_ids = list(violated_rule_ids) + [
+        rid for rid in rule_verdicts if rid not in violated_rule_ids
+    ]
+    kept: dict[str, Any] = {}
+    omitted: list[str] = []
+    for rule_id in ordered_ids:
+        trial = {**kept, rule_id: rule_verdicts[rule_id]}
+        if kept and len(json.dumps(trial, default=str)) > max_len:
+            omitted.append(rule_id)
+            continue
+        kept = trial
+    if omitted:
+        kept["_omitted_rule_ids"] = omitted
+    return json.dumps(kept, default=str)
 
 
 def instrument_vijil_dome(vijil_dome: VijilDome, tracer: Tracer) -> None:

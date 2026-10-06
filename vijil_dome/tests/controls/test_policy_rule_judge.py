@@ -18,8 +18,11 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
+from vijil_dome.controls.engine import ControlEngine
 from vijil_dome.controls.evaluators import resolve_evaluator
 from vijil_dome.controls.evaluators.policy_rule_judge import PolicyRuleJudge
+from vijil_dome.controls.evaluators.system_one_client import SystemOneError
+from vijil_dome.controls.models import Step
 
 RULE_BLOCK = {
     "rule_id": "PRIV-001",
@@ -123,12 +126,67 @@ async def test_multiple_rules_only_violated_ones_listed():
 
 
 @pytest.mark.asyncio
-async def test_missing_score_treated_as_not_violated():
+async def test_missing_score_raises_instead_of_silently_passing():
+    """A missing score must not fall through to "not violated" -- that
+    would bypass ControlEngine's on_error entirely (a judge failure on a
+    block-bucket Control should fail_closed, not silently allow)."""
     evaluator = PolicyRuleJudge()
     with _patch_scores({}):  # System One dropped this rule_id from its answers
-        result = await evaluator.evaluate("text", {"rules": [RULE_BLOCK]})
-    assert result.matched is False
-    assert result.metadata["rule_verdicts"]["PRIV-001"]["noul"] is None
+        with pytest.raises(SystemOneError, match="PRIV-001"):
+            await evaluator.evaluate("text", {"rules": [RULE_BLOCK]})
+
+
+@pytest.mark.asyncio
+async def test_non_finite_score_raises():
+    evaluator = PolicyRuleJudge()
+    with _patch_scores({"PRIV-001": float("nan")}):
+        with pytest.raises(SystemOneError, match="PRIV-001"):
+            await evaluator.evaluate("text", {"rules": [RULE_BLOCK]})
+
+
+@pytest.mark.asyncio
+async def test_out_of_range_score_raises():
+    evaluator = PolicyRuleJudge()
+    with _patch_scores({"PRIV-001": 1.5}):
+        with pytest.raises(SystemOneError, match="PRIV-001"):
+            await evaluator.evaluate("text", {"rules": [RULE_BLOCK]})
+
+
+def _block_control(on_error: str) -> dict:
+    return {
+        "name": "block-bucket",
+        "condition": {
+            "selector": "output",
+            "evaluator": {"name": "policy-rule-judge", "config": {"rules": [RULE_BLOCK]}},
+        },
+        "action": {"decision": "deny", "on_error": on_error},
+    }
+
+
+@pytest.mark.asyncio
+async def test_judge_failure_is_fail_closed_for_a_deny_control():
+    """A block-bucket Control's own on_error=fail_closed must win when the
+    judge itself fails (not just when it judges "no violation")."""
+    engine = ControlEngine()
+    engine.load_controls([_block_control("fail_closed")])
+    with _patch_scores({}):  # judge raises SystemOneError
+        result = await engine.evaluate(
+            Step(type="llm", name="output", output="anything"), stage="post"
+        )
+    assert result.action == "deny"
+    assert result.matches[0].error is not None
+
+
+@pytest.mark.asyncio
+async def test_judge_failure_is_fail_open_when_configured():
+    engine = ControlEngine()
+    engine.load_controls([_block_control("fail_open")])
+    with _patch_scores({}):  # judge raises SystemOneError
+        result = await engine.evaluate(
+            Step(type="llm", name="output", output="anything"), stage="post"
+        )
+    assert result.action == "allow"
+    assert result.matches[0].error is not None
 
 
 @pytest.mark.asyncio

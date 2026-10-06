@@ -74,7 +74,11 @@ async def test_ask_noul_batch_empty_questions_short_circuits():
 
 @pytest.mark.asyncio
 async def test_missing_api_key_raises():
-    client = SystemOneClient(api_key=None)
+    # Explicit "" rather than None: None falls back to OPENROUTER_API_KEY from
+    # the environment, so this test would silently make a real unmocked
+    # request instead of exercising the missing-key branch on any machine
+    # that happens to have that variable set (e.g. this repo's own .env).
+    client = SystemOneClient(api_key="")
     with pytest.raises(SystemOneError, match="No API key"):
         await client.ask_noul_batch("text", {"R": {"instructions": "x?"}})
 

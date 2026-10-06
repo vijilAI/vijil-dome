@@ -41,11 +41,12 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import math
 from typing import Any
 
 from vijil_dome.controls.evaluators import register_evaluator
 from vijil_dome.controls.evaluators.base import Evaluator, EvaluatorResult
-from vijil_dome.controls.evaluators.system_one_client import SystemOneClient
+from vijil_dome.controls.evaluators.system_one_client import SystemOneClient, SystemOneError
 
 logger = logging.getLogger(__name__)
 
@@ -73,6 +74,31 @@ def _chunk(rules: list[dict[str, Any]], size: int) -> list[list[dict[str, Any]]]
     if size <= 0:
         return [rules]
     return [rules[i : i + size] for i in range(0, len(rules), size)]
+
+
+def _validate_scores(
+    rules: list[dict[str, Any]], noul_scores: dict[str, float]
+) -> None:
+    """Raise if System One didn't return a usable score for every rule.
+
+    A missing, non-finite, or out-of-[0,1]-range score previously fell
+    through to "not violated" (``score is not None and score >= threshold``),
+    which bypasses ``ControlEngine``'s ``on_error`` fail_open/fail_closed
+    entirely -- a judge failure on a ``block``-bucket Control would
+    silently *allow* instead of failing closed. Raising here instead lets
+    the engine's existing per-Control error policy decide, the same as
+    any other evaluator failure.
+    """
+    bad: list[str] = []
+    for rule in rules:
+        rule_id = rule.get("rule_id", "?")
+        score = noul_scores.get(rule_id)
+        if score is None or not math.isfinite(score) or not (0.0 <= score <= 1.0):
+            bad.append(f"{rule_id}={score!r}")
+    if bad:
+        raise SystemOneError(
+            f"System One returned missing or invalid scores for: {', '.join(bad)}"
+        )
 
 
 @register_evaluator("policy-rule-judge")
@@ -114,6 +140,7 @@ class PolicyRuleJudge(Evaluator):
         client = SystemOneClient(**client_kwargs)
 
         noul_scores = await self._score_all(client, text, rules, batch_size)
+        _validate_scores(rules, noul_scores)
 
         verdicts: dict[str, dict[str, Any]] = {}
         violated_rule_ids: list[str] = []
