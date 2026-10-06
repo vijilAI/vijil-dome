@@ -130,25 +130,69 @@ Grepped the whole repo case-insensitively for "console" — nothing fetches poli
 `ConsolePolicySource` refers to `vijil-dome-private`, a different repo the user
 explicitly asked not to use here.) This is net-new, not a port.
 
+### 3.6 Judge model: Jev / TypeSafe System One
+
+User-specified model, via OpenRouter: `typesafe/jev-1.13`
+(https://openrouter.ai/typesafe/jev-1.13), docs at
+https://docs.typesafe.ai/concepts/system-one. `OPENROUTER_API_KEY` goes in Dome's
+`.env`, same convention as `GROQ_API_KEY`/`TOGETHERAI_API_KEY` today.
+
+This is **not** a general chat model — it's TypeSafe's "System One" decision layer,
+which returns typed, calibrated decisions instead of generated text, via three
+primitives: **Choice** (pick from options), **Score** (numeric scale), **Noul**
+(boolean probability). The intended pattern is: build a "state" with context, pose
+multiple independent questions against it, get back typed answers with calibrated
+confidence. That maps onto our problem almost exactly — "did this turn violate rule
+PRIV-003" is a **Noul** question, one per approved rule, posed together against the
+same turn-as-state in a single call, with the rule's `severity`/confidence handled as
+a **Score**. That's a cleaner fit than `PolicyGptOssSafeguard`'s current approach
+(prompt-engineered JSON + regex-fallback parsing of a chat completion) for exactly the
+"N structured rules → N verdicts" shape this feature needs.
+
+Two open implementation details, not blockers for this scoping pass:
+- `vijil_dome/detectors/utils/llm_api_base.py`'s `LlmBaseDetector` only knows
+  `supported_hubs = [None, "openai", "together", "groq"]` and calls litellm's standard
+  chat-completions path — it has no concept of System One's typed primitives.
+  `"openrouter"` isn't in that list yet either.
+- TypeSafe's own docs describe a dedicated `POST /v1/systemone` shape (not
+  `/chat/completions`). Whether OpenRouter's hosted `typesafe/jev-1.13` exposes that
+  typed shape through OpenRouter, or normalizes it to a chat-completions-style
+  response that still carries the typed decision in the message, needs a quick check
+  against OpenRouter's actual request/response docs for this model before writing the
+  client. Recommend a small dedicated `SystemOneClient` (posts a Noul-per-rule batch,
+  gets calibrated probabilities back directly) rather than forcing this through
+  `LlmBaseDetector`'s generic litellm path — avoids re-adding the JSON-parsing
+  fragility we'd otherwise inherit from `PolicyGptOssSafeguard`.
+
 ## 4. Proposed architecture
+
+Revised from the first pass of this doc based on a steer: rather than Dome
+independently fetching raw `PolicyRule` rows and assembling its own Controls at
+runtime, **Console compiles the approved rule set into a single hosted artifact** —
+an AgentControl-shaped spec with the judge wiring already baked in — and Dome just
+points at that one artifact, cached the same way `dome_spec` already is (fetch once,
+then a cheap hash check before re-fetching). This gives us one artifact to consume
+from Console instead of two different fetch mechanisms (raw rules + hand-authored
+dome_spec).
 
 ```mermaid
 flowchart LR
     subgraph Console
         PR[PolicyRule rows<br/>status=approved]
-        API["GET /v1/policies/{id}/rules?status=approved"]
-        PR --> API
+        Compiler[PolicyRuleControlCompiler<br/>new: compiles approved rules<br/>into an AgentControl spec]
+        Spec[Compiled control spec<br/>content_hash, ETag-cacheable<br/>sibling artifact to dome_spec]
+        PR -->|on approve/reject/edit| Compiler --> Spec
     end
 
     subgraph Dome
-        Fetcher[ConsoleRuleSource<br/>new: utils/console_rule_fetcher.py]
-        Judge[PolicyRuleJudge<br/>new DetectionMethod,<br/>specializes PolicyGptOssSafeguard]
-        Control["Control (AgentControl)<br/>condition: dome:policy-rule-judge-&lt;policy_id&gt;"]
+        Fetcher["ConsoleControlSpecSource<br/>new: fetch on startup,<br/>then hash-check -&gt; refetch if changed"]
+        Judge["PolicyRuleJudge (Jev/System One)<br/>new DetectionMethod"]
+        Controls["Controls embedded in the spec<br/>bucketed by consequence.action,<br/>each condition: dome:policy-rule-judge"]
         Engine[ControlEngine]
-        API --> Fetcher
-        Fetcher -->|cached rule set| Judge
-        Judge --> Control
-        Control --> Engine
+        Spec -->|GET + If-None-Match| Fetcher
+        Fetcher -->|parsed spec incl. embedded rule data| Controls
+        Controls -->|evaluator calls| Judge
+        Controls --> Engine
     end
 
     Turn[Agent turn<br/>input/output/tool-call] --> Engine
@@ -158,60 +202,76 @@ flowchart LR
 
 ## 5. Net-new work
 
-### A. `ConsoleRuleSource` — rule fetcher (new)
+### A. Console: `PolicyRuleControlCompiler` + compiled-spec endpoint (new)
 
-`vijil_dome/utils/console_rule_fetcher.py`. Given `(policy_id, client_id,
-client_secret, console_url)`: exchanges for a JWT via `/v1/auth/token`, calls `GET
-/v1/policies/{policy_id}/rules?status=approved`, caches in memory/disk. The list
-endpoint has no ETag today (unlike `dome_spec`'s single-file `GET .../content`), so
-staleness detection needs either (a) a cheap polling interval (e.g. refresh every N
-minutes, matching `dome.refresh_policy()`'s existing manual-refresh UX for the
-`dome_spec` path), or (b) a small Console-side addition: surface `policy.updated_at` /
-`rules_count` on a lightweight metadata endpoint so Dome can cheaply check "did
-anything change" before paying for a full rule fetch. Recommend (b) as a fast follow,
-(a) for MVP.
+A new Console-side service (sibling to `DomeSpecService`, not a change to it — see
+rationale below) that takes a policy's approved `PolicyRule` rows and emits an
+AgentControl-shaped YAML: one `Control` per `consequence.action` bucket (§5C), each
+with the relevant rules' `rule_id`/`rule_type`/`natural_language`/`action`/`target`
+embedded directly in the `Control`'s evaluator config, condition pointing at
+`dome:policy-rule-judge`. Stored with a `content_hash` the same way `dome_spec`
+already computes one, exposed via a sibling endpoint
+(`GET /v1/policies/{policy_id}/compiled-control-spec`, supporting `If-None-Match` →
+`304` exactly like `dome_spec`'s existing `GET .../content`). Recompiled whenever the
+approved rule set changes (rule approved/rejected/edited while approved/deleted) —
+this is a server-side trigger, not a user-facing action, so Dome's cached hash is
+never stale for longer than the next poll interval.
 
-### B. `PolicyRuleJudge` — the judge detector (new, specializes existing code)
+**Why a sibling artifact and not folding this into `dome_spec`**: `dome_spec` today
+is specifically "a human already hand-authored and validated a real Cedar/Rego
+control spec, upload it as-is" (`validate_dome_spec_content` rejects file-path
+Cedar/Rego references, enforces depth/length limits meant for *human* input). An
+auto-compiled, judge-based spec is a different kind of thing — generated, not
+uploaded, and should never be silently overwritten by (or silently overwrite) a
+hand-authored one for the same policy. Keeping them as two independent, composable
+artifacts (both fetchable by Dome, both ETag-cacheable) avoids a product decision we
+don't need to force yet: whether/how the two coexist for a single policy.
 
-New Dome `DetectionMethod`, e.g. `"policy-rule-judge"`, built on `LlmBaseDetector`
-exactly like `PolicyGptOssSafeguard`. Config: `policy_id` (+ Console credentials, or a
-pre-fetched rule set from `ConsoleRuleSource`). Per invocation: build one prompt
-listing each approved rule's `rule_id`, `rule_type`, `natural_language`, `action`,
-`target`; ask the model to return, per `rule_id`, `{violated: bool, confidence: float,
-rationale: str}`; batch rules the same way `PolicySectionsDetector` batches sections
-(parallel chunks with fast-fail) if the rule count is large enough to threaten context
-limits. Model default: **groq / `openai/gpt-oss-safeguard-120b`**, matching the
-existing `PolicyGptOssSafeguard` default and Console's own `VIJIL_RULES_MODEL` default
-— but see open question on "Jev" below.
+### B. Dome: `ConsoleControlSpecSource` — compiled-spec fetcher (new)
 
-### C. Wiring into `AgentControl` and deciding what happens on a violation
+`vijil_dome/utils/console_control_spec_fetcher.py`, following the same shape as
+`dome_spec`'s existing conditional-GET pattern. Per the user's steer: **fetch on Dome
+startup** (one `VijilDome(policy=ConsoleControlSpecSource(client_id=..., client_secret=...,
+policy_id=...))`-style init, each deployer supplying their own Console credentials and
+the policy they want enforced — resolves the "whose credentials" open question from
+the first pass of this doc), then a cheap periodic **hash check** (conditional GET,
+`304` if unchanged) before paying for a full re-parse — exactly the `dome_spec`
+ETag/`content_hash` mechanism already built, reused rather than re-invented.
 
-Because the `dome:` bridge already exposes any `DetectionMethod` to the control schema
-for free, this needs **no changes to `controls/models.py` or `controls/engine.py`**.
-What needs a decision is the *aggregation* from "N rules, each with its own
-`consequence.action`" down to the one `ControlAction.decision` a `Control` emits per
-invocation (today's evaluator contract is one `EvaluatorResult` in, one decision out).
+### C. `PolicyRuleJudge` — the judge detector (new)
 
-Recommended shape: run the judge once per policy per turn (not once per rule — that's
-N LLM calls), get back the full per-rule verdict list, and author **one `Control` per
-`consequence.action` bucket**, each scoped to the same evaluator call but filtering
-which rules count toward its own verdict:
+New Dome `DetectionMethod`, e.g. `"policy-rule-judge"`, backed by Jev/System One
+(§3.6) rather than `LlmBaseDetector`'s generic chat-completions path. Takes the rules
+embedded in whichever bucketed `Control` invoked it (no separate Console call needed
+at judge time — the compiled spec already carries everything), poses one **Noul**
+question per rule ("did this turn violate rule `{rule_id}`: `{natural_language}`?")
+batched into a single System One call, gets back calibrated per-rule violation
+probabilities directly (no JSON-parsing fallback regex needed, unlike
+`PolicyGptOssSafeguard`). Batches rules the same way `PolicySectionsDetector`
+batches sections if a policy's approved-rule count threatens context/request limits.
 
-- A `block`-bucket control → `decision: deny`, `on_error: fail_closed` (unless a
-  verdict is missing/erroring and you'd rather fail open for availability — TBD).
-- `warn` / `flag`-bucket control → `decision: steer` or `observe` with the rule's
+### D. Wiring into `AgentControl` and deciding what happens on a violation
+
+Because the `dome:` bridge already exposes any `DetectionMethod` to the control
+schema for free, this needs **no changes to `controls/models.py` or
+`controls/engine.py`**. The compiled spec (§5A) is already bucketed by
+`consequence.action` at compile time, so each `Control`'s `action.decision` is fixed
+at generation time:
+
+- `block` **and** `escalate` → `decision: deny`, `on_error: fail_closed` (per the
+  user: escalate is treated as deny for enforcement purposes; it still gets a
+  higher-severity audit tag so downstream alerting/reporting can distinguish "routine
+  block" from "escalate-worthy block" even though the live decision is the same).
+- `warn` / `flag` → `decision: steer` or `observe`, with the rule's
   `message`/rationale as `steering_context`.
-- `log`-bucket → `observe` only, routed to audit.
-- `escalate` — no existing `ControlAction.decision` maps cleanly to "escalate to a
-  human"; either reuse `observe` + a higher-severity audit tag, or this is where a
-  small `controls/models.py` addition might actually be warranted (open question).
+- `log` → `observe` only, routed to audit.
 
 This keeps the "one evaluator call → one decision" invariant the engine already
-assumes, at the cost of running the same judge call once per bucket-control that's
-active for a given turn — fine as long as the judge result is cached per-turn across
-the buckets (single eval, multiple controls reading the cached `EvaluatorResult`).
+assumes; running the judge once per bucket-control active for a turn is fine as long
+as the judge result is cached per-turn across buckets (single Jev call, multiple
+controls reading the cached result).
 
-### D. Traceability
+### E. Traceability
 
 Each violation verdict should carry Console's real `rule_id` (not an invented one)
 through to Dome's audit/trace output (`trust/guard.py`'s `EnforcementResult`,
@@ -220,45 +280,53 @@ carries) so Console's reporting can eventually show "blocked because of rule
 PRIV-003, severity critical." Full write-back into Console (a "violations" log) is out
 of scope for this doc — flagging as a natural follow-on, not required for MVP.
 
-### E. Evaluation-side linkage
+### F. Evaluation-side linkage
 
 The user's ask also mentioned linking policies to evaluations, not just enforcement.
 That's largely **already covered**: Console's existing rule-driven custom-harness
 generation (approved rules → generated test harness) is the evaluation-side story.
 Nothing new is needed there for this scoping pass beyond making sure the same
-`PolicyRuleJudge` detector (or at least its prompt-construction logic) is reusable as a
-scoring function inside a harness run, not just as a live `Control`, so "did this
-transcript violate rule X" is computed identically whether it's asked live or after the
-fact.
+`PolicyRuleJudge` detector (or at least its Noul-question-construction logic) is
+reusable as a scoring function inside a harness run, not just as a live `Control`, so
+"did this transcript violate rule X" is computed identically whether it's asked live
+or after the fact.
 
 ## 6. Open questions
 
-1. **Judge model** — user said "maybe Jev for now"; best-guess mapping based on what
-   already exists in this repo and in Console is `gpt-oss-safeguard` via Groq (same
-   family `PolicyGptOssSafeguard` and Console's `VIJIL_RULES_MODEL` already default
-   to). Needs confirmation — "Jev" doesn't match anything found in either repo.
-2. Polling vs. push for rule freshness in Dome (§4A) — acceptable to start with a fixed
-   poll interval, or does Console need a cheap staleness-check endpoint first?
-3. Bucket-per-`consequence.action` control authoring (§4C) — acceptable, or do we want
-   a real engine-level "fan out to multiple actions from one evaluator call" primitive
-   instead of asking callers to author N controls?
-4. `escalate` consequence has no existing `ControlAction.decision` equivalent — new
-   decision type, or map onto `observe` + audit severity for now?
-5. Who provisions the `(client_id, client_secret)` Dome uses to call Console in a live
-   deployment, and where do they live (expect: same AWS Secrets Manager pattern already
-   used for `vijil-policy-rules-agent`'s LLM keys)?
-6. Should enforcement verdicts write back to Console at all for MVP, or is Dome's own
+Resolved in review (kept here for the record, not re-asking):
+judge model → Jev/System One via OpenRouter (§3.6); rule freshness → startup fetch +
+hash-check-then-refetch (§5B, reusing `dome_spec`'s ETag mechanism); `escalate` →
+`deny` (§5D); Console credentials → supplied per-deployment at Dome init, not shared
+(§5B).
+
+Still open:
+
+1. **Jev wire format**: does OpenRouter expose System One's typed `/v1/systemone`
+   shape for `typesafe/jev-1.13`, or only a chat-completions-normalized response that
+   still carries the typed decision in the message body? Needs a check against
+   OpenRouter's actual docs for this specific model before writing `SystemOneClient`
+   (§3.6) — not a design blocker, just an implementation-time detail.
+2. **Compiled-spec vs. hand-authored `dome_spec` coexistence** (§5A): recommending
+   they stay two independent, both-fetchable artifacts rather than one overloaded
+   `dome_specs` row — confirm that's the right call, since it does mean Dome
+   potentially merges two specs for the same policy rather than consuming one.
+3. Recompile trigger (§5A) — recommending auto-recompile on any approved-rule-set
+   change (approve/reject/edit/delete), computed server-side with no user-facing
+   button. Confirm that's sufficient, vs. wanting an explicit "publish" step a policy
+   owner controls (so a policy with rules still being reviewed doesn't partially
+   enforce mid-review).
+4. Should enforcement verdicts write back to Console at all for MVP, or is Dome's own
    audit trail sufficient until there's a concrete reporting consumer?
 
 ## 7. Suggested phasing
 
-- **MVP**: `ConsoleRuleSource` (poll-based) + `PolicyRuleJudge` detector (single batch,
-  no RAG) + one `block`-bucket `Control` + one `warn/flag`-bucket `Control`, wired via
-  the existing `dome:` bridge. Fixed judge model (pending open question 1).
-  No Console write-back; audit via existing trace output.
-- **Fast follow**: `log`/`escalate` buckets, rule-count-aware batching
-  (`PolicySectionsDetector`-style fast-fail) for policies with many rules, Console
-  staleness-check endpoint to replace fixed polling, write-back of violations to
-  Console telemetry.
+- **MVP**: Console's `PolicyRuleControlCompiler` + compiled-spec endpoint (§5A) +
+  Dome's `ConsoleControlSpecSource` (§5B, startup fetch + hash-check) +
+  `PolicyRuleJudge` on Jev/System One (§5C) + `block`/`escalate`→deny and
+  `warn`/`flag`→steer buckets (§5D). No Console write-back; audit via existing trace
+  output.
+- **Fast follow**: `log` bucket, rule-count-aware batching
+  (`PolicySectionsDetector`-style fast-fail) for policies with many rules, write-back
+  of violations to Console telemetry.
 - **Later**: reuse the same judge as an evaluation-time scorer (not just a live
   `Control`), unifying the enforcement and evaluation code paths.
