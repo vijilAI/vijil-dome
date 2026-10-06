@@ -41,6 +41,12 @@ class VijilDome:
         If ``False``, violations are logged but not enforced (shadow mode).
     agent_id:
         Optional agent identifier for audit/logging.
+    team_id:
+        Optional team identifier for audit/logging and multi-tenant
+        telemetry filtering (e.g. the ``team.id`` resource attribute
+        Console's trace search already relies on).
+    user_id:
+        Optional end-user identifier for audit/logging.
     """
 
     def __init__(
@@ -49,9 +55,13 @@ class VijilDome:
         policy: list[dict | Control] | str | Path | None = None,
         enforce: bool = True,
         agent_id: str | None = None,
+        team_id: str | None = None,
+        user_id: str | None = None,
     ) -> None:
         self._enforce = enforce
         self._agent_id = agent_id
+        self._team_id = team_id
+        self._user_id = user_id
         self._engine = ControlEngine()
 
         # Populated by create_from_s3(); let config_has_changed() detect an
@@ -126,7 +136,9 @@ class VijilDome:
         )
 
         controls_list = config_dict.get("controls", [])
-        vijil_dome = VijilDome(policy=controls_list, enforce=enforce, agent_id=agent_id)
+        vijil_dome = VijilDome(
+            policy=controls_list, enforce=enforce, agent_id=agent_id, team_id=team_id
+        )
 
         vijil_dome._s3_bucket = bucket
         vijil_dome._s3_key = _resolve_key(key, team_id, agent_id)
@@ -170,6 +182,14 @@ class VijilDome:
     @property
     def agent_id(self) -> str | None:
         return self._agent_id
+
+    @property
+    def team_id(self) -> str | None:
+        return self._team_id
+
+    @property
+    def user_id(self) -> str | None:
+        return self._user_id
 
     @property
     def enforce(self) -> bool:
