@@ -1,6 +1,6 @@
 # Policy Enforcement via LLM Judges — Scoping
 
-Status: **Scoping / not yet implemented**
+Status: **Scoping complete, ready for implementation tickets**
 Branch: `design/odrl-policy-enforcement`
 
 ## 1. Goal
@@ -263,8 +263,11 @@ flowchart LR
 
 ### A. Console: `PolicyGapCompiler` — proposes controls into the existing `DomeConfig` pending slot (new)
 
-A new Console-side service that takes `(agent_id, policy_id)`, reads the policy's
-approved `PolicyRule` rows, and writes a proposed `controls` list into that agent's
+A new Console-side service, **run on explicit trigger** (a button on the
+policy/agent page — not an automatic recompile on every rule change; keeps the
+"stale pending" risk at zero since nothing touches `active` until a human calls
+`apply()` anyway). Takes `(agent_id, policy_id)`, reads the policy's approved
+`PolicyRule` rows, and writes a proposed `controls` list into that agent's
 `DomeConfig.config_body` via the **existing** create/pending flow (§3.6) — no new
 artifact, no new HTTP endpoint for Dome to poll, no new ETag scheme. One `Control`
 per `consequence.action` bucket (§5D), each with the relevant rules'
@@ -275,20 +278,33 @@ create/`apply()` today, and `apply()` promotes it to active exactly like any oth
 dome config change — "propose, let a human adjust and override" falls out of the
 existing pending/active lifecycle for free.
 
-**"Mandatory" vs. proposed, and the evaluation-gap question (§3.7)**: true gap
-analysis — cross-referencing an agent's actual evaluation/report findings against
-which rule categories are and aren't already mitigated — needs a vocabulary mapping
-between Diamond/reports' `harness_id`/`code` taxonomy and `PolicyRule`'s
+**Mandatory vs. adjustable**: confirmed not worth building — every proposed control
+is just a plain, editable entry in the list; no locked/non-removable UI treatment.
+"Mandatory" only matters as "what gets proposed in the first place" (see below), not
+as a constraint on what a human can later change.
+
+**One agent enforcing multiple policies — confirmed, not hypothetical.** `controls`
+is a flat list, so merging is additive, but *re-running* the compiler needs to only
+touch what it generated before, not a human's edits or another policy's controls.
+Each generated `Control` should carry `annotations.source_policy_id` /
+`annotations.source_rule_id` (`Control.annotations` already exists and allows extra
+fields, §3.2) so `PolicyGapCompiler`, on trigger for policy X, can replace-in-place
+only the controls tagged `source_policy_id == X` within `config_body.controls`,
+leaving controls from other policies and anything a human added by hand alone.
+`DomeConfig` itself needs `source_policy_ids: list[UUID]` (not a single id, per §3.7)
+to track which policies an agent's config was ever compiled from.
+
+**"Mandatory" and the evaluation-gap question (§3.7)**: true gap analysis —
+cross-referencing an agent's actual evaluation/report findings against which rule
+categories are and aren't already mitigated — needs a vocabulary mapping between
+Diamond/reports' `harness_id`/`code` taxonomy and `PolicyRule`'s
 `category`/`action`/`target` taxonomy that **does not exist yet** (§3.7). Rather than
-block this feature on building that mapping, recommend an MVP simplification:
-"mandatory" = every approved rule whose `consequence.action` is `block` or
-`escalate` gets proposed unconditionally (no evaluation input needed to justify
-enforcing a rule the policy itself marked as a hard stop); `warn`/`flag`/`log` rules
-are proposed too but visually marked as adjustable. The optional `[+ findings]` input
-in §4's diagram — using an agent's evaluation history to narrow or prioritize which
-rules actually need a control, versus just "propose all approved rules" — is real
-value but is its own project (the taxonomy mapping) and should be a fast-follow, not
-part of this feature's first cut.
+block this feature on building that mapping, recommend an MVP simplification: every
+approved rule gets proposed on trigger, regardless of `consequence.action` — the
+optional `[+ findings]` input in §4's diagram (using evaluation history to narrow
+*which* rules actually need a control, rather than proposing all of them) is real
+value but is its own project and should be a fast-follow, not part of this feature's
+first cut.
 
 **Schema note**: `config_body` is an untyped dict server-side today (no Pydantic
 model validates it), so adding a `controls` key alongside the existing
@@ -404,51 +420,43 @@ or after the fact.
 
 ## 6. Open questions
 
-Resolved in review (kept here for the record, not re-asking):
-judge model → Jev/System One via OpenRouter, confirmed typed (not chat-completions)
-wire format (§3.5); rule freshness → reuse `DomeConfig`'s existing S3 TTL/ETag check,
-no new HTTP/hash endpoint (§3.6, §5B); `escalate` → `deny` (§5D); Console credentials
-→ supplied per-deployment, scoped to `(team_id, agent_id)` the same way `DomeConfig`
-already is, not shared (§5B); violation reporting → ride Dome's existing OTel
-instrumentation back to Console's already-configured collector, not a new write-back
-API (§5E); delivery artifact → reuse `DomeConfig.config_body`'s existing
-pending→apply→active lifecycle instead of a new hosted spec (§3.6, §4, §5A).
+All resolved in review:
 
-Still open:
+- Judge model → Jev/System One via OpenRouter, confirmed typed (not
+  chat-completions) wire format (§3.5).
+- Rule freshness → reuse `DomeConfig`'s existing S3 TTL/ETag check, no new HTTP/hash
+  endpoint (§3.6, §5B).
+- `escalate` → `deny` (§5D).
+- Console credentials → supplied per-deployment, scoped to `(team_id, agent_id)` the
+  same way `DomeConfig` already is, not shared (§5B).
+- Violation reporting → ride Dome's existing OTel instrumentation back to Console's
+  already-configured collector, not a new write-back API (§5E).
+- Delivery artifact → reuse `DomeConfig.config_body`'s existing
+  pending→apply→active lifecycle instead of a new hosted spec (§3.6, §4, §5A).
+- Recompile trigger → **on explicit trigger only**, no automatic recompile (§5A).
+- Multi-policy → **confirmed, one agent can enforce several policies at once**;
+  `PolicyGapCompiler` merges via `annotations.source_policy_id`-tagged
+  replace-in-place per policy, `DomeConfig.source_policy_ids` is a list (§5A).
+- Mandatory-vs-adjustable UI distinction → **not worth building**; every proposed
+  control is a plain, editable list entry (§5A).
 
-1. **Recompile/re-propose trigger** (§5A): when does `PolicyGapCompiler` run —
-   on-demand (a button on the policy or agent page), automatically whenever the
-   approved rule set changes, or both? Recommend on-demand for MVP (it writes to the
-   *pending* slot, not active, so there's no "stale enforcement" risk in waiting for
-   someone to ask) — a server-side auto-trigger is a fast-follow once the UX for
-   reviewing a freshly-(re)proposed pending config is nailed down.
-2. **Does one agent enforce more than one policy at once?** `DomeConfig` is 1:1 active
-   per agent (one `config.json`), but a team could plausibly want an agent to enforce
-   two unrelated policies (e.g. a privacy policy and a brand-safety policy)
-   simultaneously. If so, `PolicyGapCompiler` needs to merge proposed controls from
-   multiple policies into one `config_body.controls` list (straightforward, since
-   each policy's controls are already independently bucketed) and
-   `source_policy_ids` (§3.7) needs to be a list, not a single id — noting now so the
-   schema doesn't need a second migration later.
-3. Should the "mandatory for `block`/`escalate`, adjustable for everything else"
-   split (§5A) be visually distinguished in whatever UI edits the pending config
-   (e.g. mandatory rules locked/non-removable, others toggleable), or is "it's just a
-   list of controls, edit any of them" sufficient for a first pass?
+None outstanding — this doc is ready to break into implementation tickets.
 
 ## 7. Suggested phasing
 
-- **MVP**: Console's `PolicyGapCompiler` (§5A, no evaluation-findings input yet —
-  just "propose every approved rule's bucket") writing into the existing `DomeConfig`
-  pending slot + a `VijilDome` S3-aware constructor (§5B) + `PolicyRuleJudge` on
-  Jev/System One (§5C) + `block`/`escalate`→deny and `warn`/`flag`→steer buckets
-  (§5D) + the new `dome-control` OTel span with `policy.id`/`rule.id`/
-  `consequence.*` attributes, wired to whichever `DOME_TRACES_COLLECTOR_ENDPOINT`
-  the deployment already points at Console with (§5E) — no new Console ingestion
-  endpoint, no new hosted artifact, no new ETag scheme.
+- **MVP**: Console's `PolicyGapCompiler` (§5A — run on trigger, proposes every
+  approved rule from one or more policies, merged by `source_policy_id` tagging so
+  re-running it for one policy doesn't clobber another's controls or a human's
+  manual edits) writing into the existing `DomeConfig` pending slot + a `VijilDome`
+  S3-aware constructor (§5B) + `PolicyRuleJudge` on Jev/System One (§5C) +
+  `block`/`escalate`→deny and `warn`/`flag`→steer buckets (§5D) + the new
+  `dome-control` OTel span with `policy.id`/`rule.id`/`consequence.*` attributes,
+  wired to whichever `DOME_TRACES_COLLECTOR_ENDPOINT` the deployment already points
+  at Console with (§5E) — no new Console ingestion endpoint, no new hosted artifact,
+  no new ETag scheme.
 - **Fast follow**: `log` bucket, rule-count-aware batching
   (`PolicySectionsDetector`-style fast-fail) for policies with many rules, a Console
-  UI surface for querying enforcement spans by `policy.id`, auto-recompile trigger
-  (open question 1), multi-policy merge (open question 2).
+  UI surface for querying enforcement spans by `policy.id`.
 - **Later**: the harness/probe → policy-rule-category taxonomy mapping (§3.7) that
   would let `PolicyGapCompiler` actually use an agent's evaluation history to decide
   what's a gap, rather than proposing every approved rule; reuse the same judge as an
