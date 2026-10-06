@@ -54,6 +54,14 @@ class VijilDome:
         self._agent_id = agent_id
         self._engine = ControlEngine()
 
+        # Populated by create_from_s3(); let config_has_changed() detect an
+        # instance that wasn't created that way, mirroring Dome.create_from_s3.
+        self._s3_bucket: str | None = None
+        self._s3_key: str | None = None
+        self._s3_config_dict: dict[str, Any] | None = None
+        self._s3_aws_kwargs: dict[str, Any] | None = None
+        self._s3_cache_dir: str | None = None
+
         if isinstance(policy, (str, Path)):
             self._engine.load_controls_from_file(str(policy))
         elif isinstance(policy, list):
@@ -62,6 +70,97 @@ class VijilDome:
                 for c in policy
             ]
             self._engine.load_controls(defs)
+
+    @staticmethod
+    def create_from_s3(
+        bucket: str,
+        key: str | None = None,
+        team_id: str | None = None,
+        agent_id: str | None = None,
+        aws_access_key_id: str | None = None,
+        aws_secret_access_key: str | None = None,
+        aws_session_token: str | None = None,
+        region_name: str | None = None,
+        cache_dir: str | None = None,
+        cache_ttl_seconds: int = 300,
+        enforce: bool = True,
+    ) -> "VijilDome":
+        """Create a VijilDome instance from a config stored in S3.
+
+        Reads the same ``config.json`` Console's agent-scoped ``DomeConfig``
+        already writes (and the old :class:`~vijil_dome.Dome.Dome` class
+        already reads for its legacy ``input-guards``/``output-guards``
+        format) — this just also reads that document's ``controls`` key.
+        TTL/ETag caching is unchanged, reused as-is from
+        :func:`~vijil_dome.utils.config_loader.load_dome_config_from_s3`; see
+        ``docs/policy-enforcement/2026-10-06-policy-enforcement-scoping.md``
+        §3.6/§5B for why no new freshness mechanism was needed here.
+
+        The S3 key can be provided directly, or constructed from *team_id*
+        and *agent_id* using the standard path
+        ``teams/{team_id}/agents/{agent_id}/dome/config.json``.
+
+        The loaded config is cached locally and the S3 coordinates are
+        stored on the instance so that :meth:`config_has_changed` can later
+        check for remote updates.
+        """
+        from vijil_dome.utils.config_loader import (
+            _resolve_key,
+            load_dome_config_from_s3,
+        )
+
+        aws_kwargs = {
+            "aws_access_key_id": aws_access_key_id,
+            "aws_secret_access_key": aws_secret_access_key,
+            "aws_session_token": aws_session_token,
+            "region_name": region_name,
+        }
+        config_dict = load_dome_config_from_s3(
+            bucket=bucket,
+            key=key,
+            team_id=team_id,
+            agent_id=agent_id,
+            cache_dir=cache_dir,
+            cache_ttl_seconds=cache_ttl_seconds,
+            **aws_kwargs,
+        )
+
+        controls_list = config_dict.get("controls", [])
+        vijil_dome = VijilDome(policy=controls_list, enforce=enforce, agent_id=agent_id)
+
+        vijil_dome._s3_bucket = bucket
+        vijil_dome._s3_key = _resolve_key(key, team_id, agent_id)
+        vijil_dome._s3_config_dict = config_dict
+        vijil_dome._s3_aws_kwargs = aws_kwargs
+        vijil_dome._s3_cache_dir = cache_dir
+        return vijil_dome
+
+    def config_has_changed(self) -> bool:
+        """Check whether the S3 config has changed since this instance was created.
+
+        Only works for instances created via :meth:`create_from_s3`.
+
+        Returns:
+            ``True`` if the remote config differs from the one used to
+            create this instance, ``False`` otherwise.
+
+        Raises:
+            ValueError: If the instance was not created from S3.
+        """
+        from vijil_dome.utils.config_loader import config_has_changed as _config_has_changed
+
+        if self._s3_bucket is None or self._s3_key is None:
+            raise ValueError(
+                "config_has_changed() is only available for VijilDome instances "
+                "created via VijilDome.create_from_s3()."
+            )
+        return _config_has_changed(
+            local_config=self._s3_config_dict,  # type: ignore[arg-type]
+            bucket=self._s3_bucket,
+            key=self._s3_key,
+            cache_dir=self._s3_cache_dir,
+            **(self._s3_aws_kwargs or {}),
+        )
 
     @property
     def engine(self) -> ControlEngine:
