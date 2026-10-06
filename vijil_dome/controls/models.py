@@ -165,6 +165,18 @@ class ControlMatch(BaseModel):
     message: str = ""
     exec_time_ms: float = 0.0
     error: str | None = None
+    metadata: dict[str, Any] = Field(
+        default_factory=dict,
+        description=(
+            "EvaluatorResult.metadata from the leaf evaluator that decided "
+            "this control, when the condition is a single leaf (composite "
+            "and/or/not conditions leave this empty — see "
+            "ControlEngine._evaluate_control). Lets instrumentation (e.g. "
+            "the dome-control OTel span) surface evaluator-specific "
+            "details like rule_id/policy_id without ControlMatch needing "
+            "to know what any given evaluator returns."
+        ),
+    )
 
 
 class EvaluationResult(BaseModel):

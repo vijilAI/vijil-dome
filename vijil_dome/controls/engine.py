@@ -19,6 +19,7 @@ except ImportError:
     _re2_engine = None  # type: ignore[assignment]
     _SCOPE_HAS_RE2 = False
 
+from vijil_dome.controls.evaluators.base import EvaluatorResult
 from vijil_dome.controls.models import (
     ConditionNode,
     Control,
@@ -311,15 +312,34 @@ class ControlEngine:
         if step_data is None:
             step_data = step.model_dump()
         try:
-            triggered = await self._evaluate_condition(
-                control.condition, step, step_data
-            )
+            # A single-leaf condition's EvaluatorResult carries confidence
+            # and metadata (e.g. PolicyRuleJudge's violated rule_ids) that a
+            # bare composite-tree bool can't represent uniformly -- see
+            # ControlMatch.metadata's docstring. Composite conditions keep
+            # the pre-existing bool-only path unchanged.
+            if control.condition.is_leaf():
+                result = await self._evaluate_leaf_result(
+                    control.condition, step, step_data
+                )
+                triggered = result.matched
+                confidence = result.confidence
+                metadata = result.metadata
+                message = result.message
+            else:
+                triggered = await self._evaluate_condition(
+                    control.condition, step, step_data
+                )
+                confidence = 1.0
+                metadata = {}
+                message = ""
+
             return ControlMatch(
                 control_name=control.name,
                 triggered=triggered,
                 action=control.action if triggered else None,
-                confidence=1.0,
-                message=control.action.message or "" if triggered else "",
+                confidence=confidence,
+                message=(control.action.message or message) if triggered else message,
+                metadata=metadata,
                 exec_time_ms=_elapsed_ms(start),
             )
         except Exception as exc:
@@ -383,6 +403,13 @@ class ControlEngine:
         self, node: ConditionNode, step: Step,
         step_data: dict[str, Any],
     ) -> bool:
+        result = await self._evaluate_leaf_result(node, step, step_data)
+        return result.matched
+
+    async def _evaluate_leaf_result(
+        self, node: ConditionNode, step: Step,
+        step_data: dict[str, Any],
+    ) -> EvaluatorResult:
         if node.selector is None or node.evaluator is None:
             raise ValueError(
                 "Leaf condition must have both selector and evaluator"
@@ -390,11 +417,10 @@ class ControlEngine:
 
         value = resolve(step, node.selector, _step_data=step_data)
         if value is MISSING:
-            return False
+            return EvaluatorResult(matched=False, message="Selector did not resolve")
 
         evaluator = self._get_evaluator(node.evaluator.name)
-        result = await evaluator.evaluate(value, node.evaluator.config)
-        return result.matched
+        return await evaluator.evaluate(value, node.evaluator.config)
 
     def _get_evaluator(self, name: str) -> Any:
         if name not in self._evaluator_cache:
