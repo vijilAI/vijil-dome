@@ -271,14 +271,52 @@ assumes; running the judge once per bucket-control active for a turn is fine as 
 as the judge result is cached per-turn across buckets (single Jev call, multiple
 controls reading the cached result).
 
-### E. Traceability
+### E. Traceability — via OTel, not a new write-back API
 
-Each violation verdict should carry Console's real `rule_id` (not an invented one)
-through to Dome's audit/trace output (`trust/guard.py`'s `EnforcementResult`,
-and/or whatever the plain non-trust `VijilDome.guard_input/output` trace already
-carries) so Console's reporting can eventually show "blocked because of rule
-PRIV-003, severity critical." Full write-back into Console (a "violations" log) is out
-of scope for this doc — flagging as a natural follow-on, not required for MVP.
+Per a steer from review: violations should trigger *within* Dome and ride Dome's
+existing OTel instrumentation back to wherever it's configured to export to, rather
+than Dome calling a new Console "report a violation" endpoint. This is much less new
+work than it sounds, because the pipe already exists end-to-end:
+
+- `helm_charts/vijil-dome/values/secrets/example.yaml` (in vijil-console) already
+  defines exactly this convention for a standalone Dome deployment:
+  `ENABLE_DOME_INSTRUMENTATION`, `DOME_{METRICS,TRACES,LOGS}_COLLECTOR_ENDPOINT` +
+  `_TOKEN` (pointed at Console's own OTel ingestion, e.g.
+  `https://otel.dev05.vijil.ai/v1/traces`), and `AGENT_ID` / `USER_ID` / `TEAM_ID` as
+  resource attributes. Console's telemetry query layer
+  (`src/domains/telemetry/trace_models.py`) already does tenancy-filtered trace
+  search keyed on a verified **`team.id`** resource attribute (see its `CON-433`
+  comment) — i.e. "Dome telemetry shows up in Console, scoped to the right team" is
+  an already-solved, already-shipping problem for Dome's existing detectors.
+- Dome's `_add_darwin_detection_spans` (`vijil_dome/integrations/instrumentation/otel_instrumentation.py`)
+  already wraps every `Guardrail.scan`/`async_scan` call in a `dome-detection` span
+  with `team.id`/`agent.id`/`user.id` + `detection.label`/`score`/`method` attributes,
+  specifically so "Darwin's `TelemetryDetectionAdapter` can query them from Tempo."
+  Any detector plugged into an input/output `Guardrail` gets this for free today.
+
+**What's actually missing** for policy violations specifically:
+
+1. `GuardResult`/`GuardrailResult` (`vijil_dome/guardrails/__init__.py`) have a fixed
+   schema — `flagged`, `detection_score`, `triggered_methods`, no generic metadata
+   dict — so there's nowhere to carry `rule_id`/`policy_id`/`consequence.action` /
+   `severity` through `_set_darwin_span_attributes` today. And since we're wiring
+   `PolicyRuleJudge` through the **AgentControl** `Control`/`ControlEngine` path (§5D)
+   rather than a plain `Guardrail`, to get the deny/steer/observe decision semantics —
+   that path currently has **zero OTel span emission at all** (grepped
+   `controls/engine.py`/`controls/decorator.py` for `span`/`tracer`/`otel`: nothing).
+2. So this needs one small, net-new piece: a `dome-control` span (same shape as
+   `dome-detection`, same `_safe_set_attribute` helper from
+   `instrumentation/tracing.py`) emitted from `ControlEngine.evaluate()` or the
+   `@control` decorator, carrying `control.name`, `control.decision`
+   (deny/steer/observe), and — specific to this feature — `policy.id`, `rule.id`,
+   `rule.type`, `consequence.action`, `consequence.severity`, plus the existing
+   `team.id`/`agent.id`/`user.id`.
+3. `POLICY_ID` should join `AGENT_ID`/`TEAM_ID`/`USER_ID` as a resource attribute in
+   the same Dome deployment config, so "show me every enforcement decision for this
+   policy" is a plain Tempo/trace-search filter, the same way `team.id` already
+   enables per-team filtering.
+
+With those two additions, "feed back into Console" is just "point `DOME_TRACES_COLLECTOR_ENDPOINT` at Console's collector, same as any other Dome deployment already does" — no new Console-side ingestion endpoint, no new write-back API, and it's consistent with how every other Dome detection already surfaces in Console today.
 
 ### F. Evaluation-side linkage
 
@@ -297,7 +335,8 @@ Resolved in review (kept here for the record, not re-asking):
 judge model → Jev/System One via OpenRouter (§3.6); rule freshness → startup fetch +
 hash-check-then-refetch (§5B, reusing `dome_spec`'s ETag mechanism); `escalate` →
 `deny` (§5D); Console credentials → supplied per-deployment at Dome init, not shared
-(§5B).
+(§5B); violation reporting → ride Dome's existing OTel instrumentation back to
+Console's already-configured collector, not a new write-back API (§5E).
 
 Still open:
 
@@ -315,18 +354,19 @@ Still open:
    button. Confirm that's sufficient, vs. wanting an explicit "publish" step a policy
    owner controls (so a policy with rules still being reviewed doesn't partially
    enforce mid-review).
-4. Should enforcement verdicts write back to Console at all for MVP, or is Dome's own
-   audit trail sufficient until there's a concrete reporting consumer?
 
 ## 7. Suggested phasing
 
 - **MVP**: Console's `PolicyRuleControlCompiler` + compiled-spec endpoint (§5A) +
   Dome's `ConsoleControlSpecSource` (§5B, startup fetch + hash-check) +
   `PolicyRuleJudge` on Jev/System One (§5C) + `block`/`escalate`→deny and
-  `warn`/`flag`→steer buckets (§5D). No Console write-back; audit via existing trace
-  output.
+  `warn`/`flag`→steer buckets (§5D) + the new `dome-control` OTel span with
+  `policy.id`/`rule.id`/`consequence.*` attributes, wired to whichever
+  `DOME_TRACES_COLLECTOR_ENDPOINT` the deployment already points at Console with
+  (§5E) — no new Console ingestion endpoint needed.
 - **Fast follow**: `log` bucket, rule-count-aware batching
-  (`PolicySectionsDetector`-style fast-fail) for policies with many rules, write-back
-  of violations to Console telemetry.
+  (`PolicySectionsDetector`-style fast-fail) for policies with many rules, a Console
+  UI surface for querying enforcement spans by `policy.id` (the query-side equivalent
+  of what Darwin already does for `team.id`-scoped detection spans).
 - **Later**: reuse the same judge as an evaluation-time scorer (not just a live
   `Control`), unifying the enforcement and evaluation code paths.
