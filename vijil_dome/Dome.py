@@ -187,6 +187,16 @@ class Dome:
         self._s3_config_dict = None  # type: Optional[Dict]
         self._s3_aws_kwargs = None  # type: Optional[Dict]
         self._s3_cache_dir = None  # type: Optional[str]
+        # Console API origin tracking (set by create_from_api)
+        self._api_base_url = None  # type: Optional[str]
+        self._api_client_id = None  # type: Optional[str]
+        self._api_client_secret = None  # type: Optional[str]
+        self._api_agent_id = None  # type: Optional[str]
+        self._api_team_id = None  # type: Optional[str]
+        self._api_config_dict = None  # type: Optional[Dict]
+        self._api_cache_dir = None  # type: Optional[str]
+        self._api_access_token = None  # type: Optional[str]
+        self._api_token_expires_at = None  # type: Optional[float]
         # DOME-167: in enforce mode, content guards default to fail_closed so an unreachable
         # detector BLOCKS rather than silently passing; an explicit on-error in the config still
         # wins. A pre-built DomeConfig is taken as-is — its guards already carry their on-error.
@@ -297,30 +307,96 @@ class Dome:
         dome._s3_cache_dir = cache_dir
         return dome
 
-    def config_has_changed(self) -> bool:
-        """Check whether the S3 config has changed since this instance was created.
+    @staticmethod
+    def create_from_api(
+        client_id: str,
+        client_secret: str,
+        agent_id: str,
+        team_id: str,
+        base_url: Optional[str] = None,
+        cache_dir: Optional[str] = None,
+        cache_ttl_seconds: int = 300,
+        client: Optional[OpenAI] = None,
+        enforce: bool = True,
+    ) -> "Dome":
+        """Create a Dome instance from Console's API, instead of S3.
 
-        Only works for instances created via :meth:`create_from_s3`.
+        No S3 bucket name or AWS credentials needed. *client_id* and
+        *client_secret* are a Console API key -- mint one for the team on
+        Console's API Keys page (Profile > API Keys). See
+        :meth:`VijilDome.create_from_api` for the full fetch/auth flow this
+        shares.
+
+        The loaded config is cached locally and the API coordinates are
+        stored on the instance so that :meth:`config_has_changed` can
+        later check for remote updates.
+        """
+        from vijil_dome.utils.api_config_loader import (
+            DEFAULT_CONSOLE_API_BASE_URL,
+            load_dome_config_from_api,
+        )
+
+        resolved_base_url = base_url or DEFAULT_CONSOLE_API_BASE_URL
+        config_dict, access_token, token_expires_at = load_dome_config_from_api(
+            base_url=resolved_base_url,
+            client_id=client_id,
+            client_secret=client_secret,
+            agent_id=agent_id,
+            team_id=team_id,
+            cache_dir=cache_dir,
+            cache_ttl_seconds=cache_ttl_seconds,
+        )
+        dome = Dome(dome_config=config_dict, client=client, enforce=enforce)
+        dome._api_base_url = resolved_base_url
+        dome._api_client_id = client_id
+        dome._api_client_secret = client_secret
+        dome._api_agent_id = agent_id
+        dome._api_team_id = team_id
+        dome._api_config_dict = config_dict
+        dome._api_cache_dir = cache_dir
+        dome._api_access_token = access_token
+        dome._api_token_expires_at = token_expires_at
+        return dome
+
+    def config_has_changed(self) -> bool:
+        """Check whether the remote config has changed since this instance was created.
+
+        Only works for instances created via :meth:`create_from_s3` or
+        :meth:`create_from_api`.
 
         Returns:
             ``True`` if the remote config differs from the one used to
             create this instance, ``False`` otherwise.
 
         Raises:
-            ValueError: If the instance was not created from S3.
+            ValueError: If the instance was not created from S3 or the API.
         """
-        if self._s3_bucket is None or self._s3_key is None:
-            raise ValueError(
-                "config_has_changed() is only available for Dome instances "
-                "created via Dome.create_from_s3()."
+        if self._s3_bucket is not None and self._s3_key is not None:
+            return _config_has_changed(
+                local_config=self._s3_config_dict,  # type: ignore[arg-type]
+                bucket=self._s3_bucket,
+                key=self._s3_key,
+                config_id=self.config_id,
+                cache_dir=self._s3_cache_dir,
+                **(self._s3_aws_kwargs or {}),
             )
-        return _config_has_changed(
-            local_config=self._s3_config_dict,  # type: ignore[arg-type]
-            bucket=self._s3_bucket,
-            key=self._s3_key,
-            config_id=self.config_id,
-            cache_dir=self._s3_cache_dir,
-            **(self._s3_aws_kwargs or {}),
+
+        if self._api_base_url is not None and self._api_agent_id is not None:
+            from vijil_dome.utils.api_config_loader import api_config_has_changed
+
+            return api_config_has_changed(
+                local_config=self._api_config_dict,  # type: ignore[arg-type]
+                base_url=self._api_base_url,
+                client_id=self._api_client_id,  # type: ignore[arg-type]
+                client_secret=self._api_client_secret,  # type: ignore[arg-type]
+                agent_id=self._api_agent_id,
+                team_id=self._api_team_id,  # type: ignore[arg-type]
+                cache_dir=self._api_cache_dir,
+            )
+
+        raise ValueError(
+            "config_has_changed() is only available for Dome instances "
+            "created via Dome.create_from_s3() or Dome.create_from_api()."
         )
 
     def _init_from_dome_config(self, dome_config: DomeConfig):
