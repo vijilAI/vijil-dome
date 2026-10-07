@@ -76,6 +76,55 @@ def _chunk(rules: list[dict[str, Any]], size: int) -> list[list[dict[str, Any]]]
     return [rules[i : i + size] for i in range(0, len(rules), size)]
 
 
+def _validate_rule_ids(rules: list[dict[str, Any]]) -> None:
+    """Raise if any rule is missing a ``rule_id``, or two rules share one.
+
+    ``_score_all`` keys both its per-batch question dict and its merged
+    score dict by ``rule_id`` -- a duplicate (or a missing id, which
+    defaults to the same ``"?"`` placeholder for every rule lacking one)
+    silently collapses two distinct rules onto one score. ``_validate_scores``
+    then sees a "valid" score for that id and applies it to every rule
+    sharing it, so a duplicated prohibition can go unjudged even with
+    ``on_error: fail_closed``. Catching this before scoring, rather than
+    trying to detect it after the fact, is the only way to guarantee every
+    rule actually got its own judgment.
+    """
+    seen: set[str] = set()
+    bad: list[str] = []
+    for rule in rules:
+        rule_id = rule.get("rule_id")
+        if not rule_id or not isinstance(rule_id, str):
+            bad.append(f"missing rule_id (rule={rule!r})")
+        elif rule_id in seen:
+            bad.append(f"duplicate rule_id={rule_id!r}")
+        else:
+            seen.add(rule_id)
+    if bad:
+        raise SystemOneError(f"Invalid rules config: {', '.join(bad)}")
+
+
+def _validate_threshold(threshold: Any) -> float:
+    """Raise if ``violation_threshold`` isn't a finite number in [0, 1].
+
+    An out-of-range threshold (e.g. > 1.0) makes ``score >= threshold``
+    false for every possible score, so a deny Control would silently never
+    flag a violation -- with no exception raised, ``on_error: fail_closed``
+    never gets a chance to apply. Validating up front, the same as
+    ``_validate_scores`` does for scores, ensures bad config fails the
+    engine's error policy instead of failing open.
+    """
+    if (
+        not isinstance(threshold, (int, float))
+        or isinstance(threshold, bool)
+        or not math.isfinite(threshold)
+        or not (0.0 <= threshold <= 1.0)
+    ):
+        raise SystemOneError(
+            f"Invalid violation_threshold: {threshold!r} (must be a finite number in [0, 1])"
+        )
+    return float(threshold)
+
+
 def _validate_scores(
     rules: list[dict[str, Any]], noul_scores: dict[str, float]
 ) -> None:
@@ -127,9 +176,10 @@ class PolicyRuleJudge(Evaluator):
         rules: list[dict[str, Any]] = config.get("rules") or []
         if not rules:
             return EvaluatorResult(matched=False, message="No rules configured")
+        _validate_rule_ids(rules)
 
         text = str(value) if value is not None else ""
-        threshold = config.get("violation_threshold", DEFAULT_VIOLATION_THRESHOLD)
+        threshold = _validate_threshold(config.get("violation_threshold", DEFAULT_VIOLATION_THRESHOLD))
         batch_size = config.get("batch_size", DEFAULT_BATCH_SIZE)
 
         client_kwargs: dict[str, Any] = {}

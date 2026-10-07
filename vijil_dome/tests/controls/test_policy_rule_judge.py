@@ -152,6 +152,48 @@ async def test_out_of_range_score_raises():
             await evaluator.evaluate("text", {"rules": [RULE_BLOCK]})
 
 
+@pytest.mark.asyncio
+async def test_out_of_range_threshold_raises_instead_of_never_matching():
+    """A violation_threshold > 1.0 makes score >= threshold false for every
+    possible score -- a deny Control would then silently never flag a
+    violation, with no exception for on_error: fail_closed to catch."""
+    evaluator = PolicyRuleJudge()
+    with _patch_scores({"PRIV-001": 1.0}):  # max possible score
+        with pytest.raises(SystemOneError, match="violation_threshold"):
+            await evaluator.evaluate(
+                "text", {"rules": [RULE_BLOCK], "violation_threshold": 1.1}
+            )
+
+
+@pytest.mark.asyncio
+async def test_non_finite_threshold_raises():
+    evaluator = PolicyRuleJudge()
+    with _patch_scores({"PRIV-001": 1.0}):
+        with pytest.raises(SystemOneError, match="violation_threshold"):
+            await evaluator.evaluate(
+                "text", {"rules": [RULE_BLOCK], "violation_threshold": float("nan")}
+            )
+
+
+@pytest.mark.asyncio
+async def test_duplicate_rule_id_raises_instead_of_silently_sharing_a_score():
+    """Two rules sharing a rule_id would collapse onto one score in
+    _score_all's batch dict, then both appear "validly scored" to
+    _validate_scores even though only one was actually judged."""
+    evaluator = PolicyRuleJudge()
+    duplicate = {**RULE_WARN, "rule_id": "PRIV-001"}
+    with pytest.raises(SystemOneError, match="duplicate"):
+        await evaluator.evaluate("text", {"rules": [RULE_BLOCK, duplicate]})
+
+
+@pytest.mark.asyncio
+async def test_missing_rule_id_raises():
+    evaluator = PolicyRuleJudge()
+    no_id_rule = {k: v for k, v in RULE_BLOCK.items() if k != "rule_id"}
+    with pytest.raises(SystemOneError, match="missing rule_id"):
+        await evaluator.evaluate("text", {"rules": [no_id_rule]})
+
+
 def _block_control(on_error: str) -> dict:
     return {
         "name": "block-bucket",

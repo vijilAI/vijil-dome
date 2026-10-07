@@ -139,6 +139,53 @@ def test_load_config_unwraps_config_body(mock_post, mock_get, tmp_path):
 
 @patch("vijil_dome.utils.api_config_loader.httpx.get")
 @patch("vijil_dome.utils.api_config_loader.httpx.post")
+def test_load_config_empty_config_body_is_valid(mock_post, mock_get, tmp_path):
+    """A present-but-empty config_body is a legitimate "no controls
+    configured yet" state, not an error."""
+    mock_post.return_value = _mock_response(
+        200, {"access_token": "jwt-123", "expires_in": 3600}
+    )
+    mock_get.return_value = _mock_response(200, _envelope({}))
+
+    config, _, _ = load_dome_config_from_api(
+        base_url=BASE_URL,
+        client_id=CLIENT_ID,
+        client_secret=CLIENT_SECRET,
+        agent_id=AGENT_ID,
+        team_id=TEAM_ID,
+        cache_dir=str(tmp_path),
+    )
+
+    assert config.get("controls", []) == []
+
+
+@patch("vijil_dome.utils.api_config_loader.httpx.get")
+@patch("vijil_dome.utils.api_config_loader.httpx.post")
+def test_load_config_missing_config_body_raises_instead_of_installing_empty_policy(
+    mock_post, mock_get, tmp_path
+):
+    """`envelope.get("config_body") or {}` would silently coerce a missing
+    or malformed config_body into the same empty-policy state as a real
+    "no controls" response and cache it -- VijilDome.create_from_api()
+    would then install zero controls instead of surfacing a failed load."""
+    mock_post.return_value = _mock_response(
+        200, {"access_token": "jwt-123", "expires_in": 3600}
+    )
+    mock_get.return_value = _mock_response(200, _envelope(None))
+
+    with pytest.raises(ValueError, match="malformed config_body"):
+        load_dome_config_from_api(
+            base_url=BASE_URL,
+            client_id=CLIENT_ID,
+            client_secret=CLIENT_SECRET,
+            agent_id=AGENT_ID,
+            team_id=TEAM_ID,
+            cache_dir=str(tmp_path),
+        )
+
+
+@patch("vijil_dome.utils.api_config_loader.httpx.get")
+@patch("vijil_dome.utils.api_config_loader.httpx.post")
 def test_load_config_404_raises_clear_error(mock_post, mock_get, tmp_path):
     mock_post.return_value = _mock_response(
         200, {"access_token": "jwt-123", "expires_in": 3600}

@@ -123,12 +123,25 @@ def _fetch_active_config(
     envelope = response.json()
     # The endpoint returns an AgentDomeConfigResponse envelope (id, status,
     # config_body, timestamps, ...) -- the actual controls/guards policy
-    # document, same shape S3's config.json is, lives in config_body. Keep
-    # the envelope's own id/updated_at on it too (mirroring config_body's
+    # document, same shape S3's config.json is, lives in config_body.
+    #
+    # A present-but-empty config_body ({}) is a legitimate "no controls
+    # configured yet" state. But a *missing* or non-dict config_body is a
+    # malformed response -- `or {}` would silently coerce that into the
+    # same empty-policy state and cache it, so VijilDome.create_from_api()
+    # would install zero controls instead of surfacing a failed load.
+    raw_config_body = envelope.get("config_body")
+    if raw_config_body is None or not isinstance(raw_config_body, dict):
+        raise ValueError(
+            f"Console returned a malformed config_body for agent {agent_id}'s "
+            f"active Dome config (got {raw_config_body!r}); refusing to silently "
+            "install an empty policy."
+        )
+    # Keep the envelope's own id/updated_at on it too (mirroring config_body's
     # own embedded "id", which Console already sets to match) so change
     # detection has something to compare even if a config_body were ever
     # missing one.
-    config_body = envelope.get("config_body") or {}
+    config_body = raw_config_body
     config_body.setdefault("id", envelope.get("id"))
     config_body.setdefault("updated_at", envelope.get("updated_at"))
     return config_body
