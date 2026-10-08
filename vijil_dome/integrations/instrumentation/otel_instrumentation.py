@@ -190,10 +190,9 @@ def _set_dome_control_span_attributes(
     and team.id/agent.id/user.id are always set; policy.id/rule.ids/
     consequence.* are only set when the triggering evaluator's metadata
     carries them (currently just ``PolicyRuleJudge`` -- see
-    ``vijil_dome/controls/evaluators/policy_rule_judge.py`` and
-    ``docs/policy-enforcement/2026-10-06-policy-enforcement-scoping.md``
-    §5E). Any other evaluator's Control still gets a span, just without
-    those extra attributes.
+    ``vijil_dome/controls/evaluators/policy_rule_judge.py``). Any other
+    evaluator's Control still gets a span, just without those extra
+    attributes.
     """
     _safe_set_attribute(span, "control.name", match.control_name)
     if match.action is not None:
@@ -295,12 +294,10 @@ def instrument_vijil_dome(vijil_dome: VijilDome, tracer: Tracer) -> None:
     wraps with ``dome-detection`` spans. This fills that gap the same
     way: wrap ``vijil_dome.engine.evaluate`` so every *triggered* Control
     emits one span, carrying enough to reconstruct "what fired, and why"
-    without needing Dome's own logs -- see
-    ``docs/policy-enforcement/2026-10-06-policy-enforcement-scoping.md``
-    §5E for why this, and not a Console write-back API, is how
-    enforcement decisions get back to Console (point
-    ``DOME_TRACES_COLLECTOR_ENDPOINT`` at Console's collector and they
-    show up like any other Dome telemetry).
+    without needing Dome's own logs -- this, and not a Console
+    write-back API, is how enforcement decisions get back to Console
+    (point ``DOME_TRACES_COLLECTOR_ENDPOINT`` at Console's collector and
+    they show up like any other Dome telemetry).
 
     Idempotent, same as ``instrument_dome``: calling it twice on an
     already-instrumented instance is a no-op.

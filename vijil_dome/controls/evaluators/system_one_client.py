@@ -24,9 +24,8 @@ in one batched call against the same state.
 
 Reachable either directly at TypeSafe (``api.typesafe.ai``) or, as deployed
 here, through OpenRouter's TypeSafe-compatible shim at the same path —
-"switch the base URL only". See
-``docs/policy-enforcement/2026-10-06-policy-enforcement-scoping.md`` (§3.5)
-for how this was confirmed against TypeSafe's and OpenRouter's own docs.
+"switch the base URL only", confirmed against TypeSafe's and OpenRouter's
+own docs.
 """
 
 from __future__ import annotations

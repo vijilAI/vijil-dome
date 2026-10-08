@@ -24,11 +24,10 @@ evaluator *name* only (``vijil_dome/controls/engine.py``), and
 by whatever ``detector_kwargs`` it was first constructed with
 (``vijil_dome/controls/evaluators/dome_bridge.py``). Two Controls that both
 reference ``dome:policy-rule-judge`` but carry *different* rule sets (e.g.
-one per ``consequence.action`` bucket, per
-``docs/policy-enforcement/2026-10-06-policy-enforcement-scoping.md`` §5A/§5D)
-would silently share one bridge-cached detector built from whichever
-Control's rules happened to construct it first — every other bucket would
-judge against the wrong rules.
+one per ``consequence.action`` bucket) would silently share one
+bridge-cached detector built from whichever Control's rules happened to
+construct it first — every other bucket would judge against the wrong
+rules.
 
 A plain registered :class:`Evaluator`, by contrast, receives ``config`` fresh
 on *every* call (see ``RegexEvaluator`` for the same pattern) — only the

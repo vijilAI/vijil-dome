@@ -114,9 +114,8 @@ class VijilDome:
         already reads for its legacy ``input-guards``/``output-guards``
         format) — this just also reads that document's ``controls`` key.
         TTL/ETag caching is unchanged, reused as-is from
-        :func:`~vijil_dome.utils.config_loader.load_dome_config_from_s3`; see
-        ``docs/policy-enforcement/2026-10-06-policy-enforcement-scoping.md``
-        §3.6/§5B for why no new freshness mechanism was needed here.
+        :func:`~vijil_dome.utils.config_loader.load_dome_config_from_s3` --
+        no new freshness mechanism was needed here.
 
         The S3 key can be provided directly, or constructed from *team_id*
         and *agent_id* using the standard path
