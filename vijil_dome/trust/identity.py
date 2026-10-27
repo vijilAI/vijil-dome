@@ -291,6 +291,7 @@ class AgentIdentity:
             # Load cert + key in memory via pyOpenSSL (no temp files).
             # Falls back to temp files if pyOpenSSL is not installed.
             ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+            ctx.minimum_version = ssl.TLSVersion.TLSv1_2
             try:
                 from OpenSSL.crypto import (  # type: ignore[import-untyped]
                     load_certificate,
