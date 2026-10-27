@@ -19,7 +19,7 @@ exclude = [
 ]
 
 [tool.poetry.dependencies]
-python = ">=3.11,<3.14"
+python = ">=3.11,<3.15"
 
 # --- Core: thin client deps (always installed) ---
 pydantic = "^2.11.7"
