@@ -9209,17 +9209,17 @@ identity = ["spiffe"]
 langchain = []
 llm = ["litellm"]
 local = ["sentence-transformers", "torch", "transformers"]
-mcp = ["fastmcp", "mcp"]
+mcp = ["authlib", "dnspython", "fastmcp", "mcp"]
 opentelemetry = ["opentelemetry-api", "opentelemetry-exporter-gcp-monitoring", "opentelemetry-exporter-gcp-trace", "opentelemetry-exporter-otlp", "opentelemetry-exporter-otlp-proto-common", "opentelemetry-exporter-otlp-proto-grpc", "opentelemetry-exporter-otlp-proto-http", "opentelemetry-instrumentation", "opentelemetry-instrumentation-asyncio", "opentelemetry-instrumentation-logging", "opentelemetry-instrumentation-threading", "opentelemetry-propagator-gcp", "opentelemetry-proto", "opentelemetry-resourcedetector-gcp", "opentelemetry-sdk", "opentelemetry-semantic-conventions"]
 pii = ["presidio_analyzer", "presidio_anonymizer"]
 s3 = ["boto3"]
 strands = ["strands-agents"]
 test = ["pytest", "pytest-asyncio"]
 trust = ["cryptography", "httpx", "spiffe"]
-trust-adapters = ["cryptography", "google-adk", "httpx", "langgraph", "spiffe", "strands-agents"]
+trust-adapters = ["authlib", "cryptography", "google-adk", "httpx", "langgraph", "spiffe", "strands-agents"]
 trust-cli = ["cryptography", "httpx", "spiffe", "typer"]
 
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.11,<3.15"
-content-hash = "8a1c997bc43a4c9ddfa6f021f4c104e185f5312beee1fa8f265ba2cb2948616f"
+content-hash = "5296c05ed5a5cc37f6d5b3d2b7538453020e20f94a27dd276ecc72131b8dc916"
