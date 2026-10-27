@@ -16,7 +16,7 @@ class TestCentralizedConstants:
             DEFAULT_SAFEGUARD_MODEL,
         )
 
-        expected_model = os.environ.get("VIJIL_LLM_MODEL") or "gpt-4-turbo"
+        expected_model = os.environ.get("VIJIL_LLM_MODEL") or "gpt-4.1"
         expected_hub = os.environ.get("VIJIL_LLM_HUB") or "openai"
         expected_safeguard = (
             os.environ.get("VIJIL_SAFEGUARD_MODEL") or "openai/gpt-oss-safeguard-20b"
