@@ -1,0 +1,15 @@
+name: Notify docs of release
+
+on:
+  release:
+    # `released` skips drafts and pre-releases
+    types: [released]
+
+permissions: {}
+
+jobs:
+  notify:
+    uses: vijilAI/docs/.github/workflows/docs-release-notify.yml@main
+    secrets:
+      app-id: ${{ secrets.DOCS_APP_ID }}
+      private-key: ${{ secrets.DOCS_APP_PRIVATE_KEY }}
