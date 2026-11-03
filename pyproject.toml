@@ -5,12 +5,11 @@ build-backend = "poetry.core.masonry.api"
 [tool.poetry]
 name = "vijil-dome"
 version = "1.7.7"
+license = "Apache-2.0"
 description = ""
 authors = [
-    "Pradeep Das <pradeep@vijil.ai>",
     "Varun Cherukuri <varun@vijil.ai>",
-    "Anuj Tambwekar <anuj@vijil.ai>",
-    "Subho Majumdar <subho@vijil.ai>"
+    "Anuj Tambwekar <anuj@vijil.ai>"
 ]
 readme = "README.md"
 exclude = [
