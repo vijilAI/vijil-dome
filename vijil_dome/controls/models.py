@@ -52,6 +52,14 @@ class ConditionNode(BaseModel):
     or_: list[ConditionNode] | None = Field(None, alias="or")
     not_: ConditionNode | None = Field(None, alias="not")
 
+    precondition: bool = Field(
+        False,
+        description=(
+            "Leaf gates whether the control applies. If its selector is missing or its "
+            "evaluator errors, the Control's skip_on_missing_condition decides the result."
+        ),
+    )
+
     early_exit: bool = Field(
         False,
         alias="early_exit",
@@ -143,6 +151,13 @@ class Control(BaseModel):
     scope: ControlScope = Field(default_factory=ControlScope)
     condition: ConditionNode
     action: ControlAction
+    skip_on_missing_condition: bool = Field(
+        False,
+        description=(
+            "When a precondition leaf's context is missing or unevaluable: "
+            "False enforces the control, True skips it."
+        ),
+    )
     priority: int = 100
     tags: list[str] = Field(default_factory=list)
     annotations: dict[str, Any] = Field(
