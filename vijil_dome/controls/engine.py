@@ -319,7 +319,8 @@ class ControlEngine:
             # the pre-existing bool-only path unchanged.
             if control.condition.is_leaf():
                 result = await self._evaluate_leaf_result(
-                    control.condition, step, step_data
+                    control.condition, step, step_data,
+                    skip_on_missing=control.skip_on_missing_condition,
                 )
                 triggered = result.matched
                 confidence = result.confidence
@@ -327,7 +328,8 @@ class ControlEngine:
                 message = result.message
             else:
                 triggered = await self._evaluate_condition(
-                    control.condition, step, step_data
+                    control.condition, step, step_data,
+                    skip_on_missing=control.skip_on_missing_condition,
                 )
                 confidence = 1.0
                 metadata = {}
@@ -366,18 +368,19 @@ class ControlEngine:
     async def _evaluate_condition(
         self, node: ConditionNode, step: Step,
         step_data: dict[str, Any],
+        skip_on_missing: bool = False,
     ) -> bool:
         if node.is_leaf():
-            return await self._evaluate_leaf(node, step, step_data)
+            return await self._evaluate_leaf(node, step, step_data, skip_on_missing)
 
         if node.and_ is not None:
             if node.early_exit:
                 for child in node.and_:
-                    if not await self._evaluate_condition(child, step, step_data):
+                    if not await self._evaluate_condition(child, step, step_data, skip_on_missing):
                         return False
                 return True
             results = await asyncio.gather(
-                *(self._evaluate_condition(child, step, step_data)
+                *(self._evaluate_condition(child, step, step_data, skip_on_missing)
                   for child in node.and_)
             )
             return all(results)
@@ -385,30 +388,32 @@ class ControlEngine:
         if node.or_ is not None:
             if node.early_exit:
                 for child in node.or_:
-                    if await self._evaluate_condition(child, step, step_data):
+                    if await self._evaluate_condition(child, step, step_data, skip_on_missing):
                         return True
                 return False
             results = await asyncio.gather(
-                *(self._evaluate_condition(child, step, step_data)
+                *(self._evaluate_condition(child, step, step_data, skip_on_missing)
                   for child in node.or_)
             )
             return any(results)
 
         if node.not_ is not None:
-            return not await self._evaluate_condition(node.not_, step, step_data)
+            return not await self._evaluate_condition(node.not_, step, step_data, skip_on_missing)
 
         raise ValueError("ConditionNode is neither leaf nor composite")
 
     async def _evaluate_leaf(
         self, node: ConditionNode, step: Step,
         step_data: dict[str, Any],
+        skip_on_missing: bool = False,
     ) -> bool:
-        result = await self._evaluate_leaf_result(node, step, step_data)
+        result = await self._evaluate_leaf_result(node, step, step_data, skip_on_missing)
         return result.matched
 
     async def _evaluate_leaf_result(
         self, node: ConditionNode, step: Step,
         step_data: dict[str, Any],
+        skip_on_missing: bool = False,
     ) -> EvaluatorResult:
         if node.selector is None or node.evaluator is None:
             raise ValueError(
@@ -417,10 +422,28 @@ class ControlEngine:
 
         value = resolve(step, node.selector, _step_data=step_data)
         if value is MISSING:
+            if node.precondition:
+                return self._unresolved_precondition("Selector did not resolve", skip_on_missing)
             return EvaluatorResult(matched=False, message="Selector did not resolve")
 
         evaluator = self._get_evaluator(node.evaluator.name)
-        return await evaluator.evaluate(value, node.evaluator.config)
+        result = await evaluator.evaluate(value, node.evaluator.config)
+        if node.precondition and result.metadata.get("error"):
+            # The evaluator could not judge the value (e.g. CEL type mismatch):
+            # same as missing context, not a definitive "condition false".
+            return self._unresolved_precondition(result.message, skip_on_missing)
+        return result
+
+    @staticmethod
+    def _unresolved_precondition(message: str, skip_on_missing: bool) -> EvaluatorResult:
+        """Result for a precondition whose context is missing or unevaluable.
+
+        Satisfied (matched=True) unless the control opted to skip.
+        """
+        return EvaluatorResult(
+            matched=not skip_on_missing,
+            message=f"{message} (precondition {'unsatisfied: skipping' if skip_on_missing else 'assumed satisfied: enforcing'})",
+        )
 
     def _get_evaluator(self, name: str) -> Any:
         if name not in self._evaluator_cache:

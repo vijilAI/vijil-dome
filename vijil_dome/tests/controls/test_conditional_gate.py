@@ -1,22 +1,15 @@
-"""Contract tests for gating a control on ``context.<field>`` conditions.
+"""Tests for precondition gates and ``Control.skip_on_missing_condition``.
 
 Vijil Console compiles conditional policy rules (``unless user.role == admin``)
 into controls shaped like::
 
-    and: [ <gate>, <judge leaf> ]  (early_exit)
+    condition: and: [ <precondition leaf on context.<field>>, <judge leaf> ]
+    skip_on_missing_condition: false
 
-where the gate is, depending on its "skip on missing condition" setting:
-
-* skip=True:   ``leaf(H)``            -- enforce only if the condition holds
-* skip=False:  ``not(leaf(not H))``   -- enforce unless the condition is disproven
-
-Both forms rely on two engine behaviors that are not otherwise pinned down:
-
-1. A leaf whose selector does not resolve is a non-match (not an error).
-2. A CEL evaluation error (e.g. comparing a string to a number) is a non-match.
-
-If either changes, conditional policy rules would silently flip between
-enforced and skipped, so they are asserted here.
+A precondition leaf (``precondition: true``) that cannot be judged -- its
+selector does not resolve, or its evaluator errors -- is decided by the
+control's ``skip_on_missing_condition`` rather than being a plain non-match:
+False (default) enforces the control anyway, True skips it.
 """
 
 from __future__ import annotations
@@ -48,11 +41,15 @@ class _AlwaysMatch(Evaluator):
         return EvaluatorResult(matched=True, confidence=1.0, message="match")
 
 
-def _cel_leaf(field: str, expression: str) -> dict[str, Any]:
-    return {"selector": f"context.{field}", "evaluator": {"name": "cel", "config": {"expression": expression}}}
+def _gate(field: str, expression: str, *, precondition: bool = True) -> dict[str, Any]:
+    return {
+        "selector": f"context.{field}",
+        "evaluator": {"name": "cel", "config": {"expression": expression}},
+        "precondition": precondition,
+    }
 
 
-def _control(gate: dict[str, Any]) -> Control:
+def _control(gate: dict[str, Any], **extra: Any) -> Control:
     judge = {"selector": "output", "evaluator": {"name": "test-gate-always-match", "config": {}}}
     return Control.model_validate(
         {
@@ -60,62 +57,94 @@ def _control(gate: dict[str, Any]) -> Control:
             "scope": {"stages": ["post"]},
             "condition": {"and": [gate, judge], "early_exit": True},
             "action": {"decision": "deny"},
+            **extra,
         }
     )
 
 
-async def _enforced(gate: dict[str, Any], context: dict[str, Any]) -> bool:
+async def _enforced(gate: dict[str, Any], context: dict[str, Any], **extra: Any) -> bool:
     step = Step(type="llm", name="n", output="hi", context=context)
-    result = await ControlEngine([_control(gate)]).evaluate(step, stage="post")
+    result = await ControlEngine([_control(gate, **extra)]).evaluate(step, stage="post")
     return result.action == "deny"
 
 
-def _skip_gate(holds: str, field: str) -> dict[str, Any]:
-    return _cel_leaf(field, holds)
+SMS = _gate("channel", 'value == "sms"')  # "when channel == sms"
 
 
-def _enforce_gate(holds: str, field: str) -> dict[str, Any]:
-    return {"not": _cel_leaf(field, f"!({holds})")}
+def test_skip_on_missing_condition_defaults_to_false():
+    assert _control(SMS).skip_on_missing_condition is False
 
 
-HOLDS = 'value == "sms"'  # "when channel == sms"
-
-
-class TestSkipOnMissingGate:
-    @pytest.mark.asyncio
-    async def test_condition_holds_enforces(self):
-        assert await _enforced(_skip_gate(HOLDS, "channel"), {"channel": "sms"}) is True
+class TestResolvedContext:
+    """When the context is present the flag is irrelevant."""
 
     @pytest.mark.asyncio
-    async def test_condition_fails_skips(self):
-        assert await _enforced(_skip_gate(HOLDS, "channel"), {"channel": "web"}) is False
+    @pytest.mark.parametrize("skip", [False, True])
+    async def test_condition_holds_enforces(self, skip):
+        assert await _enforced(SMS, {"channel": "sms"}, skip_on_missing_condition=skip) is True
 
     @pytest.mark.asyncio
-    async def test_missing_field_skips(self):
-        assert await _enforced(_skip_gate(HOLDS, "channel"), {}) is False
+    @pytest.mark.parametrize("skip", [False, True])
+    async def test_condition_fails_skips(self, skip):
+        assert await _enforced(SMS, {"channel": "web"}, skip_on_missing_condition=skip) is False
+
+
+class TestMissingContext:
+    @pytest.mark.asyncio
+    async def test_missing_field_enforces_by_default(self):
+        assert await _enforced(SMS, {}) is True
 
     @pytest.mark.asyncio
-    async def test_cel_type_error_skips(self):
-        assert await _enforced(_skip_gate("value > 100", "amount"), {"amount": "abc"}) is False
-
-
-class TestEnforceOnMissingGate:
-    @pytest.mark.asyncio
-    async def test_condition_holds_enforces(self):
-        assert await _enforced(_enforce_gate(HOLDS, "channel"), {"channel": "sms"}) is True
+    async def test_missing_field_skips_when_flag_set(self):
+        assert await _enforced(SMS, {}, skip_on_missing_condition=True) is False
 
     @pytest.mark.asyncio
-    async def test_condition_fails_skips(self):
-        assert await _enforced(_enforce_gate(HOLDS, "channel"), {"channel": "web"}) is False
+    async def test_nested_missing_field(self):
+        gate = _gate("user.role", 'value == "admin"')
+        assert await _enforced(gate, {"user": {}}) is True
+        assert await _enforced(gate, {"user": {}}, skip_on_missing_condition=True) is False
+
+
+class TestUnevaluableContext:
+    @pytest.mark.asyncio
+    async def test_cel_type_error_enforces_by_default(self):
+        gate = _gate("amount", "value > 100")
+        assert await _enforced(gate, {"amount": "abc"}) is True
 
     @pytest.mark.asyncio
-    async def test_missing_field_enforces(self):
-        assert await _enforced(_enforce_gate(HOLDS, "channel"), {}) is True
+    async def test_cel_type_error_skips_when_flag_set(self):
+        gate = _gate("amount", "value > 100")
+        assert await _enforced(gate, {"amount": "abc"}, skip_on_missing_condition=True) is False
+
+
+class TestFlagOnlyAffectsPreconditions:
+    @pytest.mark.asyncio
+    async def test_plain_leaf_missing_is_still_a_non_match(self):
+        """Without precondition: true, a missing selector is a non-match in both modes."""
+        plain = _gate("channel", 'value == "sms"', precondition=False)
+        assert await _enforced(plain, {}) is False
+        assert await _enforced(plain, {}, skip_on_missing_condition=True) is False
 
     @pytest.mark.asyncio
-    async def test_nested_missing_field_enforces(self):
-        assert await _enforced(_enforce_gate('value == "admin"', "user.role"), {"user": {}}) is True
+    async def test_judge_leaf_missing_output_is_unaffected(self):
+        """The flag must not turn a missing judge input into a match."""
+        step = Step(type="llm", name="n", output=None, context={"channel": "sms"})
+        step_missing = step.model_copy(update={"output": None})
+        control = Control.model_validate(
+            {
+                "name": "c",
+                "scope": {"stages": ["post"]},
+                "condition": {"selector": "context.nope", "evaluator": {"name": "test-gate-always-match", "config": {}}},
+                "action": {"decision": "deny"},
+            }
+        )
+        result = await ControlEngine([control]).evaluate(step_missing, stage="post")
+        assert result.action == "allow"
 
+
+class TestComposites:
     @pytest.mark.asyncio
-    async def test_cel_type_error_enforces(self):
-        assert await _enforced(_enforce_gate("value > 100", "amount"), {"amount": "abc"}) is True
+    async def test_or_gate_enforces_when_any_condition_holds(self):
+        gate = {"or": [_gate("channel", 'value == "sms"'), _gate("amount", "value > 100")]}
+        assert await _enforced(gate, {"amount": 500}, skip_on_missing_condition=True) is True
+        assert await _enforced(gate, {"amount": 5, "channel": "web"}, skip_on_missing_condition=True) is False

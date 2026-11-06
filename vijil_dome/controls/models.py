@@ -52,6 +52,19 @@ class ConditionNode(BaseModel):
     or_: list[ConditionNode] | None = Field(None, alias="or")
     not_: ConditionNode | None = Field(None, alias="not")
 
+    precondition: bool = Field(
+        False,
+        description=(
+            "Marks a leaf as a precondition gate: a check on the step's context "
+            "that decides whether the control applies at all. When its selector "
+            "does not resolve (or its evaluator errors), the result is decided "
+            "by the owning Control's ``skip_on_missing_condition`` instead of "
+            "being a plain non-match: False (default) treats the precondition as "
+            "satisfied so the control still applies; True treats it as not "
+            "satisfied so the control is skipped."
+        ),
+    )
+
     early_exit: bool = Field(
         False,
         alias="early_exit",
@@ -143,6 +156,15 @@ class Control(BaseModel):
     scope: ControlScope = Field(default_factory=ControlScope)
     condition: ConditionNode
     action: ControlAction
+    skip_on_missing_condition: bool = Field(
+        False,
+        description=(
+            "How precondition leaves (``precondition: true``) behave when the "
+            "context they read is missing or cannot be evaluated. False "
+            "(default): treat as satisfied, so the control is still enforced. "
+            "True: treat as not satisfied, so the control is skipped."
+        ),
+    )
     priority: int = 100
     tags: list[str] = Field(default_factory=list)
     annotations: dict[str, Any] = Field(
