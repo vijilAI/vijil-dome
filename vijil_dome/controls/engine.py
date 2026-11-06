@@ -427,10 +427,19 @@ class ControlEngine:
             return EvaluatorResult(matched=False, message="Selector did not resolve")
 
         evaluator = self._get_evaluator(node.evaluator.name)
-        result = await evaluator.evaluate(value, node.evaluator.config)
-        if node.precondition and result.metadata.get("error"):
-            # The evaluator could not judge the value (e.g. CEL type mismatch):
-            # same as missing context, not a definitive "condition false".
+        if not node.precondition:
+            return await evaluator.evaluate(value, node.evaluator.config)
+
+        # Precondition: an evaluator that cannot judge the value -- it raises,
+        # or reports an error in its metadata (CEL type mismatch, JSON-schema
+        # error) -- is the same as missing context, not a definitive "condition
+        # false", and must not fall through to the control's on_error policy.
+        try:
+            result = await evaluator.evaluate(value, node.evaluator.config)
+        except Exception as exc:
+            logger.warning("Precondition evaluator %s raised: %s", node.evaluator.name, exc)
+            return self._unresolved_precondition(f"Evaluator error: {exc}", skip_on_missing)
+        if any(result.metadata.get(key) for key in _EVALUATOR_ERROR_METADATA_KEYS):
             return self._unresolved_precondition(result.message, skip_on_missing)
         return result
 
@@ -451,6 +460,11 @@ class ControlEngine:
 
             self._evaluator_cache[name] = resolve_evaluator(name)
         return self._evaluator_cache[name]
+
+
+# Evaluator-result metadata keys that mean "could not evaluate" (CEL: "error",
+# JsonSchemaEvaluator: "schema_error").
+_EVALUATOR_ERROR_METADATA_KEYS = ("error", "schema_error")
 
 
 def _safe_regex_search(pattern: str, text: str) -> re.Match[str] | None:

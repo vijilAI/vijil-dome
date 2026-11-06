@@ -41,6 +41,24 @@ class _AlwaysMatch(Evaluator):
         return EvaluatorResult(matched=True, confidence=1.0, message="match")
 
 
+@register_evaluator("test-gate-raises")
+class _Raises(Evaluator):
+    async def evaluate(self, value: Any, config: dict[str, Any]) -> EvaluatorResult:
+        raise RuntimeError("boom")
+
+
+@register_evaluator("test-gate-schema-error")
+class _SchemaError(Evaluator):
+    """Mimics JsonSchemaEvaluator reporting an unusable schema via metadata."""
+
+    async def evaluate(self, value: Any, config: dict[str, Any]) -> EvaluatorResult:
+        return EvaluatorResult(matched=False, message="bad schema", metadata={"schema_error": "invalid"})
+
+
+def _custom_gate(evaluator: str) -> dict[str, Any]:
+    return {"selector": "context.x", "evaluator": {"name": evaluator, "config": {}}, "precondition": True}
+
+
 def _gate(field: str, expression: str, *, precondition: bool = True) -> dict[str, Any]:
     return {
         "selector": f"context.{field}",
@@ -65,6 +83,9 @@ def _control(gate: dict[str, Any], **extra: Any) -> Control:
 async def _enforced(gate: dict[str, Any], context: dict[str, Any], **extra: Any) -> bool:
     step = Step(type="llm", name="n", output="hi", context=context)
     result = await ControlEngine([_control(gate, **extra)]).evaluate(step, stage="post")
+    # The default on_error is fail_closed, so an engine exception also yields
+    # "deny". Assert none happened so a pass means the gate itself decided.
+    assert [m.error for m in result.matches if m.error] == []
     return result.action == "deny"
 
 
@@ -115,6 +136,22 @@ class TestUnevaluableContext:
     async def test_cel_type_error_skips_when_flag_set(self):
         gate = _gate("amount", "value > 100")
         assert await _enforced(gate, {"amount": "abc"}, skip_on_missing_condition=True) is False
+
+
+class TestEvaluatorFailures:
+    """Raised errors and error-metadata results count as unresolved context,
+    not as the control's on_error policy or a plain non-match."""
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("evaluator", ["test-gate-raises", "test-gate-schema-error"])
+    async def test_enforces_by_default(self, evaluator):
+        assert await _enforced(_custom_gate(evaluator), {"x": 1}) is True
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("evaluator", ["test-gate-raises", "test-gate-schema-error"])
+    async def test_skips_when_flag_set_even_if_fail_closed(self, evaluator):
+        # action.on_error defaults to fail_closed; the flag must win for preconditions.
+        assert await _enforced(_custom_gate(evaluator), {"x": 1}, skip_on_missing_condition=True) is False
 
 
 class TestFlagOnlyAffectsPreconditions:
