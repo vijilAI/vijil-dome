@@ -430,10 +430,7 @@ class ControlEngine:
         if not node.precondition:
             return await evaluator.evaluate(value, node.evaluator.config)
 
-        # Precondition: an evaluator that cannot judge the value -- it raises,
-        # or reports an error in its metadata (CEL type mismatch, JSON-schema
-        # error) -- is the same as missing context, not a definitive "condition
-        # false", and must not fall through to the control's on_error policy.
+        # An evaluator that cannot judge the value counts as missing context, not as on_error.
         try:
             result = await evaluator.evaluate(value, node.evaluator.config)
         except Exception as exc:
@@ -445,10 +442,6 @@ class ControlEngine:
 
     @staticmethod
     def _unresolved_precondition(message: str, skip_on_missing: bool) -> EvaluatorResult:
-        """Result for a precondition whose context is missing or unevaluable.
-
-        Satisfied (matched=True) unless the control opted to skip.
-        """
         return EvaluatorResult(
             matched=not skip_on_missing,
             message=f"{message} (precondition {'unsatisfied: skipping' if skip_on_missing else 'assumed satisfied: enforcing'})",
@@ -462,8 +455,6 @@ class ControlEngine:
         return self._evaluator_cache[name]
 
 
-# Evaluator-result metadata keys that mean "could not evaluate" (CEL: "error",
-# JsonSchemaEvaluator: "schema_error").
 _EVALUATOR_ERROR_METADATA_KEYS = ("error", "schema_error")
 
 

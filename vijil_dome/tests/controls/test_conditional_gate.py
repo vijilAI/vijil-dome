@@ -1,16 +1,4 @@
-"""Tests for precondition gates and ``Control.skip_on_missing_condition``.
-
-Vijil Console compiles conditional policy rules (``unless user.role == admin``)
-into controls shaped like::
-
-    condition: and: [ <precondition leaf on context.<field>>, <judge leaf> ]
-    skip_on_missing_condition: false
-
-A precondition leaf (``precondition: true``) that cannot be judged -- its
-selector does not resolve, or its evaluator errors -- is decided by the
-control's ``skip_on_missing_condition`` rather than being a plain non-match:
-False (default) enforces the control anyway, True skips it.
-"""
+"""Tests for precondition gates and ``Control.skip_on_missing_condition``."""
 
 from __future__ import annotations
 
@@ -35,7 +23,6 @@ from vijil_dome.controls.models import Control, Step  # noqa: E402
 
 @register_evaluator("test-gate-always-match")
 class _AlwaysMatch(Evaluator):
-    """Stands in for the judge so only the gate decides the outcome."""
 
     async def evaluate(self, value: Any, config: dict[str, Any]) -> EvaluatorResult:
         return EvaluatorResult(matched=True, confidence=1.0, message="match")
@@ -49,7 +36,6 @@ class _Raises(Evaluator):
 
 @register_evaluator("test-gate-schema-error")
 class _SchemaError(Evaluator):
-    """Mimics JsonSchemaEvaluator reporting an unusable schema via metadata."""
 
     async def evaluate(self, value: Any, config: dict[str, Any]) -> EvaluatorResult:
         return EvaluatorResult(matched=False, message="bad schema", metadata={"schema_error": "invalid"})
@@ -83,8 +69,7 @@ def _control(gate: dict[str, Any], **extra: Any) -> Control:
 async def _enforced(gate: dict[str, Any], context: dict[str, Any], **extra: Any) -> bool:
     step = Step(type="llm", name="n", output="hi", context=context)
     result = await ControlEngine([_control(gate, **extra)]).evaluate(step, stage="post")
-    # The default on_error is fail_closed, so an engine exception also yields
-    # "deny". Assert none happened so a pass means the gate itself decided.
+    # on_error defaults to fail_closed, so an engine error would also deny
     assert [m.error for m in result.matches if m.error] == []
     return result.action == "deny"
 
@@ -97,7 +82,6 @@ def test_skip_on_missing_condition_defaults_to_false():
 
 
 class TestResolvedContext:
-    """When the context is present the flag is irrelevant."""
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize("skip", [False, True])
@@ -139,8 +123,6 @@ class TestUnevaluableContext:
 
 
 class TestEvaluatorFailures:
-    """Raised errors and error-metadata results count as unresolved context,
-    not as the control's on_error policy or a plain non-match."""
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize("evaluator", ["test-gate-raises", "test-gate-schema-error"])
@@ -150,33 +132,15 @@ class TestEvaluatorFailures:
     @pytest.mark.asyncio
     @pytest.mark.parametrize("evaluator", ["test-gate-raises", "test-gate-schema-error"])
     async def test_skips_when_flag_set_even_if_fail_closed(self, evaluator):
-        # action.on_error defaults to fail_closed; the flag must win for preconditions.
         assert await _enforced(_custom_gate(evaluator), {"x": 1}, skip_on_missing_condition=True) is False
 
 
 class TestFlagOnlyAffectsPreconditions:
     @pytest.mark.asyncio
     async def test_plain_leaf_missing_is_still_a_non_match(self):
-        """Without precondition: true, a missing selector is a non-match in both modes."""
         plain = _gate("channel", 'value == "sms"', precondition=False)
         assert await _enforced(plain, {}) is False
         assert await _enforced(plain, {}, skip_on_missing_condition=True) is False
-
-    @pytest.mark.asyncio
-    async def test_judge_leaf_missing_output_is_unaffected(self):
-        """The flag must not turn a missing judge input into a match."""
-        step = Step(type="llm", name="n", output=None, context={"channel": "sms"})
-        step_missing = step.model_copy(update={"output": None})
-        control = Control.model_validate(
-            {
-                "name": "c",
-                "scope": {"stages": ["post"]},
-                "condition": {"selector": "context.nope", "evaluator": {"name": "test-gate-always-match", "config": {}}},
-                "action": {"decision": "deny"},
-            }
-        )
-        result = await ControlEngine([control]).evaluate(step_missing, stage="post")
-        assert result.action == "allow"
 
 
 class TestComposites:
