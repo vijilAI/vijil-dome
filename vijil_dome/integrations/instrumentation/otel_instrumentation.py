@@ -31,6 +31,7 @@ from vijil_dome.guardrails.instrumentation.instrumentation import (
 from vijil_dome import Dome
 from vijil_dome.guardrails import Guardrail, GuardrailResult
 from vijil_dome.integrations.vijil.telemetry import _safe_set_attribute, _set_darwin_span_attributes
+from vijil_dome.instrumentation.tracing import _truncate
 import socket
 
 
@@ -180,8 +181,19 @@ def instrument_dome(
     dome._instrumented = True  # type: ignore[attr-defined]
 
 
+def _as_attribute_text(value: Any) -> Optional[str]:
+    if value is None:
+        return None
+    text = value if isinstance(value, str) else json.dumps(value, default=str)
+    return _truncate(text)
+
+
 def _set_dome_control_span_attributes(
-    span: Span, match: ControlMatch, vijil_dome: VijilDome
+    span: Span,
+    match: ControlMatch,
+    vijil_dome: VijilDome,
+    step: Step,
+    stage: Literal["pre", "post"],
 ) -> None:
     """Set span attributes for one triggered Control match.
 
@@ -195,6 +207,14 @@ def _set_dome_control_span_attributes(
     attributes.
     """
     _safe_set_attribute(span, "control.name", match.control_name)
+    _safe_set_attribute(span, "control.stage", stage)
+    # The step's text, not the evaluator's selector value: Defend shows what
+    # the user sent or received. A post step also carries input; only the
+    # output is recorded for it.
+    if stage == "pre":
+        _safe_set_attribute(span, "control.input", _as_attribute_text(step.input))
+    else:
+        _safe_set_attribute(span, "control.output", _as_attribute_text(step.output))
     if match.action is not None:
         _safe_set_attribute(span, "control.decision", match.action.decision)
     _safe_set_attribute(span, "team.id", vijil_dome.team_id)
@@ -316,7 +336,7 @@ def instrument_vijil_dome(vijil_dome: VijilDome, tracer: Tracer) -> None:
             if not match.triggered:
                 continue
             with tracer.start_as_current_span("dome-control") as span:
-                _set_dome_control_span_attributes(span, match, vijil_dome)
+                _set_dome_control_span_attributes(span, match, vijil_dome, step, stage)
         return result
 
     vijil_dome.engine.evaluate = evaluate_with_spans  # type: ignore[method-assign]
