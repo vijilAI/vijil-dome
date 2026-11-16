@@ -27,7 +27,13 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from vijil_dome.controls.models import Control, ControlAction, ControlMatch, Step
+from vijil_dome.controls.models import (
+    Control,
+    ControlAction,
+    ControlMatch,
+    EvaluationResult,
+    Step,
+)
 from vijil_dome.core import VijilDome
 from vijil_dome.integrations.instrumentation.otel_instrumentation import (
     _set_dome_control_span_attributes,
@@ -153,14 +159,19 @@ def _regex_control(selector: str) -> Control:
     )
 
 
-async def _fire(selector: str, step: Step, stage: Literal["pre", "post"]) -> dict:
+async def _fire_with_result(selector: str, step: Step, stage: Literal["pre", "post"]) -> tuple[dict, EvaluationResult]:
     dome = VijilDome(policy=[_regex_control(selector)], enforce=False)
     tracer = MagicMock()
     instrument_vijil_dome(dome, tracer=tracer)
-    await dome.engine.evaluate(step, stage)
+    result = await dome.engine.evaluate(step, stage)
     tracer.start_as_current_span.assert_called_once_with("dome-control")
     span = tracer.start_as_current_span.return_value.__enter__.return_value
-    return {c.args[0]: c.args[1] for c in span.set_attribute.call_args_list}
+    return {c.args[0]: c.args[1] for c in span.set_attribute.call_args_list}, result
+
+
+async def _fire(selector: str, step: Step, stage: Literal["pre", "post"]) -> dict:
+    attrs, _ = await _fire_with_result(selector, step, stage)
+    return attrs
 
 
 @pytest.mark.asyncio
@@ -194,4 +205,31 @@ async def test_long_input_is_truncated():
     attrs = await _fire("input", Step(type="llm", name="t", input="secret" + "a" * 3000), "pre")
 
     assert attrs["control.input"].endswith("...<truncated>")
-    assert len(attrs["control.input"]) < 3000
+    assert len(attrs["control.input"]) == 2048
+
+
+@pytest.mark.asyncio
+async def test_non_ascii_input_is_recorded_unescaped():
+    attrs = await _fire("input", Step(type="llm", name="t", input={"msg": "secret café 秘密"}), "pre")
+
+    assert attrs["control.input"] == '{"msg": "secret café 秘密"}'
+
+
+def _circular_input() -> dict:
+    payload: dict = {"msg": "secret"}
+    payload["self"] = payload
+    return payload
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "payload",
+    [{("a", "b"): 1, "msg": "secret"}, _circular_input()],
+    ids=["tuple-key", "circular"],
+)
+async def test_unencodable_input_still_returns_the_evaluation(payload: dict):
+    attrs, result = await _fire_with_result("input", Step(type="llm", name="t", input=payload), "pre")
+
+    assert isinstance(attrs["control.input"], str)
+    assert "secret" in attrs["control.input"]
+    assert any(m.triggered for m in result.matches)

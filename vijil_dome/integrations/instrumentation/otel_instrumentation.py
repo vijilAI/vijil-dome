@@ -184,7 +184,13 @@ def instrument_dome(
 def _as_attribute_text(value: Any) -> Optional[str]:
     if value is None:
         return None
-    text = value if isinstance(value, str) else json.dumps(value, default=str)
+    if isinstance(value, str):
+        return _truncate(value)
+    try:
+        text = json.dumps(value, default=str, ensure_ascii=False)
+    except (TypeError, ValueError):
+        # This runs after enforcement; an unencodable payload must not discard the verdict.
+        text = str(value)
     return _truncate(text)
 
 
