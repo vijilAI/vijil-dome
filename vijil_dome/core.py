@@ -13,9 +13,10 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable, Literal
 
 from vijil_dome.controls.decorator import control as control_decorator
-from vijil_dome.controls.engine import ControlEngine
+from vijil_dome.controls.engine import ControlEngine, run_sync
 from vijil_dome.controls.errors import handle_result
 from vijil_dome.controls.models import Control, EvaluationResult, Step
+from vijil_dome.core_guards import Level, merge_results, text_after_guards
 from vijil_dome.utils.api_config_loader import DEFAULT_CONSOLE_API_BASE_URL
 
 if TYPE_CHECKING:
@@ -70,6 +71,7 @@ class VijilDome:
         self._team_id = team_id
         self._user_id = user_id
         self._engine = ControlEngine()
+        self._warned_dict_skip = False
         self.input_guardrail: Guardrail | None = None
         self.output_guardrail: Guardrail | None = None
 
@@ -305,23 +307,70 @@ class VijilDome:
     # Guard methods
     # ------------------------------------------------------------------
 
+    async def _guard_text(
+        self,
+        level: Level,
+        text: str | dict[str, Any],
+        context: dict[str, Any] | None,
+        step_name: str,
+        agent_id: str | None,
+        team_id: str | None,
+        user_id: str | None,
+    ) -> EvaluationResult:
+        stage: Literal["pre", "post"] = "pre" if level == "input" else "post"
+        guardrail = self.input_guardrail if level == "input" else self.output_guardrail
+        original = text if isinstance(text, str) else ""
+
+        if isinstance(text, dict) and guardrail is not None:
+            if not self._warned_dict_skip:
+                logger.warning(
+                    "VijilDome skips guards for dict input; only controls run on it."
+                )
+                self._warned_dict_skip = True
+            guardrail = None
+
+        guard_result = None
+        if guardrail is not None and guardrail.guard_list:
+            guard_result = await guardrail.async_scan(
+                original,
+                agent_id=agent_id or self._agent_id,
+                team_id=team_id or self._team_id,
+                user_id=user_id or self._user_id,
+            )
+
+        controls = None
+        if not (guard_result and guard_result.flagged and self._enforce):
+            controls_text = (
+                text_after_guards(guard_result, original) if guard_result else text
+            )
+            step = Step(
+                type="llm",
+                name=step_name,
+                **{level: controls_text},
+                context=context or {},
+            )
+            controls = await self._engine.evaluate(step, stage=stage)
+
+        result = merge_results(level, original, guard_result, controls)
+        handle_result(result, self._enforce, stage)
+        return result
+
     def guard_input(
         self,
         text: str | dict[str, Any],
         *,
         context: dict[str, Any] | None = None,
         step_name: str = "input",
+        agent_id: str | None = None,
+        team_id: str | None = None,
+        user_id: str | None = None,
     ) -> EvaluationResult:
-        """Evaluate input against the policy (sync)."""
-        step = Step(
-            type="llm",
-            name=step_name,
-            input=text,
-            context=context or {},
+        """Run input guards, then input controls (sync)."""
+        return run_sync(
+            self._guard_text(
+                "input", text, context, step_name, agent_id, team_id, user_id
+            )
         )
-        result = self._engine.evaluate_sync(step, stage="pre")
-        handle_result(result, self._enforce, "pre")
-        return result
 
     async def async_guard_input(
         self,
@@ -329,17 +378,14 @@ class VijilDome:
         *,
         context: dict[str, Any] | None = None,
         step_name: str = "input",
+        agent_id: str | None = None,
+        team_id: str | None = None,
+        user_id: str | None = None,
     ) -> EvaluationResult:
-        """Evaluate input against the policy (async)."""
-        step = Step(
-            type="llm",
-            name=step_name,
-            input=text,
-            context=context or {},
+        """Run input guards, then input controls (async)."""
+        return await self._guard_text(
+            "input", text, context, step_name, agent_id, team_id, user_id
         )
-        result = await self._engine.evaluate(step, stage="pre")
-        handle_result(result, self._enforce, "pre")
-        return result
 
     def guard_output(
         self,
@@ -347,17 +393,16 @@ class VijilDome:
         *,
         context: dict[str, Any] | None = None,
         step_name: str = "output",
+        agent_id: str | None = None,
+        team_id: str | None = None,
+        user_id: str | None = None,
     ) -> EvaluationResult:
-        """Evaluate output against the policy (sync)."""
-        step = Step(
-            type="llm",
-            name=step_name,
-            output=text,
-            context=context or {},
+        """Run output guards, then output controls (sync)."""
+        return run_sync(
+            self._guard_text(
+                "output", text, context, step_name, agent_id, team_id, user_id
+            )
         )
-        result = self._engine.evaluate_sync(step, stage="post")
-        handle_result(result, self._enforce, "post")
-        return result
 
     async def async_guard_output(
         self,
@@ -365,17 +410,14 @@ class VijilDome:
         *,
         context: dict[str, Any] | None = None,
         step_name: str = "output",
+        agent_id: str | None = None,
+        team_id: str | None = None,
+        user_id: str | None = None,
     ) -> EvaluationResult:
-        """Evaluate output against the policy (async)."""
-        step = Step(
-            type="llm",
-            name=step_name,
-            output=text,
-            context=context or {},
+        """Run output guards, then output controls (async)."""
+        return await self._guard_text(
+            "output", text, context, step_name, agent_id, team_id, user_id
         )
-        result = await self._engine.evaluate(step, stage="post")
-        handle_result(result, self._enforce, "post")
-        return result
 
     def guard_tool_call(
         self,
