@@ -27,6 +27,12 @@ logger = logging.getLogger(__name__)
 
 # tool-permissions and organization are Console constraint metadata consumed
 # by TrustRuntime; they are known here but deliberately not enforced.
+_PIPELINE_SETTING_KEYS = frozenset(
+    f"{side}-{option}"
+    for side in ("input", "output")
+    for option in ("early-exit", "run-parallel", "blocked-message", "on-error")
+)
+
 _KNOWN_CONFIG_KEYS = frozenset(
     {
         "controls",
@@ -42,11 +48,7 @@ _KNOWN_CONFIG_KEYS = frozenset(
         "agent_configuration_id",
         "user_id",
     }
-    | {
-        f"{side}-{option}"
-        for side in ("input", "output")
-        for option in ("early-exit", "run-parallel", "blocked-message", "on-error")
-    }
+    | _PIPELINE_SETTING_KEYS
 )
 
 
@@ -166,17 +168,24 @@ class VijilDome:
         )
 
         guard_names = {
-            *(config_body.get("input-guards") or []),
-            *(config_body.get("output-guards") or []),
+            g
+            for g in (
+                *(config_body.get("input-guards") or []),
+                *(config_body.get("output-guards") or []),
+            )
+            if isinstance(g, str)
         }
-        unknown = sorted(
+        unknown = {
             k
             for k in config_body
             if k not in _KNOWN_CONFIG_KEYS and k not in guard_names
-        )
+        }
+        # Pipeline settings only apply to a guardrail that exists.
+        if not has_guards:
+            unknown |= _PIPELINE_SETTING_KEYS & config_body.keys()
         if unknown:
             logger.warning(
-                "Ignoring unknown keys in Dome config: %s", ", ".join(unknown)
+                "Ignoring unknown keys in Dome config: %s", ", ".join(sorted(unknown))
             )
 
         return VijilDome(

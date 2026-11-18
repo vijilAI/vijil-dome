@@ -81,3 +81,21 @@ def test_from_config_explicit_ids_beat_body():
         user_id="U",
     )
     assert (v.agent_id, v.team_id, v.user_id) == ("A", "T", "U")
+
+
+def test_from_config_inline_dict_guard(caplog):
+    body = {
+        "input-guards": [
+            {"in-guard": {"type": "security", "methods": ["encoding-heuristics"]}}
+        ]
+    }
+    with caplog.at_level(logging.WARNING, logger="vijil_dome.core"):
+        v = VijilDome.from_config(body, enforce=False)
+    assert v.guard_input(ATTACK).action == "deny"
+    assert "Ignoring" not in caplog.text
+
+
+def test_from_config_pipeline_settings_without_guards_warn(caplog):
+    with caplog.at_level(logging.WARNING, logger="vijil_dome.core"):
+        VijilDome.from_config({"input-on-error": "fail_open", "controls": []})
+    assert "input-on-error" in caplog.text
