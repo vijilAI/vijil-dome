@@ -132,9 +132,22 @@ deprecated and returns a `VijilDome`.
 
 ```python
 dome = VijilDome(
-    guards={"input-guards": ["prompt-injection"]},
-    policy=[...],  # control dicts or a path to a policy file
+    guards={
+        "input-guards": ["in"],
+        "in": {"type": "security", "methods": ["encoding-heuristics"]},
+    },
+    policy=[{
+        "name": "block-secret",
+        "scope": {"stages": ["pre"]},
+        "action": {"decision": "deny"},
+        "condition": {
+            "selector": "input",
+            "evaluator": {"name": "regex", "config": {"pattern": "SECRET-123"}},
+        },
+    }],
+    enforce=False,
 )
+scan = dome.guard_input("my key is SECRET-123")
 ```
 
 ### Trust runtime (one line)
