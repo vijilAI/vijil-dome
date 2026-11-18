@@ -25,6 +25,30 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+# tool-permissions and organization are Console constraint metadata consumed
+# by TrustRuntime; they are known here but deliberately not enforced.
+_KNOWN_CONFIG_KEYS = frozenset(
+    {
+        "controls",
+        "input-guards",
+        "output-guards",
+        "tool-permissions",
+        "organization",
+        "id",
+        "updated_at",
+        "team_id",
+        "agent_id",
+        "agent_config_id",
+        "agent_configuration_id",
+        "user_id",
+    }
+    | {
+        f"{side}-{option}"
+        for side in ("input", "output")
+        for option in ("early-exit", "run-parallel", "blocked-message", "on-error")
+    }
+)
+
 
 class VijilDome:
     """Runtime enforcing policy controls and, optionally, Dome guard pipelines.
@@ -123,6 +147,50 @@ class VijilDome:
         self.output_guardrail = guards.output_guardrail
 
     @staticmethod
+    def from_config(
+        config_body: dict[str, Any],
+        *,
+        enforce: bool = True,
+        agent_id: str | None = None,
+        team_id: str | None = None,
+        user_id: str | None = None,
+    ) -> "VijilDome":
+        """Build a VijilDome enforcing both halves of a Console config body."""
+        has_guards = bool(
+            config_body.get("input-guards") or config_body.get("output-guards")
+        )
+        guards = (
+            {k: v for k, v in config_body.items() if k != "controls"}
+            if has_guards
+            else None
+        )
+
+        guard_names = {
+            *(config_body.get("input-guards") or []),
+            *(config_body.get("output-guards") or []),
+        }
+        unknown = sorted(
+            k
+            for k in config_body
+            if k not in _KNOWN_CONFIG_KEYS and k not in guard_names
+        )
+        if unknown:
+            logger.warning(
+                "Ignoring unknown keys in Dome config: %s", ", ".join(unknown)
+            )
+
+        return VijilDome(
+            policy=config_body.get("controls") or [],
+            guards=guards,
+            enforce=enforce,
+            agent_id=agent_id
+            or config_body.get("agent_id")
+            or config_body.get("agent_config_id"),
+            team_id=team_id or config_body.get("team_id"),
+            user_id=user_id or config_body.get("user_id"),
+        )
+
+    @staticmethod
     def create_from_s3(
         bucket: str,
         key: str | None = None,
@@ -138,10 +206,8 @@ class VijilDome:
     ) -> "VijilDome":
         """Create a VijilDome instance from a config stored in S3.
 
-        Reads the same ``config.json`` Console's agent-scoped ``DomeConfig``
-        already writes (and the old :class:`~vijil_dome.Dome.Dome` class
-        already reads for its legacy ``input-guards``/``output-guards``
-        format) — this just also reads that document's ``controls`` key.
+        Reads the ``config.json`` Console's agent-scoped ``DomeConfig``
+        writes and enforces both its guards and its ``controls``.
         TTL/ETag caching is unchanged, reused as-is from
         :func:`~vijil_dome.utils.config_loader.load_dome_config_from_s3` --
         no new freshness mechanism was needed here.
@@ -175,9 +241,8 @@ class VijilDome:
             **aws_kwargs,
         )
 
-        controls_list = config_dict.get("controls", [])
-        vijil_dome = VijilDome(
-            policy=controls_list, enforce=enforce, agent_id=agent_id, team_id=team_id
+        vijil_dome = VijilDome.from_config(
+            config_dict, enforce=enforce, agent_id=agent_id, team_id=team_id
         )
 
         vijil_dome._s3_bucket = bucket
@@ -224,9 +289,8 @@ class VijilDome:
             cache_ttl_seconds=cache_ttl_seconds,
         )
 
-        controls_list = config_dict.get("controls", [])
-        vijil_dome = VijilDome(
-            policy=controls_list, enforce=enforce, agent_id=agent_id, team_id=team_id
+        vijil_dome = VijilDome.from_config(
+            config_dict, enforce=enforce, agent_id=agent_id, team_id=team_id
         )
 
         vijil_dome._api_base_url = base_url

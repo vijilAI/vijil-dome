@@ -87,3 +87,22 @@ def test_config_has_changed_delegates_to_config_loader():
     assert call_kwargs["bucket"] == "my-bucket"
     assert call_kwargs["key"] == "teams/team-1/agents/agent-1/dome/config.json"
     assert call_kwargs["local_config"] == SAMPLE_CONFIG
+
+
+def test_create_from_s3_applies_guards_and_controls():
+    config = {
+        "input-guards": ["in-guard"],
+        "output-guards": [],
+        "in-guard": {"type": "security", "methods": ["encoding-heuristics"]},
+        "controls": SAMPLE_CONFIG["controls"],
+    }
+    with patch(
+        "vijil_dome.utils.config_loader.load_dome_config_from_s3",
+        return_value=config,
+    ):
+        dome = VijilDome.create_from_s3(
+            bucket="my-bucket", team_id="team-1", agent_id="agent-1"
+        )
+
+    assert dome.input_guardrail is not None
+    assert len(dome.engine.controls) == 1
