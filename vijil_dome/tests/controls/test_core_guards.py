@@ -7,6 +7,7 @@ import pytest
 
 from vijil_dome.controls.engine import run_sync
 from vijil_dome.controls.errors import ControlViolationError
+from vijil_dome.controls.models import ControlAction, ControlMatch, EvaluationResult
 from vijil_dome.core import VijilDome
 from vijil_dome.Dome import create_dome_config
 
@@ -162,3 +163,25 @@ def test_fail_closed_guard_crash_denies():
 def test_guard_tool_call_ignores_guards():
     v = VijilDome(guards=HEURISTIC_CFG)
     assert v.guard_tool_call("search", ATTACK).action == "allow"
+
+
+def test_controls_only_result_is_engine_result_unchanged():
+    def deny(name: str, confidence: float) -> ControlMatch:
+        return ControlMatch(
+            control_name=name,
+            triggered=True,
+            action=ControlAction(decision="deny"),
+            message=name,
+            confidence=confidence,
+        )
+
+    engine_result = EvaluationResult(
+        action="deny",
+        confidence=0.4,
+        matches=[deny("first", 0.4), deny("second", 0.9)],
+    )
+    v = VijilDome(enforce=False)
+    with patch.object(
+        v.engine, "evaluate", new_callable=AsyncMock, return_value=engine_result
+    ):
+        assert v.guard_input("hi") == engine_result

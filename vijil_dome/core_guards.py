@@ -68,6 +68,8 @@ def merge_results(
     controls: EvaluationResult | None,
 ) -> EvaluationResult:
     """Combine guard and controls outcomes; a deny from either side wins."""
+    if guard_result is None and controls is not None:
+        return controls
     guard_hits = guard_matches(guard_result, level) if guard_result else []
     control_matches = controls.matches if controls else []
     matches = guard_hits + control_matches
