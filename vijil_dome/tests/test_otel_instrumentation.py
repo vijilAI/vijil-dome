@@ -100,3 +100,95 @@ class TestOtelAttributeTruncation:
             if c[0][0] == "function.result"
         )
         assert len(result_call[0][1]) <= _MAX_ATTR_LENGTH
+
+
+class TestVijilLogFormatter:
+    def test_unresolvable_hostname_does_not_raise(self) -> None:
+        import logging
+        import socket
+
+        from vijil_dome.integrations.instrumentation import otel_instrumentation as mod
+
+        mod._host_ip.cache_clear()
+        record = logging.LogRecord("vijil.dome", logging.WARNING, "f.py", 1, "hello", None, None)
+        with patch.object(socket, "gethostbyname", side_effect=socket.gaierror(8, "not known")):
+            formatted = mod.get_vijil_log_formatter().format(record)
+        mod._host_ip.cache_clear()
+
+        assert "resource.service.ip=N/A" in formatted
+        assert formatted.endswith("hello")
+
+    def test_hostname_resolved_once(self) -> None:
+        import logging
+        import socket
+
+        from vijil_dome.integrations.instrumentation import otel_instrumentation as mod
+
+        mod._host_ip.cache_clear()
+        formatter = mod.get_vijil_log_formatter()
+        with patch.object(socket, "gethostbyname", return_value="10.0.0.1") as lookup:
+            for _ in range(3):
+                formatter.format(logging.LogRecord("vijil.dome", logging.INFO, "f.py", 1, "m", None, None))
+        mod._host_ip.cache_clear()
+
+        assert lookup.call_count == 1
+
+
+class TestInstrumentDomeLogLevel:
+    def _instrument(self, handler) -> None:
+        from vijil_dome.integrations.instrumentation.otel_instrumentation import (
+            instrument_dome,
+        )
+
+        dome = MagicMock(spec=[])
+        dome.input_guardrail = None
+        dome.output_guardrail = None
+        with patch(
+            "vijil_dome.integrations.instrumentation.otel_instrumentation.LoggingInstrumentor"
+        ):
+            instrument_dome(dome, handler=handler, tracer=None, meter=None)
+
+    def test_info_enabled_when_level_unset(self) -> None:
+        import logging
+
+        logger = logging.getLogger("vijil.dome")
+        handler = logging.NullHandler()
+        original = logger.level
+        logger.setLevel(logging.NOTSET)
+        try:
+            self._instrument(handler)
+            assert logger.level == logging.INFO
+        finally:
+            logger.removeHandler(handler)
+            logger.setLevel(original)
+
+    def test_app_level_preserved(self) -> None:
+        import logging
+
+        logger = logging.getLogger("vijil.dome")
+        handler = logging.NullHandler()
+        original = logger.level
+        logger.setLevel(logging.ERROR)
+        try:
+            self._instrument(handler)
+            assert logger.level == logging.ERROR
+        finally:
+            logger.removeHandler(handler)
+            logger.setLevel(original)
+
+
+class TestConfigLoggingFormatter:
+    def test_unresolvable_hostname_does_not_raise(self) -> None:
+        import logging
+        import socket
+
+        from vijil_dome.instrumentation import logging as dome_logging
+
+        dome_logging._get_ip_address.cache_clear()
+        formatter = dome_logging.CustomFormatter("%(ip_address)s %(message)s")
+        record = logging.LogRecord("vijil.dome", logging.INFO, "f.py", 1, "hello", None, None)
+        with patch.object(socket, "gethostbyname", side_effect=socket.gaierror(8, "not known")):
+            formatted = formatter.format(record)
+        dome_logging._get_ip_address.cache_clear()
+
+        assert formatted == "N/A hello"

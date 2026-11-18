@@ -16,7 +16,7 @@
 
 import json
 import logging
-from functools import wraps
+from functools import lru_cache, wraps
 from typing import Any, Literal, Optional
 from opentelemetry.sdk.trace import Tracer
 from opentelemetry.trace.span import Span
@@ -35,6 +35,17 @@ from vijil_dome.instrumentation.tracing import _truncate
 import socket
 
 
+@lru_cache(maxsize=1)
+def _host_ip() -> str:
+    # Hostnames often don't resolve (macOS .local names, some containers), and
+    # OTel's LoggingHandler doesn't catch formatter errors -- a raise here
+    # propagates out of the guard scan that logged.
+    try:
+        return socket.gethostbyname(socket.gethostname())
+    except OSError:
+        return "N/A"
+
+
 class VijilLogFormatter(logging.Formatter):
     def format(self, record):
         # Set the default values of the OTel Logging information if absent
@@ -44,12 +55,8 @@ class VijilLogFormatter(logging.Formatter):
         record.otelServiceName = getattr(record, "otelServiceName", "N/A")
         record.otelTraceSampled = getattr(record, "otelTraceSampled", "N/A")
 
-        # Add the IP address to the log record if it doesn't exist
-        record.ip = getattr(
-            record,
-            "ip",
-            socket.gethostbyname(socket.gethostname()),
-        )
+        if not hasattr(record, "ip"):
+            record.ip = _host_ip()
         return super().format(record)
 
 
@@ -152,6 +159,10 @@ def instrument_dome(
         logger = logging.getLogger("vijil.dome")
         logger.addHandler(handler)
         instrument_logger(logger)
+        # Unset, the logger inherits root's WARNING and drops Dome's INFO records
+        # before they reach the handler. An app-chosen level wins.
+        if logger.level == logging.NOTSET:
+            logger.setLevel(logging.INFO)
 
     # Add tracer for detailed per-guard/per-detector spans
     if tracer:

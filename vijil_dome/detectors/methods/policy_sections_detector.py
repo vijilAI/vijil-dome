@@ -16,7 +16,7 @@
 
 import asyncio
 import logging
-from typing import Optional, List, Dict, Any, Union, Tuple, Literal, cast
+from typing import TYPE_CHECKING, Optional, List, Dict, Any, Union, Tuple, Literal, cast
 
 from vijil_dome.detectors import (
     DetectionCategory,
@@ -28,7 +28,6 @@ from vijil_dome.detectors import (
 )
 from vijil_dome.types import DomePayload
 from vijil_dome.defaults import DEFAULT_SAFEGUARD_MODEL
-from vijil_dome.detectors.methods.gpt_oss_safeguard_policy import PolicyGptOssSafeguard
 from vijil_dome.utils.policy_loader import (
     load_policy_sections_from_s3,
     validate_policy_json,
@@ -40,6 +39,11 @@ from vijil_dome.utils.faiss_loader import (
 )
 from vijil_dome.embeds import EmbeddingsItem
 from vijil_dome.embeds.embedder import Embedder
+
+# gpt_oss_safeguard_policy needs litellm (the [llm] extra); this module is
+# always imported, so a top-level import would break the base install.
+if TYPE_CHECKING:
+    from vijil_dome.detectors.methods.gpt_oss_safeguard_policy import PolicyGptOssSafeguard
 
 logger = logging.getLogger("vijil.dome")
 
@@ -503,6 +507,8 @@ class PolicySectionsDetector(DetectionMethod):
         api_key: Optional[str],
     ) -> None:
         """Create PolicyGptOssSafeguard instances for each section."""
+        from vijil_dome.detectors.methods.gpt_oss_safeguard_policy import PolicyGptOssSafeguard
+
         self.detectors: List[PolicyGptOssSafeguard] = []
         self.section_metadata: List[Dict[str, Any]] = []
         self.all_sections = filtered_sections
@@ -653,7 +659,7 @@ class PolicySectionsDetector(DetectionMethod):
     async def _detect_batched(
         self,
         query_string: str,
-        detectors: Optional[List[PolicyGptOssSafeguard]] = None,
+        detectors: Optional[List["PolicyGptOssSafeguard"]] = None,
         metadata: Optional[List[Dict[str, Any]]] = None,
         rag_info: Optional[Dict[str, Any]] = None,
         batch_size: Optional[int] = None,

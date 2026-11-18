@@ -17,6 +17,7 @@
 import logging
 import toml
 import socket
+from functools import lru_cache
 from pathlib import Path
 from typing import Dict, Any, Optional
 from opentelemetry.sdk._logs import LoggerProvider, LoggingHandler
@@ -108,8 +109,14 @@ def setup_vijil_logging(
     return logger_provider
 
 
-def _get_ip_address():
-    return socket.gethostbyname(socket.gethostname())
+@lru_cache(maxsize=1)
+def _get_ip_address() -> str:
+    # An unresolvable hostname must not raise: OTel's LoggingHandler doesn't
+    # catch formatter errors, so it would propagate into the caller's log call.
+    try:
+        return socket.gethostbyname(socket.gethostname())
+    except OSError:
+        return "N/A"
 
 
 CUSTOM_FIELD_FUNCTIONS = {
