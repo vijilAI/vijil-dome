@@ -9,7 +9,7 @@ import re
 import threading
 import time
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any, Coroutine, Literal, TypeVar
 
 try:
     import re2 as _re2_engine
@@ -32,6 +32,23 @@ from vijil_dome.controls.selectors import MISSING, resolve
 logger = logging.getLogger(__name__)
 
 _nest_asyncio_applied = False
+
+T = TypeVar("T")
+
+
+def run_sync(coro: Coroutine[Any, Any, T]) -> T:
+    """Run a coroutine to completion from sync code, even inside a running loop."""
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        return asyncio.run(coro)
+    global _nest_asyncio_applied
+    if not _nest_asyncio_applied:
+        import nest_asyncio
+
+        nest_asyncio.apply()
+        _nest_asyncio_applied = True
+    return asyncio.get_event_loop().run_until_complete(coro)
 
 
 class ControlEngine:
@@ -208,19 +225,7 @@ class ControlEngine:
     def evaluate_sync(
         self, step: Step, stage: Literal["pre", "post"] = "pre"
     ) -> EvaluationResult:
-        try:
-            asyncio.get_running_loop()
-        except RuntimeError:
-            return asyncio.run(self.evaluate(step, stage))
-        # Inside an existing event loop — use nest_asyncio
-        global _nest_asyncio_applied
-        if not _nest_asyncio_applied:
-            import nest_asyncio
-
-            nest_asyncio.apply()
-            _nest_asyncio_applied = True
-        loop = asyncio.get_event_loop()
-        return loop.run_until_complete(self.evaluate(step, stage))
+        return run_sync(self.evaluate(step, stage))
 
     # ------------------------------------------------------------------
     # Scope matching

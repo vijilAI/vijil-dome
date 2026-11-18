@@ -1,18 +1,16 @@
-"""VijilDome — policy-driven runtime for agent controls.
+"""VijilDome — one runtime for policy controls and Dome guard pipelines.
 
-The policy is the single config surface.  All detection — ML models,
-regex, custom evaluators — is defined in the policy controls.  Dome
-detectors are referenced via ``dome:*`` evaluators.
-
-The existing :class:`~vijil_dome.Dome.Dome` class is unchanged and
-continues to work for standalone content guardrailing.
+Controls (``policy=``) carry ML models, regex and custom evaluators.
+Guard pipelines (``guards=``) are the same ``Guardrail`` objects
+:class:`~vijil_dome.Dome.Dome` builds, so one instance can enforce a whole
+Console config.
 """
 
 from __future__ import annotations
 
 import logging
 from pathlib import Path
-from typing import Any, Callable, Literal
+from typing import TYPE_CHECKING, Any, Callable, Literal
 
 from vijil_dome.controls.decorator import control as control_decorator
 from vijil_dome.controls.engine import ControlEngine
@@ -20,15 +18,17 @@ from vijil_dome.controls.errors import handle_result
 from vijil_dome.controls.models import Control, EvaluationResult, Step
 from vijil_dome.utils.api_config_loader import DEFAULT_CONSOLE_API_BASE_URL
 
+if TYPE_CHECKING:
+    from vijil_dome.Dome import DomeConfig
+    from vijil_dome.guardrails import Guardrail
+
 logger = logging.getLogger(__name__)
 
 
 class VijilDome:
-    """Policy-driven runtime.
+    """Runtime enforcing policy controls and, optionally, Dome guard pipelines.
 
-    All detection — ML models, regex, custom evaluators — is defined
-    in the policy controls.  Dome detectors are referenced via
-    ``dome:*`` evaluators within the policy.
+    Controls are defined in the policy; guard pipelines in ``guards``.
 
     Parameters
     ----------
@@ -37,6 +37,11 @@ class VijilDome:
         - A list of :class:`Control` objects or dicts
         - A path (str or Path) to a YAML/JSON file
         - ``None`` (empty policy — controls can be added later)
+    guards:
+        Dome guard configuration: a dict, a path to a ``.toml`` file, or a
+        :class:`~vijil_dome.Dome.DomeConfig`.  ``None`` (default) means no
+        guard pipelines.  Builds :attr:`input_guardrail` and
+        :attr:`output_guardrail`.
     enforce:
         If ``True`` (default), deny/steer actions raise exceptions.
         If ``False``, violations are logged but not enforced (shadow mode).
@@ -54,6 +59,7 @@ class VijilDome:
         self,
         *,
         policy: list[dict | Control] | str | Path | None = None,
+        guards: dict | str | DomeConfig | None = None,
         enforce: bool = True,
         agent_id: str | None = None,
         team_id: str | None = None,
@@ -64,6 +70,8 @@ class VijilDome:
         self._team_id = team_id
         self._user_id = user_id
         self._engine = ControlEngine()
+        self.input_guardrail: Guardrail | None = None
+        self.output_guardrail: Guardrail | None = None
 
         # Populated by create_from_s3(); let config_has_changed() detect an
         # instance that wasn't created that way, mirroring Dome.create_from_s3.
@@ -92,6 +100,25 @@ class VijilDome:
                 for c in policy
             ]
             self._engine.load_controls(defs)
+
+        if guards is not None:
+            self._build_guardrails(guards)
+
+    def _build_guardrails(self, guards: dict | str | DomeConfig) -> None:
+        # Lazy: Dome.py imports openai at module top.
+        from vijil_dome.Dome import DomeConfig, create_dome_config
+        from vijil_dome.guardrails import DEFAULT_ON_ERROR
+
+        if isinstance(guards, (dict, str)):
+            default_on_error = "fail_closed" if self._enforce else DEFAULT_ON_ERROR
+            guards = create_dome_config(guards, default_on_error)
+        elif not isinstance(guards, DomeConfig):
+            raise ValueError(
+                f"VijilDome received an invalid type ({type(guards)}) for guards. "
+                "Use a dictionary, a path to a .toml file, or a DomeConfig object."
+            )
+        self.input_guardrail = guards.input_guardrail
+        self.output_guardrail = guards.output_guardrail
 
     @staticmethod
     def create_from_s3(
