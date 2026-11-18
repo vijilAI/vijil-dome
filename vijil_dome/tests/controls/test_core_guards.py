@@ -1,4 +1,5 @@
 import base64
+import json
 import logging
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
@@ -133,6 +134,33 @@ def test_dict_input_skips_guards_and_warns_once(caplog):
         r2 = v.guard_input({"q": ATTACK})
     assert r1.action == "allow" and r1.guard_result is None and r2.action == "allow"
     assert len([rec for rec in caplog.records if "guards" in rec.getMessage()]) == 1
+
+
+def test_dict_input_on_side_without_guards_does_not_warn(caplog):
+    v = VijilDome(guards={"input-guards": ["in-guard"], "in-guard": HEURISTIC_CFG["in-guard"]})
+    with caplog.at_level(logging.WARNING, logger="vijil_dome.core"):
+        v.guard_output({"q": "hi"})
+    assert not caplog.records
+
+
+def test_masking_result_serializes_to_json():
+    v = VijilDome(guards=PII_MASK_CFG, enforce=False)
+    r = v.guard_output("email me at john.smith@example.com")
+    assert r.guard_result is not None
+    assert "[REDACTED" in json.loads(r.model_dump_json())["guarded_text"]
+    assert "[REDACTED" in r.model_dump(mode="json")["guarded_text"]
+    assert "guard_result" not in r.model_dump(mode="json")
+
+
+def test_guards_dict_config_ids_flow_to_guardrail_scan():
+    cfg = {**HEURISTIC_CFG, "team_id": "cfg-team", "agent_id": "cfg-agent"}
+    v = VijilDome(guards=cfg)
+    assert (v.agent_id, v.team_id) == ("cfg-agent", "cfg-team")
+
+
+def test_explicit_ids_win_over_guard_config_ids():
+    cfg = {**HEURISTIC_CFG, "team_id": "cfg-team"}
+    assert VijilDome(guards=cfg, team_id="mine").team_id == "mine"
 
 
 def test_identity_overrides_reach_guardrail():

@@ -25,8 +25,6 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-# tool-permissions and organization are Console constraint metadata consumed
-# by TrustRuntime; they are known here but deliberately not enforced.
 _PIPELINE_SETTING_KEYS = frozenset(
     f"{side}-{option}"
     for side in ("input", "output")
@@ -38,6 +36,8 @@ _KNOWN_CONFIG_KEYS = frozenset(
         "controls",
         "input-guards",
         "output-guards",
+        # Console constraint metadata consumed by TrustRuntime; known here but
+        # deliberately not enforced.
         "tool-permissions",
         "organization",
         "id",
@@ -147,6 +147,9 @@ class VijilDome:
             )
         self.input_guardrail = guards.input_guardrail
         self.output_guardrail = guards.output_guardrail
+        self._agent_id = self._agent_id or guards.get_agent_id()
+        self._team_id = self._team_id or guards.get_team_id()
+        self._user_id = self._user_id or guards.get_user_id()
 
     @staticmethod
     def from_config(
@@ -394,7 +397,7 @@ class VijilDome:
         guardrail = self.input_guardrail if level == "input" else self.output_guardrail
         original = text if isinstance(text, str) else ""
 
-        if isinstance(text, dict) and guardrail is not None:
+        if isinstance(text, dict) and guardrail is not None and guardrail.guard_list:
             if not self._warned_dict_skip:
                 logger.warning(
                     "VijilDome skips guards for dict input; only controls run on it."

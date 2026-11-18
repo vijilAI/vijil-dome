@@ -122,8 +122,10 @@ dome = VijilDome.create_from_api(
     client_id, client_secret, agent_id="my-agent", team_id="my-team"
 )
 scan = dome.guard_input(query)
+text = query if scan.guarded_text is None else scan.guarded_text  # forward masked text
 ```
 
+A guard block raises `ControlViolationError` in enforce mode, like a deny control.
 `Dome.create_from_api` / `create_from_s3` enforce guards only and warn when the
 config has controls. `Dome.create_from_vijil_agent(..., team_id=...)` is
 deprecated and returns a `VijilDome`.
@@ -148,6 +150,7 @@ dome = VijilDome(
     enforce=False,
 )
 scan = dome.guard_input("my key is SECRET-123")
+text = "my key is SECRET-123" if scan.guarded_text is None else scan.guarded_text
 ```
 
 ### Trust runtime (one line)

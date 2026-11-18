@@ -205,7 +205,8 @@ class EvaluationResult(BaseModel):
     steering_context: SteeringContext | None = None
     exec_time_ms: float = 0.0
     guarded_text: str | None = None
-    guard_result: GuardrailResult | None = None
+    # Excluded: detector details can hold non-serializable objects (e.g. classes).
+    guard_result: GuardrailResult | None = Field(default=None, exclude=True)
 
     @computed_field  # type: ignore[prop-decorator]
     @property

@@ -355,3 +355,23 @@ def test_instrument_vijil_dome_old_call_signature_still_works(telemetry):
     v.guard_input("a SECRET")
 
     assert _span_names(exporter) == ["dome-control"]
+
+
+def test_controls_only_instance_does_not_install_logging_instrumentor(telemetry):
+    tracer, _, _, _ = telemetry
+    v = VijilDome(policy=[_regex_deny("SECRET", stage="pre")], enforce=False)
+    with patch(
+        "vijil_dome.integrations.instrumentation.otel_instrumentation.LoggingInstrumentor"
+    ) as instrumentor:
+        instrument_vijil_dome(v, tracer)
+    instrumentor.assert_not_called()
+
+
+def test_guarded_instance_installs_logging_instrumentor(telemetry):
+    tracer, _, _, _ = telemetry
+    v = VijilDome(guards=HEURISTIC_CFG, enforce=False)
+    with patch(
+        "vijil_dome.integrations.instrumentation.otel_instrumentation.LoggingInstrumentor"
+    ) as instrumentor:
+        instrument_vijil_dome(v, tracer)
+    instrumentor.assert_called()

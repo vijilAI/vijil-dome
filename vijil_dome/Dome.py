@@ -253,6 +253,7 @@ class Dome:
         agent_id: str,
         api_key: str,
         base_url: Optional[str] = None,
+        # Unused; kept so positional callers' enforce argument doesn't shift.
         client: Optional[OpenAI] = None,
         enforce: bool = True,
         *,

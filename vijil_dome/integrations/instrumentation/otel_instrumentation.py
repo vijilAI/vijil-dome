@@ -373,7 +373,9 @@ def instrument_vijil_dome(
     if getattr(vijil_dome, "_instrumented", False):
         return
 
-    _instrument_guardrails(vijil_dome, handler, tracer, meter, vijil_dome.enforce)
+    guardrails = (vijil_dome.input_guardrail, vijil_dome.output_guardrail)
+    if any(g is not None and g.guard_list for g in guardrails):
+        _instrument_guardrails(vijil_dome, handler, tracer, meter, vijil_dome.enforce)
 
     original_evaluate = vijil_dome.engine.evaluate
 
