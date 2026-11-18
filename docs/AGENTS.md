@@ -113,6 +113,30 @@ if not input_scan.is_safe():
     return input_scan.guarded_response()
 ```
 
+### Enforce a whole Console config (guards and controls)
+
+```python
+from vijil_dome import VijilDome
+
+dome = VijilDome.create_from_api(
+    client_id, client_secret, agent_id="my-agent", team_id="my-team"
+)
+scan = dome.guard_input(query)
+```
+
+`Dome.create_from_api` / `create_from_s3` enforce guards only and warn when the
+config has controls. `Dome.create_from_vijil_agent(..., team_id=...)` is
+deprecated and returns a `VijilDome`.
+
+### Guards and a control policy, locally
+
+```python
+dome = VijilDome(
+    guards={"input-guards": ["prompt-injection"]},
+    policy=[...],  # control dicts or a path to a policy file
+)
+```
+
 ### Trust runtime (one line)
 
 ```python

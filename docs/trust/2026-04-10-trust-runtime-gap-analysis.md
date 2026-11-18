@@ -43,7 +43,7 @@ This document maps every component required for a complete Vijil Trust Runtime d
 | `GET /manifests/public-key` | **Missing** | Must return public key for manifest verification |
 | `POST /agents/{id}/audit` | **Missing** | Must accept streamed audit events from trust runtime |
 | Organization constraints model | **Missing** | No concept of org-level mandatory rules in Console today |
-| Dome config in AgentConstraints format | **Partial** | `Dome.create_from_vijil_agent()` exists but format may differ from AgentConstraints schema |
+| Dome config in AgentConstraints format | **Partial** | `VijilDome.create_from_api()` loads the active Console config (`Dome.create_from_vijil_agent()` is deprecated, needs `team_id`, returns a `VijilDome`), but format may differ from AgentConstraints schema |
 
 ### Build Pipeline
 
@@ -84,7 +84,7 @@ This document maps every component required for a complete Vijil Trust Runtime d
 | Component | Status | Gap |
 |---|---|---|
 | Dome library (vijil-dome) | Exists (v1.5.0) | No changes needed for trust runtime |
-| Dome guard config from Console | Exists | `Dome.create_from_vijil_agent()` fetches config |
+| Dome guard config from Console | Exists | `VijilDome.create_from_api()` fetches and enforces the active config (`Dome.create_from_vijil_agent(team_id=...)` is deprecated) |
 | Dome inference decoupling | **Missing** | ML models bundled with torch. Spec 2 offloads to vijil-inference. |
 | Dome guards on tool responses | Designed | In TrustRuntime but not tested with real Dome |
 

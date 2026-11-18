@@ -97,7 +97,7 @@ External:
 |---|---|---|
 | **TrustRuntime** | Orchestrates all trust concerns. Holds Dome instance, tool policy, identity, audit logger. | vijil-sdk |
 | **Identity** | Fetches SVID from SPIRE Workload API. Provides mTLS credentials for outbound calls. Falls back to API key when SPIRE unavailable (dev). | vijil-sdk |
-| **Dome Guards** | Input/output content scanning. Fetched from Console via `create_from_vijil_agent()`. Heuristic + API-based detectors (no torch). | vijil-dome (library) |
+| **Dome Guards** | Input/output content scanning. Fetched from Console via `VijilDome.create_from_api()` (`Dome.create_from_vijil_agent(..., team_id=...)` is deprecated and now returns a `VijilDome`). Heuristic + API-based detectors (no torch). | vijil-dome (library) |
 | **Tool Policy** | Declares permitted tools with their SPIFFE identities. Enforces MAC on every tool invocation. Loaded from Console. | vijil-sdk |
 | **Tool Manifest** | Build artifact: signed list of (tool_name, spiffe_id, version). Verified at boot. | vijil-sdk |
 | **Audit** | Emits OTel spans for every guard decision, tool MAC decision, and attestation event. Tagged with agent SPIFFE ID. | vijil-sdk |
@@ -670,7 +670,7 @@ The compilation pipeline is compromised, producing a template that looks policy-
 | Test | What it verifies |
 |---|---|
 | Console constraints fetch | `GET /agents/{id}/constraints` returns valid AgentConstraints |
-| Dome from Console config | `Dome.create_from_vijil_agent()` produces working guards |
+| Dome from Console config | `VijilDome.create_from_api()` produces a `VijilDome` enforcing guards and controls (`Dome.create_from_vijil_agent(team_id=...)` is deprecated and returns a `VijilDome`) |
 | End-to-end with real Dome | Input guard catches prompt injection, output guard catches PII |
 | SPIRE attestation (when available) | Agent receives SVID, tool verification succeeds |
 
