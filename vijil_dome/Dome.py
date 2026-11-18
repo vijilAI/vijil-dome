@@ -25,19 +25,42 @@ from vijil_dome.guardrails.config_parser import (
     convert_dict_to_guardrails,
     convert_toml_to_guardrails,
 )
-from vijil_dome.integrations.vijil.evaluate import (
-    get_config_from_vijil_agent,
-    get_config_from_vijil_evaluation,
-)
+from vijil_dome.integrations.vijil.evaluate import get_config_from_vijil_evaluation
 from vijil_dome.types import DomePayload
 from vijil_dome.utils.config_loader import (
     load_dome_config_from_s3,
     config_has_changed as _config_has_changed,
 )
 from openai import OpenAI
-from typing import Union, Dict, List, Optional, Callable, Iterator
+from typing import TYPE_CHECKING, Union, Dict, List, Optional, Callable, Iterator
 from .defaults import get_default_config
 from pydantic import BaseModel
+import logging
+import warnings
+
+if TYPE_CHECKING:
+    from vijil_dome.core import VijilDome
+
+logger = logging.getLogger(__name__)
+
+_loaders_warned_about_controls: set = set()
+
+
+def _warn_unenforced_controls(config_dict: dict, loader: str) -> None:
+    """Warn that a Dome loader dropped the config's controls."""
+    controls = config_dict.get("controls")
+    if not controls:
+        return
+    message = (
+        f"Dome.{loader} loaded a config with {len(controls)} controls; "
+        f"Dome does not enforce controls. Use VijilDome.{loader} to enforce "
+        "the whole config."
+    )
+    warnings.warn(message, DeprecationWarning, stacklevel=3)
+    # DeprecationWarning is hidden by default outside __main__, so also log it.
+    if loader not in _loaders_warned_about_controls:
+        _loaders_warned_about_controls.add(loader)
+        logger.warning(message)
 
 
 class DomeConfig(GuardrailConfig):
@@ -232,11 +255,28 @@ class Dome:
         base_url: Optional[str] = None,
         client: Optional[OpenAI] = None,
         enforce: bool = True,
-    ) -> "Dome":
-        config_dict = get_config_from_vijil_agent(api_key, agent_id, base_url)
-        if config_dict is None:
-            raise ValueError(f"No Dome configuration found for agent ID {agent_id}")
-        return Dome(dome_config=config_dict, client=client, enforce=enforce)
+        *,
+        team_id: str,
+    ) -> "VijilDome":
+        """Load the agent's active Console config into a VijilDome; *api_key* is a Console access token."""
+        from vijil_dome.core import VijilDome
+        from vijil_dome.utils.api_config_loader import (
+            DEFAULT_CONSOLE_API_BASE_URL,
+            _fetch_active_config,
+        )
+
+        warnings.warn(
+            "Dome.create_from_vijil_agent is deprecated; use "
+            "VijilDome.create_from_api(client_id, client_secret, agent_id, team_id).",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        config_body = _fetch_active_config(
+            base_url or DEFAULT_CONSOLE_API_BASE_URL, agent_id, team_id, api_key
+        )
+        return VijilDome.from_config(
+            config_body, enforce=enforce, agent_id=agent_id, team_id=team_id
+        )
 
     @staticmethod
     def create_from_vijil_evaluation(
@@ -296,6 +336,7 @@ class Dome:
             cache_ttl_seconds=cache_ttl_seconds,
             **aws_kwargs,
         )
+        _warn_unenforced_controls(config_dict, "create_from_s3")
         dome = Dome(dome_config=config_dict, client=client, enforce=enforce)
         # Store S3 origin for config_has_changed()
         from vijil_dome.utils.config_loader import _resolve_key
@@ -346,6 +387,7 @@ class Dome:
             cache_dir=cache_dir,
             cache_ttl_seconds=cache_ttl_seconds,
         )
+        _warn_unenforced_controls(config_dict, "create_from_api")
         dome = Dome(dome_config=config_dict, client=client, enforce=enforce)
         dome._api_base_url = resolved_base_url
         dome._api_client_id = client_id
