@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import logging
 from unittest.mock import MagicMock, patch
+
+import pytest
 
 
 class TestIdempotentInstrumentDome:
@@ -103,17 +106,23 @@ class TestOtelAttributeTruncation:
 
 
 class TestVijilLogFormatter:
+    @pytest.fixture(autouse=True)
+    def _reset_ip_cache(self):
+        from vijil_dome.instrumentation import logging as dome_logging
+
+        dome_logging._ip_address = None
+        yield
+        dome_logging._ip_address = None
+
     def test_unresolvable_hostname_does_not_raise(self) -> None:
         import logging
         import socket
 
         from vijil_dome.integrations.instrumentation import otel_instrumentation as mod
 
-        mod._host_ip.cache_clear()
         record = logging.LogRecord("vijil.dome", logging.WARNING, "f.py", 1, "hello", None, None)
         with patch.object(socket, "gethostbyname", side_effect=socket.gaierror(8, "not known")):
             formatted = mod.get_vijil_log_formatter().format(record)
-        mod._host_ip.cache_clear()
 
         assert "resource.service.ip=N/A" in formatted
         assert formatted.endswith("hello")
@@ -124,17 +133,50 @@ class TestVijilLogFormatter:
 
         from vijil_dome.integrations.instrumentation import otel_instrumentation as mod
 
-        mod._host_ip.cache_clear()
         formatter = mod.get_vijil_log_formatter()
         with patch.object(socket, "gethostbyname", return_value="10.0.0.1") as lookup:
             for _ in range(3):
                 formatter.format(logging.LogRecord("vijil.dome", logging.INFO, "f.py", 1, "m", None, None))
-        mod._host_ip.cache_clear()
 
         assert lookup.call_count == 1
 
+    def test_failed_lookup_is_retried(self) -> None:
+        import socket
+
+        from vijil_dome.instrumentation import logging as dome_logging
+
+        with patch.object(socket, "gethostbyname", side_effect=socket.gaierror(8, "not known")):
+            assert dome_logging._get_ip_address() == "N/A"
+        with patch.object(socket, "gethostbyname", return_value="10.0.0.1"):
+            assert dome_logging._get_ip_address() == "10.0.0.1"
+
+
+class _Capture(logging.Handler):
+    def __init__(self) -> None:
+        super().__init__()
+        self.records: list[tuple[str, str]] = []
+
+    def emit(self, record: logging.LogRecord) -> None:
+        self.records.append((record.name, record.levelname))
+
 
 class TestInstrumentDomeLogLevel:
+    @pytest.fixture(autouse=True)
+    def _restore_loggers(self):
+        names = ("vijil.dome", "vijil_dome", "")
+        saved = {
+            n: (logging.getLogger(n).level, logging.getLogger(n).propagate, list(logging.getLogger(n).handlers))
+            for n in names
+        }
+        for n in ("vijil.dome", "vijil_dome"):
+            logging.getLogger(n).setLevel(logging.NOTSET)
+        yield
+        for n, (level, propagate, handlers) in saved.items():
+            logger = logging.getLogger(n)
+            logger.setLevel(level)
+            logger.propagate = propagate
+            logger.handlers[:] = handlers
+
     def _instrument(self, handler) -> None:
         from vijil_dome.integrations.instrumentation.otel_instrumentation import (
             instrument_dome,
@@ -148,33 +190,51 @@ class TestInstrumentDomeLogLevel:
         ):
             instrument_dome(dome, handler=handler, tracer=None, meter=None)
 
-    def test_info_enabled_when_level_unset(self) -> None:
-        import logging
+    def _root_console(self, level: int) -> _Capture:
+        console = _Capture()
+        root = logging.getLogger()
+        root.addHandler(console)
+        root.setLevel(level)
+        return console
 
-        logger = logging.getLogger("vijil.dome")
-        handler = logging.NullHandler()
-        original = logger.level
-        logger.setLevel(logging.NOTSET)
-        try:
-            self._instrument(handler)
-            assert logger.level == logging.INFO
-        finally:
-            logger.removeHandler(handler)
-            logger.setLevel(original)
+    def test_info_exported_but_kept_off_the_app_console(self) -> None:
+        console = self._root_console(logging.WARNING)
+        exported = _Capture()
+        self._instrument(exported)
+
+        logging.getLogger("vijil.dome").info("scan")
+        logging.getLogger("vijil.dome").warning("degraded")
+
+        assert exported.records == [("vijil.dome", "INFO"), ("vijil.dome", "WARNING")]
+        assert console.records == [("vijil.dome", "WARNING")]
+
+    def test_app_console_at_info_still_sees_info(self) -> None:
+        console = self._root_console(logging.INFO)
+        self._instrument(_Capture())
+
+        logging.getLogger("vijil.dome").info("scan")
+
+        assert console.records == [("vijil.dome", "INFO")]
+
+    def test_module_loggers_are_exported(self) -> None:
+        console = self._root_console(logging.WARNING)
+        exported = _Capture()
+        self._instrument(exported)
+
+        name = "vijil_dome.detectors.remote_dispatcher"
+        logging.getLogger(name).info("dispatch")
+        logging.getLogger(name).warning("remote down")
+
+        assert exported.records == [(name, "INFO"), (name, "WARNING")]
+        assert console.records == [(name, "WARNING")]
 
     def test_app_level_preserved(self) -> None:
-        import logging
-
         logger = logging.getLogger("vijil.dome")
-        handler = logging.NullHandler()
-        original = logger.level
         logger.setLevel(logging.ERROR)
-        try:
-            self._instrument(handler)
-            assert logger.level == logging.ERROR
-        finally:
-            logger.removeHandler(handler)
-            logger.setLevel(original)
+        self._instrument(logging.NullHandler())
+
+        assert logger.level == logging.ERROR
+        assert logger.propagate is True
 
 
 class TestConfigLoggingFormatter:
@@ -184,11 +244,10 @@ class TestConfigLoggingFormatter:
 
         from vijil_dome.instrumentation import logging as dome_logging
 
-        dome_logging._get_ip_address.cache_clear()
+        dome_logging._ip_address = None
         formatter = dome_logging.CustomFormatter("%(ip_address)s %(message)s")
         record = logging.LogRecord("vijil.dome", logging.INFO, "f.py", 1, "hello", None, None)
         with patch.object(socket, "gethostbyname", side_effect=socket.gaierror(8, "not known")):
             formatted = formatter.format(record)
-        dome_logging._get_ip_address.cache_clear()
 
         assert formatted == "N/A hello"

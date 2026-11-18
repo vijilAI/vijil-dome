@@ -149,6 +149,14 @@ class PolicySectionsDetector(DetectionMethod):
             ValueError: If sections structure is invalid
             ValueError: If use_rag=True but FAISS files not provided
         """
+        # Fail before the S3 and RAG setup below, not after it.
+        try:
+            import litellm  # noqa: F401
+        except ImportError as e:
+            raise ImportError(
+                "policy-sections requires litellm: pip install 'vijil-dome[llm]'"
+            ) from e
+
         # Validate parameters
         has_s3, has_sections = self._validate_params(
             policy_s3_bucket, policy_s3_key, policy_sections, use_rag,

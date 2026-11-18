@@ -38,3 +38,16 @@ def test_dome_imports_without_litellm() -> None:
     )
     result = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True)
     assert result.returncode == 0, result.stderr
+
+
+def test_policy_sections_without_litellm_names_the_extra(monkeypatch) -> None:
+    import sys
+    from unittest.mock import patch
+
+    from vijil_dome.detectors.methods.policy_sections_detector import PolicySectionsDetector
+
+    monkeypatch.setitem(sys.modules, "litellm", None)
+    with patch.object(PolicySectionsDetector, "_validate_params") as validate:
+        with pytest.raises(ImportError, match=r"vijil-dome\[llm\]"):
+            PolicySectionsDetector(policy_sections=[{"section_id": "s1"}])
+    validate.assert_not_called()

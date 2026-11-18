@@ -17,7 +17,6 @@
 import logging
 import toml
 import socket
-from functools import lru_cache
 from pathlib import Path
 from typing import Dict, Any, Optional
 from opentelemetry.sdk._logs import LoggerProvider, LoggingHandler
@@ -109,14 +108,21 @@ def setup_vijil_logging(
     return logger_provider
 
 
-@lru_cache(maxsize=1)
+_ip_address: Optional[str] = None
+
+
 def _get_ip_address() -> str:
     # An unresolvable hostname must not raise: OTel's LoggingHandler doesn't
     # catch formatter errors, so it would propagate into the caller's log call.
-    try:
-        return socket.gethostbyname(socket.gethostname())
-    except OSError:
-        return "N/A"
+    # Only a successful lookup is cached, so DNS that isn't ready at startup
+    # doesn't pin "N/A" for the life of the process.
+    global _ip_address
+    if _ip_address is None:
+        try:
+            _ip_address = socket.gethostbyname(socket.gethostname())
+        except OSError:
+            return "N/A"
+    return _ip_address
 
 
 CUSTOM_FIELD_FUNCTIONS = {
