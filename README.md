@@ -304,6 +304,26 @@ agent = Agent(model="gemini-2.0-flash", callbacks=[DomeCallback()])
 
 Dome integrates with OpenTelemetry, Weave, AgentOps, and Google Cloud Trace. See the [observability docs](https://docs.vijil.ai/dome/tutorials/observability.html).
 
+Guard spans follow the [OpenInference semantic conventions](https://github.com/Arize-ai/openinference), so any OpenInference-compatible collector shows them as `GUARDRAIL` spans. Each span records `input.value` and `output.value`, and the `dome-detection` span adds a JSON `metadata` attribute with the verdict. The spans also carry `session.id` and `user.id` when the current OpenTelemetry context holds them, for example inside `openinference.instrumentation.using_session`. `input.value` holds the unmasked text that was scanned (up to 2,048 characters), so treat the trace backend as a store of user content. To export the spans over OTLP/HTTP:
+
+```python
+from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
+from opentelemetry.sdk.resources import Resource
+from opentelemetry.sdk.trace import TracerProvider
+from opentelemetry.sdk.trace.export import BatchSpanProcessor
+from vijil_dome import Dome
+from vijil_dome.integrations.instrumentation.otel_instrumentation import instrument_dome
+
+provider = TracerProvider(resource=Resource({"openinference.project.name": "my-agent"}))
+provider.add_span_processor(BatchSpanProcessor(OTLPSpanExporter(
+    endpoint="http://localhost:6006/v1/traces",
+    headers={"authorization": "Bearer <api-key>"},  # if the collector requires auth
+)))
+
+dome = Dome()
+instrument_dome(dome, handler=None, tracer=provider.get_tracer("vijil.dome"), meter=None)
+```
+
 
 ## Learn more
 

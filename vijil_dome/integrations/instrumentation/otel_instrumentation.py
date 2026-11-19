@@ -30,8 +30,18 @@ from vijil_dome.guardrails.instrumentation.instrumentation import (
 )
 from vijil_dome import Dome
 from vijil_dome.guardrails import Guardrail, GuardrailResult
-from vijil_dome.integrations.vijil.telemetry import _safe_set_attribute, _set_darwin_span_attributes
-from vijil_dome.instrumentation.tracing import _truncate
+from vijil_dome.integrations.vijil.telemetry import (
+    _safe_set_attribute,
+    _set_darwin_span_attributes,
+    _detection_label,
+)
+from vijil_dome.instrumentation.tracing import (
+    METADATA,
+    _set_context_id_attributes,
+    _truncate,
+    _set_guardrail_span_input,
+    _set_guardrail_span_output,
+)
 from vijil_dome.instrumentation.logging import _get_ip_address
 
 
@@ -96,6 +106,25 @@ def _export_dome_logs(handler: logging.Handler) -> None:
             logger.addHandler(_ForwardToAncestors(logger))
 
 
+def _set_openinference_outcome(
+    span: Span, result: GuardrailResult, guardrail_name: str, enforce: bool
+) -> None:
+    """Set OpenInference output.value and a JSON metadata summary of the verdict."""
+    _set_guardrail_span_output(span, result)
+    triggered_guards = [
+        name for name, guard in result.guard_exec_details.items() if guard.triggered
+    ]
+    metadata = {
+        "guardrail": guardrail_name,
+        "guards": triggered_guards,
+        "label": _detection_label(result),
+        "score": float(result.detection_score or 0.0),
+        "method": result.triggered_methods[0] if result.triggered_methods else None,
+        "enforced": enforce and result.flagged,
+    }
+    _safe_set_attribute(span, METADATA, json.dumps(metadata))
+
+
 def _add_darwin_detection_spans(
     guardrail: Guardrail,
     tracer: Tracer,
@@ -131,6 +160,8 @@ def _add_darwin_detection_spans(
         user_id = kwargs.get("user_id")
         with tracer.start_as_current_span("dome-detection") as span:
             span.set_attribute("dome.guardrail", guardrail_name)
+            _set_guardrail_span_input(span, args, kwargs)
+            _set_context_id_attributes(span, user_id)
             result = original_scan(*args, **kwargs)
             if isinstance(result, GuardrailResult):
                 _set_darwin_span_attributes(
@@ -141,6 +172,7 @@ def _add_darwin_detection_spans(
                     user_id=user_id,
                 )
                 span.set_attribute("dome.guard.enforced", enforce and result.flagged)
+                _set_openinference_outcome(span, result, guardrail_name, enforce)
             return result
 
     @wraps(original_async_scan)
@@ -150,6 +182,8 @@ def _add_darwin_detection_spans(
         user_id = kwargs.get("user_id")
         with tracer.start_as_current_span("dome-detection") as span:
             span.set_attribute("dome.guardrail", guardrail_name)
+            _set_guardrail_span_input(span, args, kwargs)
+            _set_context_id_attributes(span, user_id)
             result = await original_async_scan(*args, **kwargs)
             if isinstance(result, GuardrailResult):
                 _set_darwin_span_attributes(
@@ -160,6 +194,7 @@ def _add_darwin_detection_spans(
                     user_id=user_id,
                 )
                 span.set_attribute("dome.guard.enforced", enforce and result.flagged)
+                _set_openinference_outcome(span, result, guardrail_name, enforce)
             return result
 
     guardrail.scan = scan_with_darwin_spans  # type: ignore[method-assign]
