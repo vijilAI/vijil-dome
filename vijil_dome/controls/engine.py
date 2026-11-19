@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import asyncio
+import concurrent.futures
+import contextvars
 import json
 import logging
 import re
@@ -31,8 +33,6 @@ from vijil_dome.controls.selectors import MISSING, resolve
 
 logger = logging.getLogger(__name__)
 
-_nest_asyncio_applied = False
-
 T = TypeVar("T")
 
 
@@ -42,13 +42,11 @@ def run_sync(coro: Coroutine[Any, Any, T]) -> T:
         asyncio.get_running_loop()
     except RuntimeError:
         return asyncio.run(coro)
-    global _nest_asyncio_applied
-    if not _nest_asyncio_applied:
-        import nest_asyncio
-
-        nest_asyncio.apply()
-        _nest_asyncio_applied = True
-    return asyncio.get_event_loop().run_until_complete(coro)
+    # A loop of its own on another thread. nest_asyncio would re-enter the running
+    # loop instead, but it patches asyncio process-wide, and on Python 3.14 that
+    # breaks asyncio.timeout (which every detector uses) for the rest of the process.
+    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+        return pool.submit(contextvars.copy_context().run, asyncio.run, coro).result()
 
 
 class ControlEngine:

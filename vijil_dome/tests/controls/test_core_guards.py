@@ -1,6 +1,8 @@
 import base64
 import json
 import logging
+import subprocess
+import sys
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
@@ -37,6 +39,30 @@ async def test_run_sync_inside_running_loop():
         return 7
 
     assert run_sync(f()) == 7
+
+
+def test_run_sync_inside_running_loop_leaves_asyncio_unpatched():
+    # Fresh interpreter: a patched event loop would break every later test here.
+    code = """
+import asyncio
+from vijil_dome.controls.engine import run_sync
+
+async def seven():
+    return 7
+
+async def outer():
+    return run_sync(seven())
+
+async def timed():
+    async with asyncio.timeout(1):
+        return "ok"
+
+assert asyncio.run(outer()) == 7
+print(asyncio.run(timed()))
+"""
+    result = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True)
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == "ok"
 
 
 def test_guards_none_means_no_guardrails():
