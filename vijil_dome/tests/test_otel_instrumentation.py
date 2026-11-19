@@ -185,6 +185,7 @@ class TestInstrumentDomeLogLevel:
         dome = MagicMock(spec=[])
         dome.input_guardrail = None
         dome.output_guardrail = None
+        dome.enforce = True
         with patch(
             "vijil_dome.integrations.instrumentation.otel_instrumentation.LoggingInstrumentor"
         ):
