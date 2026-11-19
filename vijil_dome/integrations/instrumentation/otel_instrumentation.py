@@ -400,9 +400,9 @@ def instrument_vijil_dome(
     way: wrap ``vijil_dome.engine.evaluate`` so every *triggered* Control
     emits one span, carrying enough to reconstruct "what fired, and why"
     without needing Dome's own logs -- this, and not a Console
-    write-back API, is how enforcement decisions get back to Console
-    (point ``DOME_TRACES_COLLECTOR_ENDPOINT`` at Console's collector and
-    they show up like any other Dome telemetry).
+    write-back API, is how enforcement decisions get back to Console.
+    Use ``setup_vijil_telemetry`` to build exporters to Console and call
+    this for you.
 
     Idempotent, same as ``instrument_dome``: calling it twice on an
     already-instrumented instance is a no-op.

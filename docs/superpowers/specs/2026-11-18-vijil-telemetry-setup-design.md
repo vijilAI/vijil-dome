@@ -74,7 +74,7 @@ def setup_vijil_telemetry(
 ) -> VijilTelemetry
 ```
 
-Each explicit argument wins over its environment variable. The env names match those `examples/ci_gate` already uses.
+Each explicit argument wins. Next come the coordinates of an instance loaded with `create_from_api` (its Console URL and key), then the environment variable. (The instance fallback was added after final review, so a staging instance doesn't send to production.) The env names match those `examples/ci_gate` already uses.
 
 ### Behaviour
 
@@ -85,23 +85,24 @@ Each explicit argument wins over its environment variable. The env names match t
    - If the instance is already instrumented (`_instrumented`): raise `RuntimeError`. `instrument_*` would ignore the second call, so continuing would break anti-goal 3.
 3. **Check the key (only when `send_to_console`).** Send one authenticated POST of an empty body (`Content-Type: application/x-protobuf`; zero bytes is a valid empty `ExportTraceServiceRequest`) to `{base}/v1/otlp/v1/traces`, with a 5-second timeout. Chosen by Varun.
    - On 401 or 403, raise `ValueError` including Console's JSON `message`, for example a revoked key or an unknown key.
-   - On any other status (including 429 and 5xx), a network error or a timeout, log one WARNING and carry on, so an agent that starts offline or while Console is degraded still runs.
+   - On a redirect or any other 4xx (for example 404 from a `base_url` ending in `/v1`), raise `ValueError` naming the URL: every export would fail the same way. (Changed after final review.)
+   - On 408, 429, 5xx, a network error or a timeout, log one WARNING and carry on, so an agent that starts offline or while Console is degraded still runs.
    - Nothing is instrumented until the check has passed or been waived.
-4. **Build the Resource:** `service.name="vijil.dome"`, `agent.id` (when known), and `user.id` (when given). `team.id` isn't sent; the collector stamps it from the key.
+4. **Build the Resource:** `service.name="vijil.dome"`, `agent.id` (when known), and `user.id` (when given). `team.id` isn't sent; the collector stamps it from the key. The pipeline (Resource, sampler, span limits, batching, metric interval and temporality, exporter TLS and timeouts) is pinned rather than read from the app's `OTEL_*` env, and the Console exporters' session drops the app's OTLP client certificate and headers (newer SDKs merge `OTEL_EXPORTER_OTLP_HEADERS` into explicit ones) (except log record limits, which this SDK reads from env with no override), and the sampler is `ALWAYS_ON`, so an app sampling its own traces doesn't thin out Defend's events.
 5. **Build private providers.** Never use `set_tracer_provider` or the other global setters.
    - `TracerProvider(resource)`, with a `BatchSpanProcessor` per exporter.
    - `MeterProvider(resource, metric_readers=[PeriodicExportingMetricReader(e) for e in exporters])`.
    - `LoggerProvider(resource)`, with a `BatchLogRecordProcessor` per exporter, wrapped in an OTel `LoggingHandler`.
    - When `send_to_console` is on, the Console exporters come first: `OTLP{Span,Metric,Log}Exporter(endpoint=f"{base}/v1/otlp/v1/{signal}", headers={"Authorization": f"Bearer {client_id}:{client_secret}"})`. The user's exporters follow.
-6. **Instrument the instance** with `tracer_provider.get_tracer("vijil.dome")`, `meter_provider.get_meter("vijil.dome")` and the handler:
-   - `Dome` → `instrument_dome(dome, handler, tracer, meter)`
-   - `VijilDome` → `instrument_vijil_dome(vijil_dome, tracer, meter=meter, handler=handler)`
+6. **Instrument the instance** with `tracer_provider.get_tracer("vijil.dome")` and `meter_provider.get_meter("vijil.dome")`, passing no handler (logs go through the router below):
+   - `Dome` → `instrument_dome(dome, None, tracer, meter)`
+   - `VijilDome` → `instrument_vijil_dome(vijil_dome, tracer, meter=meter)`
 7. **Return a handle.** `VijilTelemetry` holds the three providers and has `force_flush()` and `shutdown()`. Setup also registers `shutdown` with `atexit`, so a short-lived script doesn't lose the last batch.
 
 ### Settled during review (builder's calls, made by Claude)
 
-- **`agent_id` fallback.** The order is argument, then `VIJIL_AGENT_ID`, then the instance's own `agent_id`. Most loader users therefore pass nothing. If an explicit or env value differs from a non-empty instance `agent_id`, raise `ValueError`, because the Resource and span-level IDs would disagree and the span-level one wins in Defend.
-- **Several instances in one process.** Spans and metrics are per instance, but Dome's loggers are process-wide. The first `setup_vijil_telemetry` call attaches the log handler. Later calls for other instances export spans and metrics only, and log one WARNING that Dome logs keep going through the first setup. This avoids duplicated logs carrying another agent's `agent.id`.
+- **`agent_id` fallback.** The order is argument, then `VIJIL_AGENT_ID`, then the instance's own `agent_id` (for a `Dome.create_from_api` instance, the agent it was loaded for). Most loader users therefore pass nothing. If an explicit or env value differs from a non-empty instance `agent_id`, raise `ValueError`, because the Resource and span-level IDs would disagree and the span-level one wins in Defend.
+- **Several instances in one process.** Spans and metrics are per instance, but Dome's loggers are process-wide. One router on those loggers hands each record to the setup whose span is current, or failing that whose guard call is running (the control decision is logged after its span closes), so a record carries its own agent's `agent.id`; a record from an instance set up without log exporters goes nowhere. A record the router can't attribute (outside any guard call, from a `@dome.control` function, from an instance never set up, or from one whose setup has shut down) is dropped, even with a single setup: a missing log line beats one filed under the wrong agent. Defend's events are the spans, which are always attributed. When the last log-exporting setup shuts down, the loggers' level, propagation and handlers are restored.
 - **Changes to the app's logging config.** The helper makes the same changes `instrument_dome` already makes:
   - Dome's loggers go to INFO with the forward-to-ancestors shim, so the app's console is unchanged.
   - OTel's `LoggingInstrumentor` is enabled.
@@ -116,7 +117,7 @@ Each explicit argument wins over its environment variable. The env names match t
 
 ### Logs for controls-only `VijilDome`
 
-`instrument_vijil_dome` attaches the log handler only when the instance has guards (#359). A controls-only instance would export spans but no logs. The helper therefore calls the shared Dome-log export (`_export_dome_logs(handler)`) itself whenever it has a handler, so logs flow either way.
+`instrument_vijil_dome` attaches a log handler only when the instance has guards (#359), so the helper doesn't rely on it: the router is installed on Dome's loggers by the helper itself, and a controls-only instance's logs flow too.
 
 ### Docs
 
