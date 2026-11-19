@@ -54,6 +54,29 @@ ENTITY_TYPE_LABELS = {
 _VALID_REDACTION_STYLES = ("labeled", "masked")
 
 
+def _ensure_spacy_models(config_file: str) -> None:
+    """Download the config's missing spaCy models, raising ImportError if that fails."""
+    import yaml
+    from spacy.cli import download
+    from spacy.util import is_package
+
+    with open(config_file) as f:
+        names = [m["model_name"] for m in yaml.safe_load(f).get("models", [])]
+    for name in names:
+        if is_package(name):
+            continue
+        try:
+            download(name)
+        except SystemExit:
+            # spaCy exits the process when its installer fails (a venv without pip,
+            # for one); left to Presidio, that would take the host app down with it.
+            raise ImportError(
+                f"The privacy-presidio detector needs the spaCy model {name!r}, and "
+                f"downloading it failed. Install it with `python -m spacy download {name}` "
+                "(in a venv without pip, install pip first)."
+            ) from None
+
+
 @register_method(DetectionCategory.Privacy, PRIVACY_PRESIDIO)
 class PresidioDetector(DetectionMethod):
     def __init__(
@@ -84,6 +107,7 @@ class PresidioDetector(DetectionMethod):
             config_file = os.path.join(
                 os.path.dirname(__file__), "configs/presidio", "default_config.yaml"
             )
+            _ensure_spacy_models(config_file)
             provider = NlpEngineProvider(conf_file=config_file)
             nlp_engine = provider.create_engine()
             self.analyzer = AnalyzerEngine(
