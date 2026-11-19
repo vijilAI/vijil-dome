@@ -41,12 +41,15 @@ def run_sync(coro: Coroutine[Any, Any, T]) -> T:
     try:
         asyncio.get_running_loop()
     except RuntimeError:
-        return asyncio.run(coro)
-    # A loop of its own on another thread. nest_asyncio would re-enter the running
-    # loop instead, but it patches asyncio process-wide, and on Python 3.14 that
-    # breaks asyncio.timeout (which every detector uses) for the rest of the process.
-    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
-        return pool.submit(contextvars.copy_context().run, asyncio.run, coro).result()
+        pass
+    else:
+        # A loop of its own on another thread. nest_asyncio would re-enter the running
+        # loop instead, but it patches asyncio process-wide, and on Python 3.14 that
+        # breaks asyncio.timeout (which every detector uses) for the rest of the process.
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+            return pool.submit(contextvars.copy_context().run, asyncio.run, coro).result()
+    # Outside the except block, so a failure in coro isn't chained to the probe's RuntimeError.
+    return asyncio.run(coro)
 
 
 class ControlEngine:

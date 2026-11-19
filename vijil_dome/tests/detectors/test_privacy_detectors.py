@@ -125,3 +125,23 @@ def test_invalid_redaction_style():
             PRIVACY_PRESIDIO,
             redaction_style="unknown",
         )
+
+
+def test_failed_spacy_model_download_raises_instead_of_exiting():
+    from unittest.mock import patch
+
+    # spaCy's downloader calls sys.exit when its installer fails (e.g. a venv without pip).
+    with patch("spacy.util.is_package", return_value=False), patch(
+        "spacy.cli.download", side_effect=SystemExit(2)
+    ):
+        with pytest.raises(ImportError, match="en_core_web_sm"):
+            PresidioDetector()  # noqa: F405
+
+
+def test_installed_spacy_model_is_not_downloaded():
+    from unittest.mock import patch
+
+    with patch("spacy.cli.download") as download:
+        PresidioDetector()  # noqa: F405
+
+    download.assert_not_called()
