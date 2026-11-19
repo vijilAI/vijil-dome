@@ -62,7 +62,7 @@ dnspython = {version = ">=2.9.0", optional = true}
 strands-agents = {version = "^1.43.0", optional = true}
 cryptography = {version = ">=43.0.0", optional = true}
 typer = {version = ">=0.9.0", optional = true}
-langgraph = {version = ">=1.2.18", optional = true}
+langgraph = {version = ">=1.2.18,<1.3", optional = true}  # adapter uses ToolNode internals; widen after testing
 # Pinned to >=1.35.0, not the 1.28.1 that actually fixes GHSA-rg7c-g689-fr3x
 # (critical code injection / missing auth): 1.28.1-1.34.x require
 # opentelemetry-api <1.39.0, which conflicts with the opentelemetry stack

@@ -7,6 +7,8 @@ langgraph at all.
 
 from __future__ import annotations
 
+import asyncio
+import copy
 import logging
 from collections.abc import Iterator
 from typing import Any
@@ -30,11 +32,21 @@ def _extract_text(message: Any) -> str:
     return _content_text(content)
 
 
-def _content_text(content: Any) -> str:
-    """Text of a message's content: a string, or the text blocks of a content-block list.
+# Content blocks that carry no readable text for a guard: model reasoning (and its
+# signatures), tool calls, and binary or encoded media. Every other block's "text" is
+# scanned, so document blocks ("text-plain") and OpenAI-style "input_text" are kept.
+_OPAQUE_BLOCK_TYPES = frozenset({
+    "thinking", "redacted_thinking", "reasoning",
+    "tool_use", "tool_call", "tool_call_chunk", "server_tool_use", "invalid_tool_call",
+    "image", "image_url", "input_image", "audio", "input_audio", "file", "input_file", "video",
+})
 
-    Non-text blocks (thinking signatures, images, tool_use) are skipped, so guards scan
-    what the model said, not opaque encoded payloads.
+
+def _content_text(content: Any) -> str:
+    """Text of a message's content: a string, or the text of a content-block list.
+
+    Opaque blocks (reasoning signatures, tool calls, media) are skipped, so guards scan
+    what was said, not encoded payloads; any other block's ``text`` is kept.
     """
     if isinstance(content, str):
         return content
@@ -43,8 +55,10 @@ def _content_text(content: Any) -> str:
         for block in content:
             if isinstance(block, str):
                 parts.append(block)
-            elif isinstance(block, dict) and block.get("type", "text") == "text":
-                parts.append(str(block.get("text", "")))
+            elif isinstance(block, dict) and block.get("type") not in _OPAQUE_BLOCK_TYPES:
+                text = block.get("text")
+                if isinstance(text, str):
+                    parts.append(text)
         return "\n".join(part for part in parts if part)
     return str(content)
 
@@ -63,6 +77,38 @@ def _extract_output_text(result: dict[str, Any]) -> str:
     if not messages:
         return ""
     return _extract_text(messages[-1])
+
+
+class _StreamedOutput:
+    """Collects the model's text from stream chunks, whatever the stream mode.
+
+    ``updates`` chunks nest messages under node names, ``values`` chunks repeat the whole
+    state, ``messages`` mode yields ``(token, metadata)`` tuples, and list modes or
+    ``subgraphs=True`` wrap chunks in tuples. Only AI messages count (tool results are
+    guarded at the ToolNode); each is keyed by id, so a message repeated across chunks is
+    counted once and token chunks of one message are joined.
+    """
+
+    def __init__(self) -> None:
+        self._texts: dict[str, str] = {}
+
+    def add(self, chunk: Any) -> None:
+        if isinstance(chunk, dict):
+            for value in chunk.values():
+                self.add(value)
+        elif isinstance(chunk, (list, tuple)):
+            for item in chunk:
+                self.add(item)
+        elif getattr(chunk, "type", None) in ("ai", "AIMessageChunk"):
+            key = str(getattr(chunk, "id", None) or f"anonymous-{len(self._texts)}")
+            text = _content_text(getattr(chunk, "content", ""))
+            if getattr(chunk, "type", None) == "AIMessageChunk":
+                self._texts[key] = self._texts.get(key, "") + text
+            else:
+                self._texts[key] = text
+
+    def text(self) -> str:
+        return " ".join(text for text in self._texts.values() if text)
 
 
 # ------------------------------------------------------------------
@@ -130,16 +176,14 @@ class SecureGraph:
             yield {"messages": [input_result.guarded_response]}
             return
 
-        # Yield chunks, accumulating output for post-stream guard
-        accumulated_texts: list[str] = []
+        # Yield chunks, collecting the model's text for the post-stream guard
+        streamed = _StreamedOutput()
         for chunk in self._graph.stream(input, config, **kwargs):
-            chunk_text = _extract_output_text(chunk)
-            if chunk_text:
-                accumulated_texts.append(chunk_text)
+            streamed.add(chunk)
             yield chunk
 
         # Post-stream output guard (best-effort — cannot retract chunks)
-        full_output = " ".join(accumulated_texts)
+        full_output = streamed.text()
         if full_output:
             output_result = self._runtime.guard_output(full_output)
             if output_result.flagged:
@@ -188,14 +232,12 @@ class SecureGraph:
             yield {"messages": [input_result.guarded_response]}
             return
 
-        accumulated_texts: list[str] = []
+        streamed = _StreamedOutput()
         async for chunk in self._graph.astream(input, config, **kwargs):
-            chunk_text = _extract_output_text(chunk) if isinstance(chunk, dict) else ""
-            if chunk_text:
-                accumulated_texts.append(chunk_text)
+            streamed.add(chunk)
             yield chunk
 
-        full_output = " ".join(accumulated_texts)
+        full_output = streamed.text()
         if full_output:
             output_result = await self._runtime.aguard_output(full_output)
             if output_result.flagged:
@@ -207,14 +249,15 @@ class SecureGraph:
 
 # ------------------------------------------------------------------
 # Tool enforcement inside LangGraph ToolNodes
+#
+# Enforcement is installed through ToolNode's wrap_tool_call / awrap_tool_call
+# protocol, composed with any wrapper the node already has. ToolNode exposes those
+# only as constructor arguments, so they are set on a private copy of each node:
+# the graph passed to secure_graph (and the builder it came from) is never changed,
+# and securing the same graph again starts from the original node, not a wrapped one.
 # ------------------------------------------------------------------
 
-
-def _tool_message_text(message: Any) -> str | None:
-    """Text of a ToolMessage's content, or None for non-ToolMessage results (e.g. Command)."""
-    if getattr(message, "type", None) != "tool":
-        return None
-    return _content_text(message.content)
+_ORIGINAL_NODE = "_vijil_original_tool_node"
 
 
 def _denied_message(call: dict[str, Any], error: str | None) -> Any:
@@ -239,58 +282,160 @@ def _mac_check(runtime: TrustRuntime, call: dict[str, Any]) -> Any | None:
     return None
 
 
-def _apply_tool_guard(message: Any, guard_result: Any) -> Any:
-    if guard_result.flagged and guard_result.enforced:
-        message.content = guard_result.guarded_response
-    return message
+def _result_messages(result: Any) -> list[Any] | None:
+    """The ToolMessages a tool result carries, or None if Dome cannot find them.
 
-
-def _wrap_tool_node(node: Any, runtime: TrustRuntime) -> bool:
-    """Patch one ToolNode instance so every tool call gets MAC and its result is guarded.
-
-    Hooks the node's per-call methods (``_run_one`` / ``_arun_one``), so it covers every
-    tool the node holds, sync or async, including tools that use LangGraph's runtime
-    injection. Returns False if this LangGraph version does not have those methods.
+    A result is a ToolMessage, a ``Command`` whose ``update`` holds messages (routing
+    and other state updates are left untouched), or a list of those.
     """
-    run_one = getattr(node, "_run_one", None)
-    arun_one = getattr(node, "_arun_one", None)
-    if run_one is None or arun_one is None:
-        return False
+    if getattr(result, "type", None) == "tool":
+        return [result]
+    if isinstance(result, list):
+        found: list[Any] = []
+        for item in result:
+            messages = _result_messages(item)
+            if messages is None:
+                return None
+            found.extend(messages)
+        return found
+    if hasattr(result, "goto") and hasattr(result, "update"):  # langgraph.types.Command
+        update = result.update
+        if update is None:
+            return []
+        pairs = update.items() if isinstance(update, dict) else update if isinstance(update, (list, tuple)) else None
+        if pairs is None:
+            return None
+        found = []
+        for pair in pairs:
+            if not (isinstance(pair, (list, tuple)) and len(pair) == 2):
+                return None
+            _key, value = pair
+            values = value if isinstance(value, list) else [value]
+            found.extend(item for item in values if getattr(item, "type", None) == "tool")
+        return found
+    return None
 
-    def guarded_run_one(call: Any, *args: Any, **kwargs: Any) -> Any:
-        denied = _mac_check(runtime, call)
+
+def _unscannable(call: dict[str, Any], result: Any) -> None:
+    logger.warning(
+        "Tool '%s' returned %s, which Dome cannot scan; its result was not guarded.",
+        call.get("name"), type(result).__name__,
+    )
+
+
+def _guard_result(runtime: TrustRuntime, call: dict[str, Any], result: Any) -> Any:
+    messages = _result_messages(result)
+    if messages is None:
+        _unscannable(call, result)
+        return result
+    for message in messages:
+        text = _content_text(message.content)
+        if text:
+            verdict = runtime.guard_tool_response(str(call.get("name")), text)
+            if verdict.flagged and verdict.enforced:
+                message.content = verdict.guarded_response
+    return result
+
+
+async def _aguard_result(runtime: TrustRuntime, call: dict[str, Any], result: Any) -> Any:
+    messages = _result_messages(result)
+    if messages is None:
+        _unscannable(call, result)
+        return result
+    for message in messages:
+        text = _content_text(message.content)
+        if text:
+            verdict = await runtime.aguard_output(text)
+            if verdict.flagged and verdict.enforced:
+                message.content = verdict.guarded_response
+    return result
+
+
+def _is_tool_node(node: Any) -> bool:
+    return isinstance(getattr(node, "tools_by_name", None), dict) and hasattr(node, "_wrap_tool_call")
+
+
+def _guarded_tool_node(node: Any, runtime: TrustRuntime) -> Any:
+    """A copy of ``node`` whose every tool call gets MAC and whose results are guarded."""
+    original = getattr(node, _ORIGINAL_NODE, node)
+    inner_wrap = original._wrap_tool_call
+    inner_awrap = getattr(original, "_awrap_tool_call", None)
+
+    def wrap_tool_call(request: Any, execute: Any) -> Any:
+        denied = _mac_check(runtime, request.tool_call)
         if denied is not None:
             return denied
-        message = run_one(call, *args, **kwargs)
-        text = _tool_message_text(message)
-        if text:
-            message = _apply_tool_guard(message, runtime.guard_tool_response(str(call.get("name")), text))
-        return message
+        result = inner_wrap(request, execute) if inner_wrap is not None else execute(request)
+        return _guard_result(runtime, request.tool_call, result)
 
-    async def guarded_arun_one(call: Any, *args: Any, **kwargs: Any) -> Any:
-        denied = _mac_check(runtime, call)
+    async def awrap_tool_call(request: Any, execute: Any) -> Any:
+        denied = _mac_check(runtime, request.tool_call)
         if denied is not None:
             return denied
-        message = await arun_one(call, *args, **kwargs)
-        text = _tool_message_text(message)
-        if text:
-            message = _apply_tool_guard(message, await runtime.aguard_output(text))
-        return message
+        if inner_awrap is not None:
+            result = await inner_awrap(request, execute)
+        elif inner_wrap is not None:
+            # A sync-only wrapper: run it off the event loop, executing tools back on it.
+            loop = asyncio.get_running_loop()
 
-    node._run_one = guarded_run_one
-    node._arun_one = guarded_arun_one
-    return True
+            def sync_execute(req: Any) -> Any:
+                return asyncio.run_coroutine_threadsafe(execute(req), loop).result()
+
+            result = await asyncio.to_thread(inner_wrap, request, sync_execute)
+        else:
+            result = await execute(request)
+        return await _aguard_result(runtime, request.tool_call, result)
+
+    guarded = copy.copy(original)
+    # RunnableCallable stores its entry points as methods bound to the original node.
+    guarded.func, guarded.afunc = guarded._func, guarded._afunc
+    guarded._wrap_tool_call = wrap_tool_call
+    guarded._awrap_tool_call = awrap_tool_call
+    setattr(guarded, _ORIGINAL_NODE, original)
+    return guarded
 
 
-def _wrap_graph_tools(compiled: Any, runtime: TrustRuntime) -> list[str]:
-    """Find every ToolNode in a compiled graph and wrap it. Returns the wrapped tool names."""
+def _is_graph(node: Any) -> bool:
+    return isinstance(getattr(node, "nodes", None), dict) and callable(getattr(node, "copy", None))
+
+
+def _secure_graph_tools(graph: Any, runtime: TrustRuntime) -> tuple[Any, list[str], int]:
+    """Copy ``graph`` with every ToolNode, in it and in its subgraphs, guarded.
+
+    Returns the copy (``graph`` itself if it has no ToolNode), the guarded tool names, and
+    how many subgraphs with tools could not be reached (a subgraph called from inside a
+    function node, rather than added as a node, cannot be swapped).
+    """
+    if not _is_graph(graph):
+        return graph, [], 0
+    nodes: dict[str, Any] = {}
     wrapped: list[str] = []
-    for node in (getattr(compiled, "nodes", None) or {}).values():
+    unreachable = 0
+    changed = False
+    for name, node in graph.nodes.items():
         bound = getattr(node, "bound", None)
-        tools_by_name = getattr(bound, "tools_by_name", None)
-        if isinstance(tools_by_name, dict) and _wrap_tool_node(bound, runtime):
-            wrapped.extend(tools_by_name)
-    return wrapped
+        replacement = None
+        if _is_tool_node(bound):
+            replacement = _guarded_tool_node(bound, runtime)
+            wrapped.extend(bound.tools_by_name)
+        elif _is_graph(bound):
+            secured, sub_wrapped, sub_unreachable = _secure_graph_tools(bound, runtime)
+            wrapped.extend(sub_wrapped)
+            unreachable += sub_unreachable
+            if secured is not bound:
+                replacement = secured
+        else:
+            for subgraph in getattr(node, "subgraphs", None) or []:
+                if _secure_graph_tools(subgraph, runtime)[1]:
+                    unreachable += 1
+        if replacement is not None and callable(getattr(node, "copy", None)):
+            nodes[name] = node.copy({"bound": replacement})
+            changed = True
+        else:
+            nodes[name] = node
+    if not changed:
+        return graph, wrapped, unreachable
+    return graph.copy({"nodes": nodes}), wrapped, unreachable
 
 
 # ------------------------------------------------------------------
@@ -354,12 +499,18 @@ def secure_graph(
     else:
         compiled = graph
 
-    # Tool enforcement: patch the graph's ToolNodes (MAC before each call, guards on each
-    # result). Compiled LangGraph graphs have no ``tools`` attribute, so the old
-    # ``compiled.tools`` path is kept only as a fallback for other graph shapes.
-    wrapped_tools = _wrap_graph_tools(compiled, runtime)
+    # Tool enforcement: guard every ToolNode, including those in subgraphs (MAC before
+    # each call, guards on each result), on a copy of the compiled graph. Compiled
+    # LangGraph graphs have no ``tools`` attribute, so the old ``compiled.tools`` path
+    # is kept only as a fallback for other graph shapes.
+    compiled, wrapped_tools, unreachable = _secure_graph_tools(compiled, runtime)
+    if unreachable:
+        logger.warning(
+            "%d subgraph(s) with tools are called from inside a node, not added as nodes; "
+            "Dome cannot enforce tool policy on them.", unreachable,
+        )
     if wrapped_tools:
-        logger.info("Tool-level enforcement on: %s", ", ".join(sorted(wrapped_tools)))
+        logger.info("Tool-level enforcement on: %s", ", ".join(sorted(set(wrapped_tools))))
     elif hasattr(compiled, "tools"):
         try:
             compiled.tools = runtime.wrap_tools(compiled.tools)
