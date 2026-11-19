@@ -34,6 +34,8 @@ def __getattr__(name: str):
         "ControlError": ("vijil_dome.controls.errors", "ControlError"),
         "ControlViolationError": ("vijil_dome.controls.errors", "ControlViolationError"),
         "ControlSteerError": ("vijil_dome.controls.errors", "ControlSteerError"),
+        # Telemetry
+        "setup_vijil_telemetry": ("vijil_dome.integrations.vijil.telemetry_setup", "setup_vijil_telemetry"),
         # Adapter registry
         "register_adapter": ("vijil_dome.trust.adapters.base", "register_adapter"),
         "BaseAdapter": ("vijil_dome.trust.adapters.base", "BaseAdapter"),
@@ -65,6 +67,8 @@ __all__ = [
     "ControlError",
     "ControlViolationError",
     "ControlSteerError",
+    # Telemetry
+    "setup_vijil_telemetry",
     # Adapter registry
     "register_adapter",
     "BaseAdapter",

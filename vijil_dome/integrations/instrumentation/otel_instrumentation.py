@@ -90,13 +90,15 @@ class _ForwardToAncestors(logging.Handler):
 
 
 def _export_dome_logs(handler: logging.Handler) -> None:
+    # Only our handler: the app's own handlers on these loggers keep their format.
+    handler.setFormatter(get_vijil_log_formatter())
     for name in _DOME_LOGGER_NAMES:
         logger = logging.getLogger(name)
         logger.addHandler(handler)
-        instrument_logger(logger)
         # Unset, the logger inherits root's WARNING and drops Dome's INFO records
-        # before they reach the handler. An app-chosen level wins.
-        if logger.level != logging.NOTSET:
+        # before they reach the handler. An app-chosen level wins, and an app already
+        # at INFO or below needs no change (raising to INFO would hide its DEBUG lines).
+        if logger.level != logging.NOTSET or logger.getEffectiveLevel() <= logging.INFO:
             continue
         logger.setLevel(logging.INFO)
         if logger.propagate:
@@ -398,9 +400,9 @@ def instrument_vijil_dome(
     way: wrap ``vijil_dome.engine.evaluate`` so every *triggered* Control
     emits one span, carrying enough to reconstruct "what fired, and why"
     without needing Dome's own logs -- this, and not a Console
-    write-back API, is how enforcement decisions get back to Console
-    (point ``DOME_TRACES_COLLECTOR_ENDPOINT`` at Console's collector and
-    they show up like any other Dome telemetry).
+    write-back API, is how enforcement decisions get back to Console.
+    Use ``setup_vijil_telemetry`` to build exporters to Console and call
+    this for you.
 
     Idempotent, same as ``instrument_dome``: calling it twice on an
     already-instrumented instance is a no-op.

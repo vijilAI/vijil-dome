@@ -17,6 +17,7 @@
 from vijil_dome.detectors import DetectionMethod, DetectionTimingResult, BatchDetectionTimingResult
 from vijil_dome.types import DomePayload
 import asyncio
+import contextvars
 from asyncio import Task  # noqa: F401
 import concurrent.futures
 import os
@@ -162,7 +163,9 @@ async def run_detector_via_executor(
             except TypeError:
                 return detector.sync_detect(dome_input)
 
-    future = loop.run_in_executor(executor, _invoke_sync_detect)
+    # run_in_executor doesn't carry contextvars, so the detector would lose the
+    # caller's trace context and with it any telemetry attribution.
+    future = loop.run_in_executor(executor, contextvars.copy_context().run, _invoke_sync_detect)
     try:
         result = await future
         execution_time = round((time.time() - start_time) * 1000, 3)
