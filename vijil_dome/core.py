@@ -1,34 +1,61 @@
-"""VijilDome — policy-driven runtime for agent controls.
+"""VijilDome — one runtime for policy controls and Dome guard pipelines.
 
-The policy is the single config surface.  All detection — ML models,
-regex, custom evaluators — is defined in the policy controls.  Dome
-detectors are referenced via ``dome:*`` evaluators.
-
-The existing :class:`~vijil_dome.Dome.Dome` class is unchanged and
-continues to work for standalone content guardrailing.
+Controls (``policy=``) carry ML models, regex and custom evaluators.
+Guard pipelines (``guards=``) are the same ``Guardrail`` objects
+:class:`~vijil_dome.Dome.Dome` builds, so one instance can enforce a whole
+Console config.
 """
 
 from __future__ import annotations
 
 import logging
 from pathlib import Path
-from typing import Any, Callable, Literal
+from typing import TYPE_CHECKING, Any, Callable, Literal
 
 from vijil_dome.controls.decorator import control as control_decorator
-from vijil_dome.controls.engine import ControlEngine
+from vijil_dome.controls.engine import ControlEngine, run_sync
 from vijil_dome.controls.errors import handle_result
 from vijil_dome.controls.models import Control, EvaluationResult, Step
+from vijil_dome.core_guards import Level, merge_results, text_after_guards
 from vijil_dome.utils.api_config_loader import DEFAULT_CONSOLE_API_BASE_URL
+
+if TYPE_CHECKING:
+    from vijil_dome.Dome import DomeConfig
+    from vijil_dome.guardrails import Guardrail
 
 logger = logging.getLogger(__name__)
 
+_PIPELINE_SETTING_KEYS = frozenset(
+    f"{side}-{option}"
+    for side in ("input", "output")
+    for option in ("early-exit", "run-parallel", "blocked-message", "on-error")
+)
+
+_KNOWN_CONFIG_KEYS = frozenset(
+    {
+        "controls",
+        "input-guards",
+        "output-guards",
+        # Console constraint metadata consumed by TrustRuntime; known here but
+        # deliberately not enforced.
+        "tool-permissions",
+        "organization",
+        "id",
+        "updated_at",
+        "team_id",
+        "agent_id",
+        "agent_config_id",
+        "agent_configuration_id",
+        "user_id",
+    }
+    | _PIPELINE_SETTING_KEYS
+)
+
 
 class VijilDome:
-    """Policy-driven runtime.
+    """Runtime enforcing policy controls and, optionally, Dome guard pipelines.
 
-    All detection — ML models, regex, custom evaluators — is defined
-    in the policy controls.  Dome detectors are referenced via
-    ``dome:*`` evaluators within the policy.
+    Controls are defined in the policy; guard pipelines in ``guards``.
 
     Parameters
     ----------
@@ -37,6 +64,11 @@ class VijilDome:
         - A list of :class:`Control` objects or dicts
         - A path (str or Path) to a YAML/JSON file
         - ``None`` (empty policy — controls can be added later)
+    guards:
+        Dome guard configuration: a dict, a path to a ``.toml`` file, or a
+        :class:`~vijil_dome.Dome.DomeConfig`.  ``None`` (default) means no
+        guard pipelines.  Builds :attr:`input_guardrail` and
+        :attr:`output_guardrail`.
     enforce:
         If ``True`` (default), deny/steer actions raise exceptions.
         If ``False``, violations are logged but not enforced (shadow mode).
@@ -54,6 +86,7 @@ class VijilDome:
         self,
         *,
         policy: list[dict | Control] | str | Path | None = None,
+        guards: dict | str | DomeConfig | None = None,
         enforce: bool = True,
         agent_id: str | None = None,
         team_id: str | None = None,
@@ -64,6 +97,9 @@ class VijilDome:
         self._team_id = team_id
         self._user_id = user_id
         self._engine = ControlEngine()
+        self._warned_dict_skip = False
+        self.input_guardrail: Guardrail | None = None
+        self.output_guardrail: Guardrail | None = None
 
         # Populated by create_from_s3(); let config_has_changed() detect an
         # instance that wasn't created that way, mirroring Dome.create_from_s3.
@@ -93,6 +129,79 @@ class VijilDome:
             ]
             self._engine.load_controls(defs)
 
+        if guards is not None:
+            self._build_guardrails(guards)
+
+    def _build_guardrails(self, guards: dict | str | DomeConfig) -> None:
+        # Lazy: Dome.py imports openai at module top.
+        from vijil_dome.Dome import DomeConfig, create_dome_config
+        from vijil_dome.guardrails import DEFAULT_ON_ERROR
+
+        if isinstance(guards, (dict, str)):
+            default_on_error = "fail_closed" if self._enforce else DEFAULT_ON_ERROR
+            guards = create_dome_config(guards, default_on_error)
+        elif not isinstance(guards, DomeConfig):
+            raise ValueError(
+                f"VijilDome received an invalid type ({type(guards)}) for guards. "
+                "Use a dictionary, a path to a .toml file, or a DomeConfig object."
+            )
+        self.input_guardrail = guards.input_guardrail
+        self.output_guardrail = guards.output_guardrail
+        self._agent_id = self._agent_id or guards.get_agent_id()
+        self._team_id = self._team_id or guards.get_team_id()
+        self._user_id = self._user_id or guards.get_user_id()
+
+    @staticmethod
+    def from_config(
+        config_body: dict[str, Any],
+        *,
+        enforce: bool = True,
+        agent_id: str | None = None,
+        team_id: str | None = None,
+        user_id: str | None = None,
+    ) -> "VijilDome":
+        """Build a VijilDome enforcing both halves of a Console config body."""
+        has_guards = bool(
+            config_body.get("input-guards") or config_body.get("output-guards")
+        )
+        guards = (
+            {k: v for k, v in config_body.items() if k != "controls"}
+            if has_guards
+            else None
+        )
+
+        guard_names = {
+            g
+            for g in (
+                *(config_body.get("input-guards") or []),
+                *(config_body.get("output-guards") or []),
+            )
+            if isinstance(g, str)
+        }
+        unknown = {
+            k
+            for k in config_body
+            if k not in _KNOWN_CONFIG_KEYS and k not in guard_names
+        }
+        # Pipeline settings only apply to a guardrail that exists.
+        if not has_guards:
+            unknown |= _PIPELINE_SETTING_KEYS & config_body.keys()
+        if unknown:
+            logger.warning(
+                "Ignoring unknown keys in Dome config: %s", ", ".join(sorted(unknown))
+            )
+
+        return VijilDome(
+            policy=config_body.get("controls") or [],
+            guards=guards,
+            enforce=enforce,
+            agent_id=agent_id
+            or config_body.get("agent_id")
+            or config_body.get("agent_config_id"),
+            team_id=team_id or config_body.get("team_id"),
+            user_id=user_id or config_body.get("user_id"),
+        )
+
     @staticmethod
     def create_from_s3(
         bucket: str,
@@ -109,10 +218,8 @@ class VijilDome:
     ) -> "VijilDome":
         """Create a VijilDome instance from a config stored in S3.
 
-        Reads the same ``config.json`` Console's agent-scoped ``DomeConfig``
-        already writes (and the old :class:`~vijil_dome.Dome.Dome` class
-        already reads for its legacy ``input-guards``/``output-guards``
-        format) — this just also reads that document's ``controls`` key.
+        Reads the ``config.json`` Console's agent-scoped ``DomeConfig``
+        writes and enforces both its guards and its ``controls``.
         TTL/ETag caching is unchanged, reused as-is from
         :func:`~vijil_dome.utils.config_loader.load_dome_config_from_s3` --
         no new freshness mechanism was needed here.
@@ -146,9 +253,8 @@ class VijilDome:
             **aws_kwargs,
         )
 
-        controls_list = config_dict.get("controls", [])
-        vijil_dome = VijilDome(
-            policy=controls_list, enforce=enforce, agent_id=agent_id, team_id=team_id
+        vijil_dome = VijilDome.from_config(
+            config_dict, enforce=enforce, agent_id=agent_id, team_id=team_id
         )
 
         vijil_dome._s3_bucket = bucket
@@ -195,9 +301,8 @@ class VijilDome:
             cache_ttl_seconds=cache_ttl_seconds,
         )
 
-        controls_list = config_dict.get("controls", [])
-        vijil_dome = VijilDome(
-            policy=controls_list, enforce=enforce, agent_id=agent_id, team_id=team_id
+        vijil_dome = VijilDome.from_config(
+            config_dict, enforce=enforce, agent_id=agent_id, team_id=team_id
         )
 
         vijil_dome._api_base_url = base_url
@@ -278,23 +383,70 @@ class VijilDome:
     # Guard methods
     # ------------------------------------------------------------------
 
+    async def _guard_text(
+        self,
+        level: Level,
+        text: str | dict[str, Any],
+        context: dict[str, Any] | None,
+        step_name: str,
+        agent_id: str | None,
+        team_id: str | None,
+        user_id: str | None,
+    ) -> EvaluationResult:
+        stage: Literal["pre", "post"] = "pre" if level == "input" else "post"
+        guardrail = self.input_guardrail if level == "input" else self.output_guardrail
+        original = text if isinstance(text, str) else ""
+
+        if isinstance(text, dict) and guardrail is not None and guardrail.guard_list:
+            if not self._warned_dict_skip:
+                logger.warning(
+                    "VijilDome skips guards for dict input; only controls run on it."
+                )
+                self._warned_dict_skip = True
+            guardrail = None
+
+        guard_result = None
+        if guardrail is not None and guardrail.guard_list:
+            guard_result = await guardrail.async_scan(
+                original,
+                agent_id=agent_id or self._agent_id,
+                team_id=team_id or self._team_id,
+                user_id=user_id or self._user_id,
+            )
+
+        controls = None
+        if not (guard_result and guard_result.flagged and self._enforce):
+            controls_text = (
+                text_after_guards(guard_result, original) if guard_result else text
+            )
+            step = Step(
+                type="llm",
+                name=step_name,
+                **{level: controls_text},
+                context=context or {},
+            )
+            controls = await self._engine.evaluate(step, stage=stage)
+
+        result = merge_results(level, original, guard_result, controls)
+        handle_result(result, self._enforce, stage)
+        return result
+
     def guard_input(
         self,
         text: str | dict[str, Any],
         *,
         context: dict[str, Any] | None = None,
         step_name: str = "input",
+        agent_id: str | None = None,
+        team_id: str | None = None,
+        user_id: str | None = None,
     ) -> EvaluationResult:
-        """Evaluate input against the policy (sync)."""
-        step = Step(
-            type="llm",
-            name=step_name,
-            input=text,
-            context=context or {},
+        """Run input guards, then input controls (sync)."""
+        return run_sync(
+            self._guard_text(
+                "input", text, context, step_name, agent_id, team_id, user_id
+            )
         )
-        result = self._engine.evaluate_sync(step, stage="pre")
-        handle_result(result, self._enforce, "pre")
-        return result
 
     async def async_guard_input(
         self,
@@ -302,17 +454,14 @@ class VijilDome:
         *,
         context: dict[str, Any] | None = None,
         step_name: str = "input",
+        agent_id: str | None = None,
+        team_id: str | None = None,
+        user_id: str | None = None,
     ) -> EvaluationResult:
-        """Evaluate input against the policy (async)."""
-        step = Step(
-            type="llm",
-            name=step_name,
-            input=text,
-            context=context or {},
+        """Run input guards, then input controls (async)."""
+        return await self._guard_text(
+            "input", text, context, step_name, agent_id, team_id, user_id
         )
-        result = await self._engine.evaluate(step, stage="pre")
-        handle_result(result, self._enforce, "pre")
-        return result
 
     def guard_output(
         self,
@@ -320,17 +469,16 @@ class VijilDome:
         *,
         context: dict[str, Any] | None = None,
         step_name: str = "output",
+        agent_id: str | None = None,
+        team_id: str | None = None,
+        user_id: str | None = None,
     ) -> EvaluationResult:
-        """Evaluate output against the policy (sync)."""
-        step = Step(
-            type="llm",
-            name=step_name,
-            output=text,
-            context=context or {},
+        """Run output guards, then output controls (sync)."""
+        return run_sync(
+            self._guard_text(
+                "output", text, context, step_name, agent_id, team_id, user_id
+            )
         )
-        result = self._engine.evaluate_sync(step, stage="post")
-        handle_result(result, self._enforce, "post")
-        return result
 
     async def async_guard_output(
         self,
@@ -338,17 +486,14 @@ class VijilDome:
         *,
         context: dict[str, Any] | None = None,
         step_name: str = "output",
+        agent_id: str | None = None,
+        team_id: str | None = None,
+        user_id: str | None = None,
     ) -> EvaluationResult:
-        """Evaluate output against the policy (async)."""
-        step = Step(
-            type="llm",
-            name=step_name,
-            output=text,
-            context=context or {},
+        """Run output guards, then output controls (async)."""
+        return await self._guard_text(
+            "output", text, context, step_name, agent_id, team_id, user_id
         )
-        result = await self._engine.evaluate(step, stage="post")
-        handle_result(result, self._enforce, "post")
-        return result
 
     def guard_tool_call(
         self,
