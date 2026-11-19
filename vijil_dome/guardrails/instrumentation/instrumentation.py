@@ -112,19 +112,19 @@ def _add_tracing_to_scan(
     obj: Union[Guardrail, Guard, DetectionMethod], name: str, tracer: Tracer
 ) -> None:
     if isinstance(obj, Guardrail) or isinstance(obj, Guard):
-        obj.scan = auto_trace(tracer, f"{name}.scan")(  # type: ignore[method-assign]
+        obj.scan = auto_trace(tracer, f"{name}.scan", guardrail=True)(  # type: ignore[method-assign]
             obj.scan
         )
-        obj.async_scan = auto_trace(tracer, f"{name}.async_scan")(  # type: ignore[method-assign]
+        obj.async_scan = auto_trace(tracer, f"{name}.async_scan", guardrail=True)(  # type: ignore[method-assign]
             obj.async_scan
         )
 
     elif isinstance(obj, DetectionMethod):
-        obj.detect = auto_trace(tracer, f"{name}.scan")(  # type: ignore[method-assign]
+        obj.detect = auto_trace(tracer, f"{name}.scan", guardrail=True)(  # type: ignore[method-assign]
             obj.detect
         )
         if hasattr(obj, "sync_detect") and callable(obj.sync_detect):
-            obj.sync_detect = auto_trace(tracer, f"{name}.scan")(  # type: ignore[method-assign]
+            obj.sync_detect = auto_trace(tracer, f"{name}.scan", guardrail=True)(  # type: ignore[method-assign]
                 obj.sync_detect
             )
 

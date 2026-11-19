@@ -43,6 +43,18 @@ def _safe_set_attribute(span: "Span", key: str, value: object) -> None:
         setter(key, value)
 
 
+def _detection_label(result: Union[GuardrailResult, GuardResult]) -> str:
+    """'flagged', 'errored' (a method failed and nothing flagged), or 'clean'."""
+    is_flagged = (
+        result.flagged if isinstance(result, GuardrailResult) else result.triggered
+    )
+    if is_flagged:
+        return "flagged"
+    if result.errored_methods:
+        return "errored"
+    return "clean"
+
+
 def _set_darwin_span_attributes(
     span: "Span",
     result: Union[GuardrailResult, GuardResult],
@@ -65,19 +77,7 @@ def _set_darwin_span_attributes(
     if user_id:
         _safe_set_attribute(span, "user.id", str(user_id))
 
-    is_flagged = (
-        result.flagged if isinstance(result, GuardrailResult) else result.triggered
-    )
-    has_errors = bool(result.errored_methods)
-
-    if has_errors and not is_flagged:
-        label = "errored"
-    elif is_flagged:
-        label = "flagged"
-    else:
-        label = "clean"
-
-    _safe_set_attribute(span, "detection.label", label)
+    _safe_set_attribute(span, "detection.label", _detection_label(result))
     _safe_set_attribute(span, "detection.score", float(result.detection_score or 0.0))
 
     if result.triggered_methods:
