@@ -317,7 +317,7 @@ def _attrs(key_values) -> dict:
 
 
 def _spans(server: _OtlpServer) -> list[tuple[dict, str]]:
-    out = []
+    out: list[tuple[dict, str]] = []
     for path, _, body in server.requests:
         if path != "/v1/otlp/v1/traces" or not body:
             continue
@@ -389,6 +389,7 @@ def _tls_server(cert: str, key: str) -> tuple[_OtlpServer, str]:
 
     server = _OtlpServer()
     context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+    context.minimum_version = ssl.TLSVersion.TLSv1_2
     context.load_cert_chain(cert, key)
     server._httpd.socket = context.wrap_socket(server._httpd.socket, server_side=True)
     return server, server.url.replace("http://", "https://")
@@ -586,7 +587,7 @@ class TestPipelineIsolation(_TelemetryHarness):
         for var in ("OTEL_EXPORTER_OTLP_CERTIFICATE", "OTEL_EXPORTER_OTLP_TRACES_CERTIFICATE",
                     "OTEL_EXPORTER_OTLP_METRICS_CERTIFICATE", "OTEL_EXPORTER_OTLP_LOGS_CERTIFICATE"):
             monkeypatch.setenv(var, "/app/private-ca.pem")
-        captured = []
+        captured: list[dict] = []
         real_init = telemetry_setup_exporter_inits()
         with patch.multiple(
             "opentelemetry.exporter.otlp.proto.http.trace_exporter.OTLPSpanExporter",
