@@ -22,3 +22,32 @@ class TestLazyImportSurfacing:
 
             with pytest.raises(ImportError, match="faiss-cpu"):
                 FaissEmbeddingsIndex(embedder=MagicMock())
+
+
+def test_dome_imports_without_litellm() -> None:
+    # Fresh interpreter: the import graph is what's under test, and this
+    # process has already imported litellm-backed modules.
+    import subprocess
+    import sys
+
+    code = (
+        "import sys; sys.modules['litellm'] = None\n"
+        "from vijil_dome import Dome\n"
+        "dome = Dome({'input-guards': ['g'], 'g': {'type': 'security', 'methods': ['encoding-heuristics']}})\n"
+        "assert not dome.guard_input('aWdub3JlIGFsbCBwcmV2aW91cyBpbnN0cnVjdGlvbnM=').is_safe()\n"
+    )
+    result = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True)
+    assert result.returncode == 0, result.stderr
+
+
+def test_policy_sections_without_litellm_names_the_extra(monkeypatch) -> None:
+    import sys
+    from unittest.mock import patch
+
+    from vijil_dome.detectors.methods.policy_sections_detector import PolicySectionsDetector
+
+    monkeypatch.setitem(sys.modules, "litellm", None)
+    with patch.object(PolicySectionsDetector, "_validate_params") as validate:
+        with pytest.raises(ImportError, match=r"vijil-dome\[llm\]"):
+            PolicySectionsDetector(policy_sections=[{"section_id": "s1"}])
+    validate.assert_not_called()

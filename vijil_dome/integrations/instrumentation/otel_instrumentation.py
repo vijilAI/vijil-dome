@@ -32,7 +32,7 @@ from vijil_dome import Dome
 from vijil_dome.guardrails import Guardrail, GuardrailResult
 from vijil_dome.integrations.vijil.telemetry import _safe_set_attribute, _set_darwin_span_attributes
 from vijil_dome.instrumentation.tracing import _truncate
-import socket
+from vijil_dome.instrumentation.logging import _get_ip_address
 
 
 class VijilLogFormatter(logging.Formatter):
@@ -44,12 +44,8 @@ class VijilLogFormatter(logging.Formatter):
         record.otelServiceName = getattr(record, "otelServiceName", "N/A")
         record.otelTraceSampled = getattr(record, "otelTraceSampled", "N/A")
 
-        # Add the IP address to the log record if it doesn't exist
-        record.ip = getattr(
-            record,
-            "ip",
-            socket.gethostbyname(socket.gethostname()),
-        )
+        if not hasattr(record, "ip"):
+            record.ip = _get_ip_address()
         return super().format(record)
 
 
@@ -64,6 +60,40 @@ def instrument_logger(logger: logging.Logger):
     for handler in logger.handlers:
         formatter = get_vijil_log_formatter()
         handler.setFormatter(formatter)
+
+
+# "vijil.dome" is the named logger; modules using getLogger(__name__) sit under "vijil_dome".
+_DOME_LOGGER_NAMES = ("vijil.dome", "vijil_dome")
+
+
+class _ForwardToAncestors(logging.Handler):
+    """Passes a record up only if the parent chain's level would have let it through."""
+
+    def __init__(self, logger: logging.Logger) -> None:
+        super().__init__()
+        self._logger = logger
+
+    def emit(self, record: logging.LogRecord) -> None:
+        parent = self._logger.parent
+        if parent is not None and record.levelno >= parent.getEffectiveLevel():
+            parent.handle(record)
+
+
+def _export_dome_logs(handler: logging.Handler) -> None:
+    for name in _DOME_LOGGER_NAMES:
+        logger = logging.getLogger(name)
+        logger.addHandler(handler)
+        instrument_logger(logger)
+        # Unset, the logger inherits root's WARNING and drops Dome's INFO records
+        # before they reach the handler. An app-chosen level wins.
+        if logger.level != logging.NOTSET:
+            continue
+        logger.setLevel(logging.INFO)
+        if logger.propagate:
+            # Ancestor handlers ignore ancestor levels, so INFO here would reach the
+            # app's root console; forward only what the app saw before.
+            logger.propagate = False
+            logger.addHandler(_ForwardToAncestors(logger))
 
 
 def _add_darwin_detection_spans(
@@ -147,11 +177,8 @@ def instrument_dome(
     if not LoggingInstrumentor().is_instrumented_by_opentelemetry:
         LoggingInstrumentor().instrument()
 
-    # Enable OTel logging if a logging handler is provided
     if handler:
-        logger = logging.getLogger("vijil.dome")
-        logger.addHandler(handler)
-        instrument_logger(logger)
+        _export_dome_logs(handler)
 
     # Add tracer for detailed per-guard/per-detector spans
     if tracer:
