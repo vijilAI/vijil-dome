@@ -90,13 +90,15 @@ class _ForwardToAncestors(logging.Handler):
 
 
 def _export_dome_logs(handler: logging.Handler) -> None:
+    # Only our handler: the app's own handlers on these loggers keep their format.
+    handler.setFormatter(get_vijil_log_formatter())
     for name in _DOME_LOGGER_NAMES:
         logger = logging.getLogger(name)
         logger.addHandler(handler)
-        instrument_logger(logger)
         # Unset, the logger inherits root's WARNING and drops Dome's INFO records
-        # before they reach the handler. An app-chosen level wins.
-        if logger.level != logging.NOTSET:
+        # before they reach the handler. An app-chosen level wins, and an app already
+        # at INFO or below needs no change (raising to INFO would hide its DEBUG lines).
+        if logger.level != logging.NOTSET or logger.getEffectiveLevel() <= logging.INFO:
             continue
         logger.setLevel(logging.INFO)
         if logger.propagate:
