@@ -41,6 +41,17 @@ async def test_run_sync_inside_running_loop():
     assert run_sync(f()) == 7
 
 
+def test_run_sync_error_has_no_event_loop_context():
+    async def fails():
+        raise ValueError("boom")
+
+    with pytest.raises(ValueError) as e:
+        run_sync(fails())
+
+    # The probe for a running loop must not show up as the cause of every failure.
+    assert e.value.__context__ is None
+
+
 def test_run_sync_inside_running_loop_leaves_asyncio_unpatched():
     # Fresh interpreter: a patched event loop would break every later test here.
     code = """
