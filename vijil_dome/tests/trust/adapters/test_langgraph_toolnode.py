@@ -545,3 +545,81 @@ def test_cyclic_state_does_not_recurse_forever() -> None:
     streamed.add((), "updates", {"node": state})
     assert streamed.text() == "ok"
 
+
+
+class TestStreamEdgeCases:
+    def test_explicit_none_stream_mode_uses_the_graph_default(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        def model(state: MessagesState) -> dict[str, Any]:
+            get_stream_writer()("progress")
+            return {"messages": [AIMessage("custom-default answer")]}
+
+        compiled = _linear(MessagesState, ("model", model)).compile()
+        compiled.stream_mode = "custom"
+        graph = _secured(compiled)
+        seen = _recording(graph, monkeypatch)
+
+        chunks = list(graph.stream({"messages": [HumanMessage("hi")]}, stream_mode=None))
+
+        assert chunks == ["progress"]
+        assert seen == ["custom-default answer"]
+
+    def test_none_custom_payload_reaches_the_caller(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        def model(state: MessagesState) -> dict[str, Any]:
+            get_stream_writer()(None)
+            return {"messages": [AIMessage("answer")]}
+
+        graph = _secured(_linear(MessagesState, ("model", model)))
+        _recording(graph, monkeypatch)
+
+        assert list(graph.stream({"messages": [HumanMessage("hi")]}, stream_mode="custom")) == [None]
+
+    def test_edited_checkpointed_message_is_scanned(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        def first(state: MessagesState) -> dict[str, Any]:
+            if any(m.type == "ai" for m in state["messages"]):
+                return {"messages": [AIMessage("unsafe draft", id="m1")]}  # replaces the earlier answer
+            return {"messages": [AIMessage("old answer", id="m1")]}
+
+        def second(state: MessagesState) -> dict[str, Any]:
+            if sum(1 for m in state["messages"] if m.type == "ai") > 0 and len(state["messages"]) > 2:
+                return {"messages": [AIMessage("safe answer", id="m2")]}
+            return {"messages": []}
+
+        graph = _secured(_linear(MessagesState, ("first", first), ("second", second)), checkpointer=InMemorySaver())
+        seen = _recording(graph, monkeypatch)
+        config = {"configurable": {"thread_id": "t2"}}
+        graph.invoke({"messages": [HumanMessage("one")]}, config)
+        seen.clear()
+
+        list(graph.stream({"messages": [HumanMessage("two")]}, config, stream_mode="values"))
+
+        assert "unsafe draft" in seen[0] and "safe answer" in seen[0] and "old answer" not in seen[0]
+
+    def test_non_langgraph_graph_gets_its_stream_arguments_unchanged(self) -> None:
+        from unittest.mock import MagicMock
+
+        from vijil_dome.trust.adapters.langgraph import SecureGraph
+
+        duck = MagicMock()
+        duck.stream.return_value = iter([{"messages": ["chunk"]}])
+        runtime = MagicMock()
+        runtime.guard_input.return_value = _unflagged()
+        runtime.guard_output.return_value = _unflagged()
+
+        chunks = list(SecureGraph(graph=duck, runtime=runtime).stream({"messages": ["hi"]}, stream_mode="updates"))
+
+        assert chunks == [{"messages": ["chunk"]}]
+        assert duck.stream.call_args.kwargs["stream_mode"] == "updates"
+
+
+def _unflagged():
+    from vijil_dome.trust.guard import EnforcementResult
+
+    return EnforcementResult(flagged=False, enforced=False, score=0.0, guarded_response=None, exec_time_ms=0.0, trace=[])
+
+
+def test_cyclic_metadata_in_the_fallback_does_not_recurse_forever() -> None:
+    update: dict[str, Any] = {"note": "no messages here"}
+    update["self"] = update
+    streamed = _StreamedOutput()
+    streamed.add((), "updates", {"node": update})
+    assert streamed.text() == ""
