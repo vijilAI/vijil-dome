@@ -623,3 +623,43 @@ def test_cyclic_metadata_in_the_fallback_does_not_recurse_forever() -> None:
     streamed = _StreamedOutput()
     streamed.add((), "updates", {"node": update})
     assert streamed.text() == ""
+
+
+class TestStreamThirdReview:
+    def test_complete_chunk_in_state_events_is_not_appended_again(self) -> None:
+        streamed = _StreamedOutput()
+        for _ in range(2):  # the same node result seen in two update events
+            streamed.add((), "updates", {"node": {"messages": [AIMessageChunk(content="full answer", id="c1")]}})
+        for token in ("full ", "answer"):  # and as tokens of the same message
+            streamed.add((), "messages", (AIMessageChunk(content=token, id="c1"), {}))
+        assert streamed.text() == "full answer"
+
+    def test_messages_mode_ignores_history_in_metadata(self) -> None:
+        streamed = _StreamedOutput()
+        metadata = {"history": [AIMessage("old answer", id="o1")]}
+        streamed.add((), "messages", (AIMessageChunk(content="new", id="n1"), metadata))
+        assert streamed.text() == "new"
+
+    def test_assistant_dict_without_content_is_walked_into(self) -> None:
+        streamed = _StreamedOutput()
+        update = {
+            "writer": {"messages": [AIMessage("other answer", id="y")]},
+            "node": {"role": "assistant", "messages": [AIMessage("nested answer", id="x")]},
+        }
+        streamed.add((), "updates", update)
+        assert "nested answer" in streamed.text()
+
+    def test_subclass_of_a_compiled_graph_is_recognized(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        def model(state: MessagesState) -> dict[str, Any]:
+            get_stream_writer()("progress")
+            return {"messages": [AIMessage("subclass answer")]}
+
+        compiled = _linear(MessagesState, ("model", model)).compile()
+        compiled.__class__ = type("TeamGraph", (type(compiled),), {})  # defined outside langgraph
+        graph = _secured(compiled)
+        seen = _recording(graph, monkeypatch)
+
+        chunks = list(graph.stream({"messages": [HumanMessage("hi")]}, stream_mode="custom"))
+
+        assert chunks == ["progress"]
+        assert seen == ["subclass answer"]

@@ -103,7 +103,7 @@ class _StreamPlan:
         requested = kwargs.get("stream_mode")
         if requested is None:  # omitted or explicit None: the graph's own default
             requested = getattr(graph, "stream_mode", None)
-        is_langgraph = (type(graph).__module__ or "").startswith("langgraph")
+        is_langgraph = any((cls.__module__ or "").startswith("langgraph") for cls in type(graph).__mro__)
         self.tagged = is_langgraph and isinstance(requested, (str, list, tuple))
         self.single = isinstance(requested, str)
         self.modes: list[str] = [requested] if isinstance(requested, str) else list(requested or [])
@@ -133,8 +133,8 @@ class _StreamPlan:
 
 
 def _is_ai_message(node: Any) -> bool:
-    if isinstance(node, dict):
-        return node.get("role") in ("assistant", "ai") or node.get("type") == "ai"
+    if isinstance(node, dict):  # a message dict, not a state or update that happens to have these keys
+        return "content" in node and (node.get("role") in ("assistant", "ai") or node.get("type") == "ai")
     return getattr(node, "type", None) in ("ai", "AIMessageChunk")
 
 
@@ -209,9 +209,13 @@ class _StreamedOutput:
                 self._baseline[namespace] = {(self._key(namespace, m, text), text) for m, text in texts}
                 return
             seen_before = self._baseline[namespace]
-        for message in _ai_messages(data):
+        # messages mode yields (message, metadata): metadata is the caller's, not output
+        source = data[0] if mode == "messages" and isinstance(data, tuple) and data else data
+        for message in _ai_messages(source):
             text = _extract_text(message)
-            if getattr(message, "type", None) == "AIMessageChunk":
+            # Token fragments only come from message events; an AIMessageChunk in a state or
+            # update event is a complete node result, deduplicated like any full message.
+            if mode == "messages" and getattr(message, "type", None) == "AIMessageChunk":
                 message_id = getattr(message, "id", None)
                 key = (namespace, "id", message_id) if message_id else (namespace, "anonymous-chunks")
                 self._fragments.setdefault(key, []).append(text)
