@@ -65,6 +65,7 @@ import logging
 import os
 import threading
 import weakref
+from contextlib import contextmanager
 from types import SimpleNamespace
 from typing import Any, Iterator, Optional
 
@@ -303,12 +304,29 @@ def mark_explicitly_instrumented(dome: Any) -> None:
     setattr(dome, _EXPLICIT_ATTR, True)
 
 
-def undo_env_instrumentation(dome: Any) -> None:
-    """Release *dome*'s reliance on the env layer, removing it where the contract allows (C2, C3).
+@contextmanager
+def instrumentation_lock() -> Iterator[list[_Notice]]:
+    """Hold the module lock across a whole explicit instrumentation, logging its notices after release.
 
-    A no-op on an instance that does not rely on the env layer.
+    Explicit ``instrument_dome`` wraps the same guardrail objects as the env layer, so it must run
+    under the same lock (C1, C2); its notices are logged only once the lock is released (C6).
     """
     notices: list[_Notice] = []
+    try:
+        with _lock:
+            yield notices
+    finally:
+        _emit(notices)
+
+
+def undo_env_instrumentation(dome: Any, notices: Optional[list[_Notice]] = None) -> None:
+    """Release *dome*'s reliance on the env layer, removing it where the contract allows (C2, C3).
+
+    A no-op on an instance that does not rely on the env layer. When *notices* is given, the caller
+    holds the lock and logs them after releasing it.
+    """
+    caller_logs = notices is not None
+    notices = notices if notices is not None else []
     with _lock:
         guardrails = getattr(dome, _DOME_GUARDRAILS_ATTR, None)
         if not isinstance(guardrails, list):
@@ -350,7 +368,8 @@ def undo_env_instrumentation(dome: Any) -> None:
                 setattr(guardrail, _GUARDRAIL_STATE_ATTR, None)
         setattr(dome, _DOME_GUARDRAILS_ATTR, None)
         dome._instrumented = False
-    _emit(notices)
+    if not caller_logs:
+        _emit(notices)
 
 
 def _instrument(dome: Any, notices: list[_Notice]) -> None:

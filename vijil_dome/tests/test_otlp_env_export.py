@@ -575,9 +575,13 @@ def test_c1_concurrent_construction_installs_env_layer_once(receiver, monkeypatc
     monkeypatch.setenv("OTEL_EXPORTER_OTLP_ENDPOINT", receiver.url)
     real = otel_instrumentation._instrument_guardrails
 
-    def slow(*args, **kwargs):
-        time.sleep(0.02)  # widen the check-then-wrap window
-        return real(*args, **kwargs)
+    calls: list[int] = []
+
+    def slow(target, *args, **kwargs):
+        if target.input_guardrail is not None or target.output_guardrail is not None:
+            calls.append(1)  # a call that actually wraps a guardrail
+        time.sleep(0.02)  # keep threads overlapping inside the check-then-wrap window
+        return real(target, *args, **kwargs)
 
     monkeypatch.setattr(otel_instrumentation, "_instrument_guardrails", slow)
     shared = create_dome_config(GUARD_CFG)
@@ -603,7 +607,69 @@ def test_c1_concurrent_construction_installs_env_layer_once(receiver, monkeypatc
 
     _run_with_watchdog(construct_concurrently)
     assert len(domes) == 8
+    # Without the lock, several threads pass the "no layer yet" check and each wraps.
+    assert len(calls) == 1
     domes[0].guard_input(ATTACK)
+    assert _received_detections(receiver) == 1
+
+
+def test_c1_c2_explicit_instrumentation_races_construction_without_losing_spans(
+    receiver, monkeypatch
+) -> None:
+    """Explicit instrument_dome on one Dome while others are built from the same DomeConfig."""
+    from vijil_dome.Dome import create_dome_config
+    from vijil_dome.integrations.instrumentation import otel_instrumentation
+
+    monkeypatch.setenv("OTEL_EXPORTER_OTLP_ENDPOINT", receiver.url)
+    real = otel_instrumentation._instrument_guardrails
+
+    explicit_held_lock: list[bool] = []
+
+    def slow(target, *args, **kwargs):
+        if target is first:  # the explicit call wraps the Dome itself
+            explicit_held_lock.append(otlp_env._lock._is_owned())  # type: ignore[attr-defined]
+        time.sleep(0.02)
+        return real(target, *args, **kwargs)
+
+    monkeypatch.setattr(otel_instrumentation, "_instrument_guardrails", slow)
+    shared = create_dome_config(GUARD_CFG)
+    first = Dome(shared, enforce=False)
+    memory, tracer = _memory_tracer()
+    others: list[Dome] = []
+
+    def race() -> None:
+        barrier = threading.Barrier(5)
+
+        def explicit() -> None:
+            barrier.wait()
+            instrument_dome(first, None, tracer, None)  # type: ignore[arg-type]
+
+        def build() -> None:
+            barrier.wait()
+            others.append(Dome(shared, enforce=False))
+
+        threads = [threading.Thread(target=explicit)] + [
+            threading.Thread(target=build) for _ in range(4)
+        ]
+        old_interval = sys.getswitchinterval()
+        sys.setswitchinterval(1e-6)
+        try:
+            for t in threads:
+                t.start()
+            for t in threads:
+                t.join()
+        finally:
+            sys.setswitchinterval(old_interval)
+
+    _run_with_watchdog(race)
+    assert len(others) == 4
+    # The race is timing-dependent, so assert its precondition directly: the explicit
+    # wrap of shared guardrails runs under the env layer's lock.
+    assert explicit_held_lock == [True]
+    first.guard_input(ATTACK)
+    # Whichever ran first, the explicit tracer and the env layer (still owned by the
+    # other Domes) each see the scan exactly once.
+    assert _detections(memory) == 1
     assert _received_detections(receiver) == 1
 
 
