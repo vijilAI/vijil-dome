@@ -300,3 +300,148 @@ def test_missing_extra_warns_once(receiver, monkeypatch, dome_warnings) -> None:
     assert len(dome_warnings) == 1
     assert "vijil-dome[opentelemetry]" in dome_warnings[0]
     assert receiver.requests == []
+
+
+def _assert_nothing_wrapped(dome: Dome) -> None:
+    """No guardrail, guard or detector carries an instance-level wrapper."""
+    assert dome.input_guardrail is not None
+    objects: list[object] = [dome.input_guardrail]
+    for guard in dome.input_guardrail.guard_list:
+        objects.append(guard)
+        objects.extend(guard.detector_list)
+    for obj in objects:
+        assert not {"scan", "async_scan", "detect", "sync_detect"} & set(vars(obj)), obj
+
+
+@pytest.mark.parametrize(
+    "var, value",
+    [
+        ("OTEL_EXPORTER_OTLP_TIMEOUT", "abc"),
+        ("OTEL_EXPORTER_OTLP_COMPRESSION", "bogus"),
+        ("OTEL_BSP_MAX_EXPORT_BATCH_SIZE", "4096"),  # above the default queue size of 2048
+    ],
+)
+def test_malformed_env_value_warns_and_leaves_dome_usable(
+    receiver, monkeypatch, dome_warnings, var, value
+) -> None:
+    monkeypatch.setenv("OTEL_EXPORTER_OTLP_ENDPOINT", receiver.url)
+    monkeypatch.setenv(var, value)
+
+    dome = Dome(GUARD_CFG, enforce=False)
+    scan = dome.guard_input(ATTACK)
+
+    assert scan.flagged
+    assert otlp_env._provider is None
+    _assert_uninstrumented(dome)
+    _assert_nothing_wrapped(dome)
+    assert len(dome_warnings) == 1
+    assert "ValueError" in dome_warnings[0] and "not exported" in dome_warnings[0]
+
+
+def test_failure_midway_through_wrapping_leaves_nothing_wrapped(
+    receiver, monkeypatch, dome_warnings
+) -> None:
+    from vijil_dome.integrations.instrumentation import otel_instrumentation
+
+    monkeypatch.setenv("OTEL_EXPORTER_OTLP_ENDPOINT", receiver.url)
+
+    def boom(*args, **kwargs):
+        raise RuntimeError("wrap failed")
+
+    # Runs after the per-guard and per-detector tracer wrapping is in place.
+    monkeypatch.setattr(otel_instrumentation, "_add_darwin_detection_spans", boom)
+
+    dome = Dome(GUARD_CFG, enforce=False)
+    assert dome.guard_input(ATTACK).flagged
+
+    _assert_uninstrumented(dome)
+    _assert_nothing_wrapped(dome)
+    assert len(dome_warnings) == 1 and "wrap failed" in dome_warnings[0]
+
+
+@pytest.mark.parametrize(
+    "exporters, expected",
+    [
+        ("otlp_proto_http", "http"),
+        ("otlp_proto_grpc", "grpc"),
+        ("otlp,console", "http"),
+    ],
+)
+def test_sdk_otlp_exporter_names_enable_export(monkeypatch, exporters, expected) -> None:
+    from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import (
+        OTLPSpanExporter as GrpcSpanExporter,
+    )
+    from opentelemetry.exporter.otlp.proto.http.trace_exporter import (
+        OTLPSpanExporter as HttpSpanExporter,
+    )
+
+    monkeypatch.setenv("OTEL_EXPORTER_OTLP_ENDPOINT", "http://127.0.0.1:4317")
+    monkeypatch.setenv("OTEL_TRACES_EXPORTER", exporters)
+
+    dome = Dome(GUARD_CFG, enforce=False)
+
+    assert otlp_env.is_env_instrumented(dome)
+    processors = otlp_env._provider._active_span_processor._span_processors
+    expected_cls = GrpcSpanExporter if expected == "grpc" else HttpSpanExporter
+    assert type(processors[0].span_exporter) is expected_cls
+
+
+def test_shared_dome_config_wraps_once_and_survives_undo_on_other_instance(
+    receiver, monkeypatch
+) -> None:
+    from vijil_dome.Dome import create_dome_config
+
+    monkeypatch.setenv("OTEL_EXPORTER_OTLP_ENDPOINT", receiver.url)
+    config = create_dome_config(GUARD_CFG)
+    a = Dome(config, enforce=False)
+    b = Dome(config, enforce=False)
+    assert a.input_guardrail is b.input_guardrail
+
+    a.guard_input(ATTACK, agent_id="ag-a")
+    _flush()
+    assert [_attr(s, "agent.id") for _, s in receiver.spans() if s.name == "dome-detection"] == ["ag-a"]
+
+    # An explicit setup on a releases a's env instrumentation; b still relies on it.
+    memory = InMemorySpanExporter()
+    app_provider = TracerProvider()
+    app_provider.add_span_processor(SimpleSpanProcessor(memory))
+    instrument_dome(a, None, app_provider.get_tracer("app"), None)  # type: ignore[arg-type]
+    assert otlp_env.is_env_instrumented(b)
+
+    b.guard_input(ATTACK, agent_id="ag-b")
+    _flush()
+    exported = [_attr(s, "agent.id") for _, s in receiver.spans() if s.name == "dome-detection"]
+    assert exported == ["ag-a", "ag-b"]
+
+
+def test_no_otel_env_imports_no_opentelemetry() -> None:
+    import os
+    import subprocess
+
+    code = (
+        "import sys\n"
+        "from vijil_dome import Dome\n"
+        f"Dome({GUARD_CFG!r}, enforce=False).guard_input('hello')\n"
+        "print(sorted(m for m in sys.modules if m.startswith('opentelemetry')))\n"
+    )
+    env = {k: v for k, v in os.environ.items() if not k.startswith("OTEL_")}
+    result = subprocess.run(
+        [sys.executable, "-c", code], env=env, capture_output=True, text=True, timeout=300
+    )
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip().splitlines()[-1] == "[]"
+
+
+def test_global_tracer_provider_untouched(receiver, monkeypatch) -> None:
+    from opentelemetry import trace
+
+    monkeypatch.setenv("OTEL_EXPORTER_OTLP_ENDPOINT", receiver.url)
+    before = trace.get_tracer_provider()
+
+    dome = Dome(GUARD_CFG, enforce=False)
+    dome.guard_input(ATTACK)
+    _flush()
+
+    assert trace.get_tracer_provider() is before
+    assert before is not otlp_env._provider
+    assert "dome-detection" in {s.name for _, s in receiver.spans()}
