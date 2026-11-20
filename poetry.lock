@@ -9226,4 +9226,4 @@ trust-cli = ["cryptography", "httpx", "spiffe", "typer"]
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.11,<3.15"
-content-hash = "e4bff88e0d203cf1a6c406d87120cab4208942acbe50c6b95b0f8781404505f6"
+content-hash = "26f3cca83f311b449fd5a1011895d173c8e9af8470ed7e6ad3cea240d5f41a9f"
