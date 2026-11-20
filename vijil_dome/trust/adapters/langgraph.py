@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import copy
+import json
 import logging
 from collections.abc import Iterator
 from typing import Any
@@ -46,7 +47,9 @@ def _content_text(content: Any) -> str:
     """Text of a message's content: a string, or the text of a content-block list.
 
     Opaque blocks (reasoning signatures, tool calls, media) are skipped, so guards scan
-    what was said, not encoded payloads; any other block's ``text`` is kept.
+    what was said, not encoded payloads. Any other block contributes its ``text``, or,
+    when it keeps its text elsewhere (Anthropic ``document`` sources, ``tool_result``
+    content), the whole block serialized, as ``str(content)`` did before.
     """
     if isinstance(content, str):
         return content
@@ -57,8 +60,7 @@ def _content_text(content: Any) -> str:
                 parts.append(block)
             elif isinstance(block, dict) and block.get("type") not in _OPAQUE_BLOCK_TYPES:
                 text = block.get("text")
-                if isinstance(text, str):
-                    parts.append(text)
+                parts.append(text if isinstance(text, str) else json.dumps(block, default=str, ensure_ascii=False))
         return "\n".join(part for part in parts if part)
     return str(content)
 
