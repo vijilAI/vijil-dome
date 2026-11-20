@@ -43,6 +43,7 @@ from vijil_dome.instrumentation.tracing import (
     _set_guardrail_span_output,
 )
 from vijil_dome.instrumentation.logging import _get_ip_address
+from vijil_dome.integrations.instrumentation.otlp_env import undo_env_instrumentation
 
 
 class VijilLogFormatter(logging.Formatter):
@@ -249,6 +250,9 @@ def instrument_dome(
     tracer: Optional[Tracer],
     meter: Optional[Meter],
 ):
+    # An explicit call replaces the instrumentation Dome applied from the
+    # OTEL_EXPORTER_OTLP_* env vars, instead of being a no-op on it.
+    undo_env_instrumentation(dome)
     if getattr(dome, "_instrumented", False):
         return
     _instrument_guardrails(dome, handler, tracer, meter, dome.enforce)
