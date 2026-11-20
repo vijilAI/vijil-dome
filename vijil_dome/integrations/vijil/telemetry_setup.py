@@ -402,7 +402,7 @@ def setup_vijil_telemetry(
             instrument_vijil_dome,
         )
         from vijil_dome.integrations.instrumentation.otlp_env import (
-            is_env_instrumented,
+            env_only_instrumented,
         )
     except ImportError as e:
         raise ImportError(_MISSING_EXTRA) from e
@@ -413,7 +413,7 @@ def setup_vijil_telemetry(
     # Instrumentation Dome applied from the OTEL_EXPORTER_OTLP_* env vars is
     # not an earlier setup: instrument_dome below replaces it. It is left in
     # place until then, so a setup that fails (say, on a rejected key) keeps it.
-    if getattr(dome, "_instrumented", False) and not is_env_instrumented(dome):
+    if getattr(dome, "_instrumented", False) and not env_only_instrumented(dome):
         raise RuntimeError(
             "This Dome instance is already instrumented; a second setup would be ignored"
         )

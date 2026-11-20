@@ -29,20 +29,34 @@ for export.
 
 Every ``Dome`` in the process shares one ``TracerProvider``, built on first
 use. The SDK registers an atexit hook that flushes and shuts it down. The
-app's global tracer provider is never touched.
+app's global tracer provider is never touched. Opting in does install the
+OpenTelemetry logging, asyncio and threading instrumentors process-wide, as
+``instrument_dome`` does: log records gain trace-context fields, and spans
+propagate across asyncio tasks and threads.
 
-Telemetry never breaks ``Dome()``: a malformed env value, a missing
-exporter or a failure while wrapping logs one warning and leaves the
-instance uninstrumented.
+The "env layer" is the set of wrappers this module installs on a
+guardrail's, its guards' and its detectors' ``scan``/``async_scan``/
+``detect``/``sync_detect`` methods. It is tracked per guardrail object,
+because Domes built from one ``DomeConfig`` share their guardrails. The
+contract:
 
-Wrapping is tracked per guardrail object, not per Dome, because Domes built
-from one ``DomeConfig`` share their guardrails. A shared guardrail is
-wrapped once, and stays wrapped while any Dome using it still relies on
-the env export.
-
-An explicit ``instrument_dome`` or ``setup_vijil_telemetry`` call on the
-same instance wins: both go through :func:`undo_env_instrumentation`,
-which puts back the scan/detect methods this module wrapped.
+C1. The env layer is installed at most once per guardrail object, however
+    many Domes share it and however many threads construct them at once.
+C2. Undo for a Dome removes only the env layer, and only once no other Dome
+    relies on it. It never removes a wrapper it did not install: each
+    method is put back only if it is still the exact wrapper installed.
+C3. If another wrapper has been layered over the env layer on a method, that
+    part of the env layer stays in place, and one warning says so. Removing
+    it would strip the other wrapper too, silently losing someone's export.
+C4. An explicit ``instrument_dome`` or ``setup_vijil_telemetry`` with a
+    tracer, on an unshared Dome, removes the env layer: only the explicit
+    tracer exports.
+C5. ``instrument_dome`` with ``tracer=None`` (metrics or logs only) keeps
+    the env trace export.
+C6. Telemetry never raises from ``Dome()``: any failure logs one warning and
+    leaves the instance uninstrumented, with nothing half-wrapped. Log
+    handlers never run while this module's lock is held: messages decided
+    under the lock are logged after it is released.
 """
 
 from __future__ import annotations
@@ -69,44 +83,53 @@ _OTLP_EXPORTER_PROTOCOLS = {
 }
 # Every method instrument_dome replaces on a guardrail, guard or detector.
 _WRAPPED_METHODS = ("scan", "async_scan", "detect", "sync_detect")
-_GUARDRAIL_STATE_ATTR = "_otlp_env_state"  # on a Guardrail this module wrapped
-_DOME_GUARDRAILS_ATTR = "_otlp_env_guardrails"  # on a Dome relying on the env export
+_GUARDRAIL_STATE_ATTR = "_otlp_env_state"  # on a Guardrail carrying the env layer
+_DOME_GUARDRAILS_ATTR = "_otlp_env_guardrails"  # on a Dome relying on the env layer
+_EXPLICIT_ATTR = "_explicitly_instrumented"  # on a Dome instrument_dome has instrumented
 _ABSENT = object()
 
 _EXTRA_HINT = "pip install 'vijil-dome[opentelemetry]'"
 _NOT_EXPORTED = "so Dome guard spans are not exported"
 
-# Re-entrant: _exporter_class warns (taking the lock) while _shared_tracer holds it.
+# Guards _provider, _warned and every env-layer install and undo (C1, C2).
+# Re-entrant because _instrument holds it while building the provider.
 _lock = threading.RLock()
 _provider: Any = None
 _warned: set[str] = set()
 
-Snapshot = list[tuple[Any, dict[str, Any]]]
+
+class _Notice:
+    """A message decided under the lock, logged once per process after the lock is released (C6)."""
+
+    def __init__(self, level: int, key: str, message: str, *args: Any) -> None:
+        self.level, self.key, self.message, self.args = level, key, message, args
+
+
+def _emit(notices: list[_Notice]) -> None:
+    """Log each notice not yet logged in this process. Must be called without the lock held."""
+    for notice in notices:
+        with _lock:
+            if notice.key in _warned:
+                continue
+            _warned.add(notice.key)
+        logger.log(notice.level, notice.message, *notice.args)
+
+
+# One installed wrapper: (object, method name, value before the env layer, wrapper installed).
+_Layer = tuple[Any, str, Any, Any]
 
 
 class _GuardrailState:
-    """The methods a guardrail had before env wrapping, and the Domes relying on that wrapping."""
+    """The env layer on one guardrail object, and the Domes relying on it."""
 
-    def __init__(self, snapshot: Snapshot) -> None:
-        self.snapshot = snapshot
+    def __init__(self, layers: list[_Layer]) -> None:
+        self.layers = layers
         self.owners: weakref.WeakSet[Any] = weakref.WeakSet()
 
 
 def otlp_endpoint_configured() -> bool:
     """True when either OTLP endpoint variable is set to a non-blank value."""
     return any(os.environ.get(name, "").strip() for name in _ENDPOINT_VARS)
-
-
-def _log_once(level: int, key: str, message: str, *args: Any) -> None:
-    with _lock:
-        if key in _warned:
-            return
-        _warned.add(key)
-    logger.log(level, message, *args)
-
-
-def _warn_once(key: str, message: str, *args: Any) -> None:
-    _log_once(logging.WARNING, key, message, *args)
 
 
 def _opted_in() -> bool:
@@ -120,7 +143,7 @@ def _otlp_exporter_name() -> Optional[str]:
     return next((n for n in names if n in _OTLP_EXPORTER_PROTOCOLS), None)
 
 
-def _export_requested() -> bool:
+def _export_requested(notices: list[_Notice]) -> bool:
     """Whether the env asks for Dome spans over OTLP. Reads env vars only; imports nothing."""
     if not otlp_endpoint_configured():
         return False
@@ -129,12 +152,14 @@ def _export_requested() -> bool:
     if _otlp_exporter_name() is None:
         return False
     if not _opted_in():
-        _log_once(
-            logging.INFO,
-            "opt-in",
-            "An OTLP endpoint is set, but Dome does not export its guard spans, which "
-            "include prompt and response text, unless %s=1 is also set",
-            _OPT_IN_VAR,
+        notices.append(
+            _Notice(
+                logging.INFO,
+                "opt-in",
+                "An OTLP endpoint is set, but Dome does not export its guard spans, which "
+                "include prompt and response text, unless %s=1 is also set",
+                _OPT_IN_VAR,
+            )
         )
         return False
     return True
@@ -148,7 +173,17 @@ def _protocol() -> str:
     return _OTLP_EXPORTER_PROTOCOLS[_otlp_exporter_name() or "otlp"]
 
 
-def _exporter_class() -> Optional[type]:
+def _missing_extra() -> _Notice:
+    return _Notice(
+        logging.WARNING,
+        "extra",
+        "OTEL_EXPORTER_OTLP_* is set but Dome cannot export spans without the "
+        "opentelemetry extra: %s",
+        _EXTRA_HINT,
+    )
+
+
+def _exporter_class(notices: list[_Notice]) -> Optional[type]:
     """The OTLP span exporter class for the configured protocol, or None to export nothing.
 
     Raises ImportError when the HTTP exporter (part of the opentelemetry extra) is missing.
@@ -164,37 +199,32 @@ def _exporter_class() -> Optional[type]:
                 OTLPSpanExporter as GrpcSpanExporter,
             )
         except ImportError:
-            _warn_once(
-                "grpc",
-                "OTLP protocol is grpc but the gRPC exporter is not installed, %s; "
-                "install opentelemetry-exporter-otlp-proto-grpc",
-                _NOT_EXPORTED,
+            notices.append(
+                _Notice(
+                    logging.WARNING,
+                    "grpc",
+                    "OTLP protocol is grpc but the gRPC exporter is not installed, %s; "
+                    "install opentelemetry-exporter-otlp-proto-grpc",
+                    _NOT_EXPORTED,
+                )
             )
             return None
         return GrpcSpanExporter
-    _warn_once(
-        f"protocol:{protocol}",
-        "OTLP protocol %r is not supported for Dome spans (use http/protobuf or grpc), %s",
-        protocol,
-        _NOT_EXPORTED,
+    notices.append(
+        _Notice(
+            logging.WARNING,
+            f"protocol:{protocol}",
+            "OTLP protocol %r is not supported for Dome spans (use http/protobuf or grpc), %s",
+            protocol,
+            _NOT_EXPORTED,
+        )
     )
     return None
 
 
-def _warn_missing_extra() -> None:
-    _warn_once(
-        "extra",
-        "OTEL_EXPORTER_OTLP_* is set but Dome cannot export spans without the "
-        "opentelemetry extra: %s",
-        _EXTRA_HINT,
-    )
-
-
-def _shared_tracer() -> Any:
+def _shared_tracer(notices: list[_Notice]) -> Any:
     """A tracer on the process-wide Dome provider, building it on first use; None if unavailable."""
     global _provider
-    missing_extra = False
-    build_error: Optional[Exception] = None
     with _lock:
         if _provider is None:
             try:
@@ -202,33 +232,33 @@ def _shared_tracer() -> Any:
                 from opentelemetry.sdk.trace import TracerProvider
                 from opentelemetry.sdk.trace.export import BatchSpanProcessor
 
-                exporter_cls = _exporter_class()
+                exporter_cls = _exporter_class(notices)
             except ImportError:
-                exporter_cls, missing_extra = None, True
-            if exporter_cls is not None:
-                try:
-                    # No arguments: the SDK reads endpoint, headers, timeout,
-                    # compression and certificates from OTEL_EXPORTER_OTLP_*.
-                    processor = BatchSpanProcessor(exporter_cls())
-                    new_provider = TracerProvider(resource=Resource.create())
-                    new_provider.add_span_processor(processor)
-                    _provider = new_provider
-                except Exception as e:  # a malformed OTEL_* value must not break Dome()
-                    build_error = e
-        provider = _provider
-    if provider is not None:
-        return provider.get_tracer("vijil.dome")
-    if missing_extra:
-        _warn_missing_extra()
-    elif build_error is not None:
-        _warn_once(
-            "build",
-            "Could not build Dome's OTLP span exporter from the OTEL_* env vars (%s: %s), %s",
-            type(build_error).__name__,
-            build_error,
-            _NOT_EXPORTED,
-        )
-    return None
+                notices.append(_missing_extra())
+                return None
+            if exporter_cls is None:
+                return None
+            try:
+                # No arguments: the SDK reads endpoint, headers, timeout,
+                # compression and certificates from OTEL_EXPORTER_OTLP_*.
+                processor = BatchSpanProcessor(exporter_cls())
+                provider = TracerProvider(resource=Resource.create())
+                provider.add_span_processor(processor)
+            except Exception as e:  # a malformed OTEL_* value must not break Dome()
+                notices.append(
+                    _Notice(
+                        logging.WARNING,
+                        "build",
+                        "Could not build Dome's OTLP span exporter from the OTEL_* env vars "
+                        "(%s: %s), %s",
+                        type(e).__name__,
+                        e,
+                        _NOT_EXPORTED,
+                    )
+                )
+                return None
+            _provider = provider
+        return _provider.get_tracer("vijil.dome")
 
 
 def _guardrail_objects(guardrail: Any) -> Iterator[Any]:
@@ -238,20 +268,20 @@ def _guardrail_objects(guardrail: Any) -> Iterator[Any]:
         yield from guard.detector_list
 
 
-def _snapshot(guardrail: Any) -> Snapshot:
+def _method_values(guardrail: Any) -> list[tuple[Any, str, Any]]:
+    """(object, method name, instance-level value or _ABSENT) for every wrappable method."""
     return [
-        (obj, {name: getattr(obj, "__dict__", {}).get(name, _ABSENT) for name in _WRAPPED_METHODS})
+        (obj, name, getattr(obj, "__dict__", {}).get(name, _ABSENT))
         for obj in _guardrail_objects(guardrail)
+        for name in _WRAPPED_METHODS
     ]
 
 
-def _restore(snapshot: Snapshot) -> None:
-    for obj, methods in snapshot:
-        for name, value in methods.items():
-            if value is _ABSENT:
-                obj.__dict__.pop(name, None)
-            else:
-                setattr(obj, name, value)
+def _put_back(obj: Any, name: str, before: Any) -> None:
+    if before is _ABSENT:
+        obj.__dict__.pop(name, None)
+    else:
+        setattr(obj, name, before)
 
 
 def _state(guardrail: Any) -> Optional[_GuardrailState]:
@@ -260,97 +290,137 @@ def _state(guardrail: Any) -> Optional[_GuardrailState]:
 
 
 def is_env_instrumented(dome: Any) -> bool:
-    """True when *dome*'s current instrumentation came from the OTLP env vars."""
+    """True when *dome* relies on the env layer."""
     return isinstance(getattr(dome, _DOME_GUARDRAILS_ATTR, None), list)
 
 
+def env_only_instrumented(dome: Any) -> bool:
+    """True when *dome*'s only instrumentation is the env layer (no explicit instrument_dome yet)."""
+    return is_env_instrumented(dome) and getattr(dome, _EXPLICIT_ATTR, False) is not True
+
+
+def mark_explicitly_instrumented(dome: Any) -> None:
+    setattr(dome, _EXPLICIT_ATTR, True)
+
+
 def undo_env_instrumentation(dome: Any) -> None:
-    """Release *dome*'s env instrumentation, so an explicit setup can instrument it afresh.
+    """Release *dome*'s reliance on the env layer, removing it where the contract allows (C2, C3).
 
-    A guardrail's methods are put back once no Dome relies on its env
-    wrapping. A guardrail shared with another such Dome keeps it, and a
-    warning says so. A no-op on an instance this module did not instrument.
+    A no-op on an instance that does not rely on the env layer.
     """
-    guardrails = getattr(dome, _DOME_GUARDRAILS_ATTR, None)
-    if not isinstance(guardrails, list):
-        return
-    for guardrail in guardrails:
-        state = _state(guardrail)
-        if state is None:
-            continue
-        state.owners.discard(dome)
-        if len(state.owners) == 0:
-            _restore(state.snapshot)
-            setattr(guardrail, _GUARDRAIL_STATE_ATTR, None)
-        else:
-            _warn_once(
-                "shared",
-                "Guardrails shared with another Dome instance (built from one DomeConfig) "
-                "keep exporting spans to OTEL_EXPORTER_OTLP_* while that instance uses them",
+    notices: list[_Notice] = []
+    with _lock:
+        guardrails = getattr(dome, _DOME_GUARDRAILS_ATTR, None)
+        if not isinstance(guardrails, list):
+            return
+        for guardrail in guardrails:
+            state = _state(guardrail)
+            if state is None:
+                continue
+            state.owners.discard(dome)
+            if len(state.owners) > 0:
+                notices.append(
+                    _Notice(
+                        logging.WARNING,
+                        "shared",
+                        "Guardrails shared with another Dome instance (built from one "
+                        "DomeConfig) keep exporting spans to OTEL_EXPORTER_OTLP_* while "
+                        "that instance uses them",
+                    )
+                )
+                continue
+            kept = []
+            for obj, name, before, installed in state.layers:
+                if getattr(obj, "__dict__", {}).get(name, _ABSENT) is installed:
+                    _put_back(obj, name, before)
+                else:
+                    kept.append((obj, name, before, installed))
+            if kept:
+                state.layers = kept
+                notices.append(
+                    _Notice(
+                        logging.WARNING,
+                        "layered",
+                        "Dome's OTLP env export wrappers were left in place under wrappers "
+                        "added later, so Dome guard spans are still also exported to "
+                        "OTEL_EXPORTER_OTLP_*; removing them would also remove the later ones",
+                    )
+                )
+            else:
+                setattr(guardrail, _GUARDRAIL_STATE_ATTR, None)
+        setattr(dome, _DOME_GUARDRAILS_ATTR, None)
+        dome._instrumented = False
+    _emit(notices)
+
+
+def _instrument(dome: Any, notices: list[_Notice]) -> None:
+    with _lock:
+        tracer = _shared_tracer(notices)
+        if tracer is None:
+            return
+        try:
+            from vijil_dome.integrations.instrumentation.otel_instrumentation import (
+                _instrument_guardrails,
             )
-    setattr(dome, _DOME_GUARDRAILS_ATTR, None)
-    dome._instrumented = False
+        except ImportError:
+            notices.append(_missing_extra())
+            return
 
+        slots = [g for g in (dome.input_guardrail, dome.output_guardrail) if g is not None]
+        if len(slots) == 2 and slots[0] is slots[1]:
+            slots = slots[:1]  # one object in both slots carries one env layer
+        fresh = [g if _state(g) is None else None for g in (dome.input_guardrail, dome.output_guardrail)]
+        if fresh[0] is not None and fresh[1] is fresh[0]:
+            fresh[1] = None
+        before = {id(g): _method_values(g) for g in fresh if g is not None}
+        try:
+            _instrument_guardrails(
+                SimpleNamespace(input_guardrail=fresh[0], output_guardrail=fresh[1]),
+                None,
+                tracer,
+                None,
+                dome.enforce,
+            )
+        except Exception:
+            # Nothing else can have layered over these while the lock was held.
+            for values in before.values():
+                for obj, name, value in values:
+                    _put_back(obj, name, value)
+            raise
 
-def _instrument(dome: Any) -> None:
-    tracer = _shared_tracer()
-    if tracer is None:
-        return
-    try:
-        from vijil_dome.integrations.instrumentation.otel_instrumentation import (
-            _instrument_guardrails,
-        )
-    except ImportError:
-        _warn_missing_extra()
-        return
-
-    slots = (dome.input_guardrail, dome.output_guardrail)
-    fresh = [g if g is not None and _state(g) is None else None for g in slots]
-    if fresh[1] is fresh[0]:
-        fresh[1] = None  # one object in both slots is wrapped once
-    snapshots = {id(g): _snapshot(g) for g in fresh if g is not None}
-    try:
-        _instrument_guardrails(
-            SimpleNamespace(input_guardrail=fresh[0], output_guardrail=fresh[1]),
-            None,
-            tracer,
-            None,
-            dome.enforce,
-        )
-    except Exception:
-        # Leave no half-wrapped guardrail behind.
-        for snapshot in snapshots.values():
-            _restore(snapshot)
-        raise
-
-    owned = []
-    for guardrail in slots:
-        if guardrail is None:
-            continue
-        state = _state(guardrail)
-        if state is None:
-            state = _GuardrailState(snapshots[id(guardrail)])
-            setattr(guardrail, _GUARDRAIL_STATE_ATTR, state)
-        state.owners.add(dome)
-        owned.append(guardrail)
-    setattr(dome, _DOME_GUARDRAILS_ATTR, owned)
-    dome._instrumented = True
+        for guardrail in slots:
+            state = _state(guardrail)
+            if state is None:
+                layers = [
+                    (obj, name, value, obj.__dict__[name])
+                    for obj, name, value in before[id(guardrail)]
+                    if obj.__dict__.get(name, _ABSENT) is not value
+                ]
+                state = _GuardrailState(layers)
+                setattr(guardrail, _GUARDRAIL_STATE_ATTR, state)
+            state.owners.add(dome)
+        setattr(dome, _DOME_GUARDRAILS_ATTR, list(slots))
+        dome._instrumented = True
 
 
 def instrument_from_env(dome: Any) -> None:
-    """Wrap *dome*'s guards with spans exported over OTLP, if the OTLP env vars ask for it.
+    """Wrap *dome*'s guards with spans exported over OTLP, if the env asks for it.
 
     Never raises: any failure logs one warning and leaves *dome* uninstrumented.
     """
+    notices: list[_Notice] = []
     try:
-        if not _export_requested() or getattr(dome, "_instrumented", False):
-            return
-        _instrument(dome)
+        if _export_requested(notices) and not getattr(dome, "_instrumented", False):
+            _instrument(dome, notices)
     except Exception as e:
-        _warn_once(
-            "instrument",
-            "Could not instrument Dome for OTLP export (%s: %s), %s",
-            type(e).__name__,
-            e,
-            _NOT_EXPORTED,
+        notices.append(
+            _Notice(
+                logging.WARNING,
+                "instrument",
+                "Could not instrument Dome for OTLP export (%s: %s), %s",
+                type(e).__name__,
+                e,
+                _NOT_EXPORTED,
+            )
         )
+    _emit(notices)

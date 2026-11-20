@@ -6,6 +6,7 @@ import base64
 import logging
 import sys
 import threading
+import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import pytest
@@ -524,3 +525,220 @@ def test_opt_in_values_enable_export(receiver, monkeypatch, dome_records, opt_in
 
     assert "dome-detection" in {s.name for _, s in receiver.spans()}
     assert not [r for r in dome_records if "VIJIL_DOME_OTLP_EXPORT" in r.getMessage()]
+
+
+# --- Contract C1-C6 (see the otlp_env module docstring): one behavioural test per clause ---
+
+
+def _run_with_watchdog(fn, timeout: float = 120.0) -> None:
+    """Run *fn* in a thread and fail, instead of hanging, if it does not finish (e.g. a deadlock)."""
+    outcome: dict[str, BaseException] = {}
+
+    def target() -> None:
+        try:
+            fn()
+        except BaseException as e:  # re-raised in the test thread below
+            outcome["error"] = e
+
+    worker = threading.Thread(target=target, daemon=True)
+    worker.start()
+    worker.join(timeout)
+    assert not worker.is_alive(), f"timed out after {timeout}s: possible deadlock"
+    if "error" in outcome:
+        raise outcome["error"]
+
+
+def _memory_tracer() -> tuple[InMemorySpanExporter, object]:
+    memory = InMemorySpanExporter()
+    provider = TracerProvider()
+    provider.add_span_processor(SimpleSpanProcessor(memory))
+    return memory, provider.get_tracer("explicit")
+
+
+def _detections(memory: InMemorySpanExporter) -> int:
+    count = [s.name for s in memory.get_finished_spans()].count("dome-detection")
+    memory.clear()
+    return count
+
+
+def _received_detections(receiver: _Receiver) -> int:
+    _flush()
+    count = [getattr(s, "name") for _, s in receiver.spans()].count("dome-detection")
+    receiver.requests.clear()
+    return count
+
+
+def test_c1_concurrent_construction_installs_env_layer_once(receiver, monkeypatch) -> None:
+    from vijil_dome.Dome import create_dome_config
+    from vijil_dome.integrations.instrumentation import otel_instrumentation
+
+    monkeypatch.setenv("OTEL_EXPORTER_OTLP_ENDPOINT", receiver.url)
+    real = otel_instrumentation._instrument_guardrails
+
+    def slow(*args, **kwargs):
+        time.sleep(0.02)  # widen the check-then-wrap window
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(otel_instrumentation, "_instrument_guardrails", slow)
+    shared = create_dome_config(GUARD_CFG)
+    domes: list[Dome] = []
+
+    def construct_concurrently() -> None:
+        barrier = threading.Barrier(8)
+
+        def build() -> None:
+            barrier.wait()
+            domes.append(Dome(shared, enforce=False))
+
+        threads = [threading.Thread(target=build) for _ in range(8)]
+        old_interval = sys.getswitchinterval()
+        sys.setswitchinterval(1e-6)
+        try:
+            for t in threads:
+                t.start()
+            for t in threads:
+                t.join()
+        finally:
+            sys.setswitchinterval(old_interval)
+
+    _run_with_watchdog(construct_concurrently)
+    assert len(domes) == 8
+    domes[0].guard_input(ATTACK)
+    assert _received_detections(receiver) == 1
+
+
+def test_c2_undo_keeps_other_owners_and_layers_it_did_not_install(receiver, monkeypatch) -> None:
+    from vijil_dome.Dome import create_dome_config
+
+    monkeypatch.setenv("OTEL_EXPORTER_OTLP_ENDPOINT", receiver.url)
+    shared = create_dome_config(GUARD_CFG)
+    calls: list[str] = []
+    original = shared.input_guardrail.scan
+
+    def app_wrapper(*args, **kwargs):  # installed by the app before any Dome exists
+        calls.append("app")
+        return original(*args, **kwargs)
+
+    shared.input_guardrail.scan = app_wrapper  # type: ignore[method-assign]
+    a = Dome(shared, enforce=False)
+    b = Dome(shared, enforce=False)
+
+    x_memory, x_tracer = _memory_tracer()
+    instrument_dome(a, None, x_tracer, None)  # type: ignore[arg-type]
+    b.guard_input(ATTACK)
+    assert _received_detections(receiver) == 1  # b still relies on the env layer
+
+    y_memory, y_tracer = _memory_tracer()
+    instrument_dome(b, None, y_tracer, None)  # type: ignore[arg-type]
+    calls.clear()
+    b.guard_input(ATTACK)
+    assert calls == ["app"], "the app's own wrapper must survive the undo"
+
+
+def test_c3_env_layer_under_another_wrapper_is_kept_with_a_warning(
+    receiver, monkeypatch, dome_warnings
+) -> None:
+    """The reviewer's repro: A explicit (tracer X), then B explicit (tracer Y), on one DomeConfig."""
+    from vijil_dome.Dome import create_dome_config
+
+    monkeypatch.setenv("OTEL_EXPORTER_OTLP_ENDPOINT", receiver.url)
+    shared = create_dome_config(GUARD_CFG, "fail_closed")
+    a = Dome(shared)
+    b = Dome(shared)
+    x_memory, x_tracer = _memory_tracer()
+    y_memory, y_tracer = _memory_tracer()
+    instrument_dome(a, None, x_tracer, None)  # type: ignore[arg-type]
+    instrument_dome(b, None, y_tracer, None)  # type: ignore[arg-type]
+
+    a.guard_input("hi")
+
+    # X's layer sits on the env layer, so removing the env layer would strip X:
+    # it stays, every exporter still sees A's scan, and a warning says so.
+    assert _detections(x_memory) == 1
+    assert _detections(y_memory) == 1
+    assert _received_detections(receiver) == 1
+    assert any("left in place" in m for m in dome_warnings), dome_warnings
+
+
+def test_c4_explicit_instrumentation_of_unshared_dome_replaces_env_layer(receiver, monkeypatch) -> None:
+    monkeypatch.setenv("OTEL_EXPORTER_OTLP_ENDPOINT", receiver.url)
+    dome = Dome(GUARD_CFG, enforce=False)
+    memory, tracer = _memory_tracer()
+    instrument_dome(dome, None, tracer, None)  # type: ignore[arg-type]
+
+    dome.guard_input(ATTACK)
+
+    assert _detections(memory) == 1
+    assert _received_detections(receiver) == 0
+    assert not otlp_env.is_env_instrumented(dome)
+
+
+def test_c5_instrument_dome_without_tracer_keeps_env_trace_export(receiver, monkeypatch) -> None:
+    from opentelemetry.sdk.metrics import MeterProvider
+    from opentelemetry.sdk.metrics.export import InMemoryMetricReader
+
+    monkeypatch.setenv("OTEL_EXPORTER_OTLP_ENDPOINT", receiver.url)
+    dome = Dome(GUARD_CFG, enforce=False)
+    reader = InMemoryMetricReader()
+    meter = MeterProvider(metric_readers=[reader]).get_meter("explicit")
+
+    instrument_dome(dome, None, None, meter)
+    dome.guard_input(ATTACK)
+
+    assert _received_detections(receiver) == 1
+    data = reader.get_metrics_data()
+    names = {
+        m.name
+        for rm in data.resource_metrics
+        for sm in rm.scope_metrics
+        for m in sm.metrics
+    }
+    assert "dome_input-requests_total" in names, names
+    # The explicit meter-only call still counts as explicit instrumentation.
+    with pytest.raises(RuntimeError):
+        setup_vijil_telemetry(dome, send_to_console=False, span_exporters=[InMemorySpanExporter()])
+
+
+def test_c6_log_handlers_never_run_under_the_lock(receiver, monkeypatch) -> None:
+    from vijil_dome.Dome import create_dome_config
+
+    seen: list[tuple[bool, str]] = []
+
+    class LockProbe(logging.Handler):
+        def emit(self, record: logging.LogRecord) -> None:
+            seen.append((otlp_env._lock._is_owned(), record.getMessage()))  # type: ignore[attr-defined]
+
+    probe = LockProbe(level=logging.DEBUG)
+    lg = logging.getLogger("vijil.dome")
+    old_level = lg.level
+    lg.addHandler(probe)
+    lg.setLevel(logging.INFO)
+
+    def exercise() -> None:
+        monkeypatch.setenv("OTEL_EXPORTER_OTLP_ENDPOINT", receiver.url)
+        # Unsupported protocol: the warning is decided while the provider is being built.
+        monkeypatch.setenv("OTEL_EXPORTER_OTLP_PROTOCOL", "http/json")
+        Dome(GUARD_CFG, enforce=False)
+        monkeypatch.delenv("OTEL_EXPORTER_OTLP_PROTOCOL")
+        # Malformed value: the build failure is caught under the lock.
+        monkeypatch.setenv("OTEL_EXPORTER_OTLP_TIMEOUT", "abc")
+        Dome(GUARD_CFG, enforce=False)
+        monkeypatch.delenv("OTEL_EXPORTER_OTLP_TIMEOUT")
+        # Missing opt-in notice.
+        monkeypatch.delenv("VIJIL_DOME_OTLP_EXPORT")
+        Dome(GUARD_CFG, enforce=False)
+        monkeypatch.setenv("VIJIL_DOME_OTLP_EXPORT", "1")
+        # Shared-guardrail and layered-undo warnings.
+        shared = create_dome_config(GUARD_CFG)
+        a, b = Dome(shared, enforce=False), Dome(shared, enforce=False)
+        instrument_dome(a, None, _memory_tracer()[1], None)  # type: ignore[arg-type]
+        instrument_dome(b, None, _memory_tracer()[1], None)  # type: ignore[arg-type]
+
+    try:
+        _run_with_watchdog(exercise)
+    finally:
+        lg.removeHandler(probe)
+        lg.setLevel(old_level)
+
+    assert len(seen) >= 4, seen
+    assert [m for held, m in seen if held] == []
