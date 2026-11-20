@@ -90,13 +90,15 @@ class _ForwardToAncestors(logging.Handler):
 
 
 def _export_dome_logs(handler: logging.Handler) -> None:
+    # Only our handler: the app's own handlers on these loggers keep their format.
+    handler.setFormatter(get_vijil_log_formatter())
     for name in _DOME_LOGGER_NAMES:
         logger = logging.getLogger(name)
         logger.addHandler(handler)
-        instrument_logger(logger)
         # Unset, the logger inherits root's WARNING and drops Dome's INFO records
-        # before they reach the handler. An app-chosen level wins.
-        if logger.level != logging.NOTSET:
+        # before they reach the handler. An app-chosen level wins, and an app already
+        # at INFO or below needs no change (raising to INFO would hide its DEBUG lines).
+        if logger.level != logging.NOTSET or logger.getEffectiveLevel() <= logging.INFO:
             continue
         logger.setLevel(logging.INFO)
         if logger.propagate:
@@ -201,14 +203,14 @@ def _add_darwin_detection_spans(
     guardrail.async_scan = async_scan_with_darwin_spans  # type: ignore[method-assign]
 
 
-def instrument_dome(
-    dome: Dome,
+def _instrument_guardrails(
+    target: Any,
     handler: Optional[logging.Handler],
     tracer: Optional[Tracer],
     meter: Optional[Meter],
-):
-    if getattr(dome, "_instrumented", False):
-        return
+    enforce: bool,
+) -> None:
+    """Instrument the input/output guardrails of anything that exposes them."""
     if not LoggingInstrumentor().is_instrumented_by_opentelemetry:
         LoggingInstrumentor().instrument()
 
@@ -217,29 +219,39 @@ def instrument_dome(
 
     # Add tracer for detailed per-guard/per-detector spans
     if tracer:
-        if dome.input_guardrail is not None:
-            instrument_with_tracer(dome.input_guardrail, tracer, "Dome-Input-Guardrail")
-        if dome.output_guardrail is not None:
+        if target.input_guardrail is not None:
+            instrument_with_tracer(target.input_guardrail, tracer, "Dome-Input-Guardrail")
+        if target.output_guardrail is not None:
             instrument_with_tracer(
-                dome.output_guardrail, tracer, "Dome-Output-Guardrail"
+                target.output_guardrail, tracer, "Dome-Output-Guardrail"
             )
 
     if meter:
         # Add split metrics (dome-input-*, dome-output-*)
-        if dome.input_guardrail is not None:
-            instrument_with_monitors(dome.input_guardrail, meter, "dome-input")
-        if dome.output_guardrail is not None:
-            instrument_with_monitors(dome.output_guardrail, meter, "dome-output")
+        if target.input_guardrail is not None:
+            instrument_with_monitors(target.input_guardrail, meter, "dome-input")
+        if target.output_guardrail is not None:
+            instrument_with_monitors(target.output_guardrail, meter, "dome-output")
 
     # Add Darwin-compatible detection spans at the guardrail level.
     # These must be added AFTER monitors and tracer so the "dome-detection"
     # span wraps the full scan chain (metrics + generic traces + original scan).
     if tracer:
-        if dome.input_guardrail is not None:
-            _add_darwin_detection_spans(dome.input_guardrail, tracer, "dome-input", enforce=dome.enforce)
-        if dome.output_guardrail is not None:
-            _add_darwin_detection_spans(dome.output_guardrail, tracer, "dome-output", enforce=dome.enforce)
+        if target.input_guardrail is not None:
+            _add_darwin_detection_spans(target.input_guardrail, tracer, "dome-input", enforce=enforce)
+        if target.output_guardrail is not None:
+            _add_darwin_detection_spans(target.output_guardrail, tracer, "dome-output", enforce=enforce)
 
+
+def instrument_dome(
+    dome: Dome,
+    handler: Optional[logging.Handler],
+    tracer: Optional[Tracer],
+    meter: Optional[Meter],
+):
+    if getattr(dome, "_instrumented", False):
+        return
+    _instrument_guardrails(dome, handler, tracer, meter, dome.enforce)
     dome._instrumented = True  # type: ignore[attr-defined]
 
 
@@ -374,8 +386,13 @@ def _bounded_rule_verdicts_json(
     return json.dumps(kept, default=str)
 
 
-def instrument_vijil_dome(vijil_dome: VijilDome, tracer: Tracer) -> None:
-    """Add ``dome-control`` OTel spans to a :class:`VijilDome` instance.
+def instrument_vijil_dome(
+    vijil_dome: VijilDome,
+    tracer: Tracer,
+    meter: Optional[Meter] = None,
+    handler: Optional[logging.Handler] = None,
+) -> None:
+    """Add ``dome-control`` spans for controls and ``instrument_dome``-style telemetry for guards.
 
     The Controls-first runtime (``vijil_dome/core.py``) has no span
     emission of its own, unlike the Guardrail path ``instrument_dome``
@@ -383,15 +400,19 @@ def instrument_vijil_dome(vijil_dome: VijilDome, tracer: Tracer) -> None:
     way: wrap ``vijil_dome.engine.evaluate`` so every *triggered* Control
     emits one span, carrying enough to reconstruct "what fired, and why"
     without needing Dome's own logs -- this, and not a Console
-    write-back API, is how enforcement decisions get back to Console
-    (point ``DOME_TRACES_COLLECTOR_ENDPOINT`` at Console's collector and
-    they show up like any other Dome telemetry).
+    write-back API, is how enforcement decisions get back to Console.
+    Use ``setup_vijil_telemetry`` to build exporters to Console and call
+    this for you.
 
     Idempotent, same as ``instrument_dome``: calling it twice on an
     already-instrumented instance is a no-op.
     """
     if getattr(vijil_dome, "_instrumented", False):
         return
+
+    guardrails = (vijil_dome.input_guardrail, vijil_dome.output_guardrail)
+    if any(g is not None and g.guard_list for g in guardrails):
+        _instrument_guardrails(vijil_dome, handler, tracer, meter, vijil_dome.enforce)
 
     original_evaluate = vijil_dome.engine.evaluate
 

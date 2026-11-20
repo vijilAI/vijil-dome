@@ -113,6 +113,66 @@ if not input_scan.is_safe():
     return input_scan.guarded_response()
 ```
 
+### Enforce a whole Console config (guards and controls)
+
+```python
+from vijil_dome import VijilDome
+
+dome = VijilDome.create_from_api(
+    client_id, client_secret, agent_id="my-agent", team_id="my-team"
+)
+scan = dome.guard_input(query)
+text = query if scan.guarded_text is None else scan.guarded_text  # forward masked text
+```
+
+A guard block raises `ControlViolationError` in enforce mode, like a deny control.
+`Dome.create_from_api` / `create_from_s3` enforce guards only and warn when the
+config has controls. `Dome.create_from_vijil_agent(..., team_id=...)` is
+deprecated and returns a `VijilDome`.
+
+### Send telemetry to Console
+
+```python
+from vijil_dome import setup_vijil_telemetry
+
+telemetry = setup_vijil_telemetry(dome)  # a create_from_api instance supplies key and Console URL
+```
+
+This sends guard detections, control decisions, metrics and Dome logs to Console's
+OTLP ingest, under the instance's `agent_id` (`Dome`'s `*_batch` calls don't yet emit
+the `dome-detection` span Defend lists). It needs the `[opentelemetry]` extra
+and a Console API key pair (`vk_...` id and secret); a single `VIJIL_API_KEY` token
+is rejected. Otherwise pass `client_id=` / `client_secret=` (or set the env vars below).
+A rejected key or a wrong Console URL raises at setup. To also send to another backend, pass
+`span_exporters=` / `metric_exporters=` / `log_exporters=` (exporters dedicated to
+Dome, since `telemetry.shutdown()` shuts them down); `send_to_console=False` sends
+only to those. The app's own OpenTelemetry providers are never touched, and its
+sampling and `OTEL_*` exporter settings don't apply to Dome's export (`OTEL_SDK_DISABLED`
+still turns it off, with a warning).
+
+### Guards and a control policy, locally
+
+```python
+dome = VijilDome(
+    guards={
+        "input-guards": ["in"],
+        "in": {"type": "security", "methods": ["encoding-heuristics"]},
+    },
+    policy=[{
+        "name": "block-secret",
+        "scope": {"stages": ["pre"]},
+        "action": {"decision": "deny"},
+        "condition": {
+            "selector": "input",
+            "evaluator": {"name": "regex", "config": {"pattern": "SECRET-123"}},
+        },
+    }],
+    enforce=False,
+)
+scan = dome.guard_input("my key is SECRET-123")
+text = "my key is SECRET-123" if scan.guarded_text is None else scan.guarded_text
+```
+
 ### Trust runtime (one line)
 
 ```python
@@ -191,8 +251,11 @@ poetry run ruff check vijil_dome/ demo/
 | `ANTHROPIC_API_KEY` | — | Claude-based detection |
 | `HF_TOKEN` | — | Gated HuggingFace models |
 | `VIJIL_MODEL_DIR` | `/models` | Local model directory (S3-synced in production) |
-| `VIJIL_CONSOLE_URL` | — | Console URL for constraints and manifest signing |
+| `VIJIL_CONSOLE_URL` | `https://console-api.vijil.ai` for telemetry | Console URL for constraints, manifest signing and telemetry |
 | `VIJIL_API_KEY` | — | Console API key |
+| `VIJIL_CLIENT_ID` | — | Console API key id (`vk_...`) for `setup_vijil_telemetry` |
+| `VIJIL_CLIENT_SECRET` | — | Console API key secret for `setup_vijil_telemetry` |
+| `VIJIL_AGENT_ID` | instance `agent_id` | Console agent UUID that telemetry is filed under |
 
 ## Testing Conventions
 

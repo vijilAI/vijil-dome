@@ -6,6 +6,8 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field, computed_field, model_validator
 
+from vijil_dome.guardrails import GuardrailResult
+
 
 class Step(BaseModel):
     """Runtime payload being evaluated by the control engine."""
@@ -202,6 +204,9 @@ class EvaluationResult(BaseModel):
     matches: list[ControlMatch] = Field(default_factory=list)
     steering_context: SteeringContext | None = None
     exec_time_ms: float = 0.0
+    guarded_text: str | None = None
+    # Excluded: detector details can hold non-serializable objects (e.g. classes).
+    guard_result: GuardrailResult | None = Field(default=None, exclude=True)
 
     @computed_field  # type: ignore[prop-decorator]
     @property

@@ -413,3 +413,32 @@ def test_vijildome_config_has_changed_not_from_s3_or_api():
     dome = VijilDome(policy=[])
     with pytest.raises(ValueError, match="created via VijilDome.create_from_s3"):
         dome.config_has_changed()
+
+
+@patch("vijil_dome.utils.api_config_loader.httpx.get")
+@patch("vijil_dome.utils.api_config_loader.httpx.post")
+def test_create_from_api_applies_guards_and_controls(mock_post, mock_get, tmp_path):
+    from vijil_dome.core import VijilDome
+
+    body = {
+        **SAMPLE_CONTROLS_DOC,
+        "input-guards": ["in-guard"],
+        "output-guards": [],
+        "in-guard": {"type": "security", "methods": ["encoding-heuristics"]},
+    }
+    mock_post.return_value = _mock_response(
+        200, {"access_token": "jwt-123", "expires_in": 3600}
+    )
+    mock_get.return_value = _mock_response(200, _envelope(body))
+
+    dome = VijilDome.create_from_api(
+        client_id=CLIENT_ID,
+        client_secret=CLIENT_SECRET,
+        agent_id=AGENT_ID,
+        team_id=TEAM_ID,
+        base_url=BASE_URL,
+        cache_dir=str(tmp_path),
+    )
+
+    assert dome.input_guardrail is not None
+    assert len(dome.engine.controls) == 1

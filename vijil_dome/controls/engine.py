@@ -3,13 +3,15 @@
 from __future__ import annotations
 
 import asyncio
+import concurrent.futures
+import contextvars
 import json
 import logging
 import re
 import threading
 import time
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any, Coroutine, Literal, TypeVar
 
 try:
     import re2 as _re2_engine
@@ -31,7 +33,23 @@ from vijil_dome.controls.selectors import MISSING, resolve
 
 logger = logging.getLogger(__name__)
 
-_nest_asyncio_applied = False
+T = TypeVar("T")
+
+
+def run_sync(coro: Coroutine[Any, Any, T]) -> T:
+    """Run a coroutine to completion from sync code, even inside a running loop."""
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        pass
+    else:
+        # A loop of its own on another thread. nest_asyncio would re-enter the running
+        # loop instead, but it patches asyncio process-wide, and on Python 3.14 that
+        # breaks asyncio.timeout (which every detector uses) for the rest of the process.
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+            return pool.submit(contextvars.copy_context().run, asyncio.run, coro).result()
+    # Outside the except block, so a failure in coro isn't chained to the probe's RuntimeError.
+    return asyncio.run(coro)
 
 
 class ControlEngine:
@@ -208,19 +226,7 @@ class ControlEngine:
     def evaluate_sync(
         self, step: Step, stage: Literal["pre", "post"] = "pre"
     ) -> EvaluationResult:
-        try:
-            asyncio.get_running_loop()
-        except RuntimeError:
-            return asyncio.run(self.evaluate(step, stage))
-        # Inside an existing event loop — use nest_asyncio
-        global _nest_asyncio_applied
-        if not _nest_asyncio_applied:
-            import nest_asyncio
-
-            nest_asyncio.apply()
-            _nest_asyncio_applied = True
-        loop = asyncio.get_event_loop()
-        return loop.run_until_complete(self.evaluate(step, stage))
+        return run_sync(self.evaluate(step, stage))
 
     # ------------------------------------------------------------------
     # Scope matching
