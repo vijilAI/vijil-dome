@@ -36,6 +36,9 @@ _OTEL_VARS = (
     "OTEL_TRACES_EXPORTER",
     "OTEL_SERVICE_NAME",
     "OTEL_RESOURCE_ATTRIBUTES",
+    "OTEL_BSP_MAX_EXPORT_BATCH_SIZE",
+    "OTEL_EXPORTER_OTLP_TIMEOUT",
+    "OTEL_EXPORTER_OTLP_COMPRESSION",
 )
 
 
@@ -43,6 +46,8 @@ _OTEL_VARS = (
 def _isolated_env_export(monkeypatch):
     for name in _OTEL_VARS:
         monkeypatch.delenv(name, raising=False)
+    # Opted in by default; the opt-in tests below unset or override it.
+    monkeypatch.setenv("VIJIL_DOME_OTLP_EXPORT", "1")
     monkeypatch.setattr(otlp_env, "_provider", None)
     monkeypatch.setattr(otlp_env, "_warned", set())
     yield
@@ -414,7 +419,15 @@ def test_shared_dome_config_wraps_once_and_survives_undo_on_other_instance(
     assert exported == ["ag-a", "ag-b"]
 
 
-def test_no_otel_env_imports_no_opentelemetry() -> None:
+@pytest.mark.parametrize(
+    "extra_env",
+    [
+        {},
+        {"VIJIL_DOME_OTLP_EXPORT": "1"},  # the opt-in alone does nothing
+        {"OTEL_EXPORTER_OTLP_ENDPOINT": "http://127.0.0.1:4318"},  # endpoint without opt-in
+    ],
+)
+def test_no_export_imports_no_opentelemetry(extra_env) -> None:
     import os
     import subprocess
 
@@ -424,7 +437,12 @@ def test_no_otel_env_imports_no_opentelemetry() -> None:
         f"Dome({GUARD_CFG!r}, enforce=False).guard_input('hello')\n"
         "print(sorted(m for m in sys.modules if m.startswith('opentelemetry')))\n"
     )
-    env = {k: v for k, v in os.environ.items() if not k.startswith("OTEL_")}
+    env = {
+        k: v
+        for k, v in os.environ.items()
+        if not k.startswith("OTEL_") and k != "VIJIL_DOME_OTLP_EXPORT"
+    }
+    env.update(extra_env)
     result = subprocess.run(
         [sys.executable, "-c", code], env=env, capture_output=True, text=True, timeout=300
     )
@@ -445,3 +463,64 @@ def test_global_tracer_provider_untouched(receiver, monkeypatch) -> None:
     assert trace.get_tracer_provider() is before
     assert before is not otlp_env._provider
     assert "dome-detection" in {s.name for _, s in receiver.spans()}
+
+
+class _AllRecords(logging.Handler):
+    def __init__(self) -> None:
+        super().__init__(level=logging.DEBUG)
+        self.records: list[logging.LogRecord] = []
+
+    def emit(self, record: logging.LogRecord) -> None:
+        self.records.append(record)
+
+
+@pytest.fixture
+def dome_records():
+    handler = _AllRecords()
+    lg = logging.getLogger("vijil.dome")
+    old_level = lg.level
+    lg.addHandler(handler)
+    lg.setLevel(logging.INFO)
+    yield handler.records
+    lg.removeHandler(handler)
+    lg.setLevel(old_level)
+
+
+@pytest.mark.parametrize("opt_in", [None, "0", "false", " no ", ""])
+def test_endpoint_without_opt_in_exports_nothing_and_says_so_once(
+    receiver, monkeypatch, dome_records, opt_in
+) -> None:
+    monkeypatch.setenv("OTEL_EXPORTER_OTLP_ENDPOINT", receiver.url)
+    monkeypatch.setenv("OTEL_EXPORTER_OTLP_HEADERS", "x-collector-key=abc123")
+    if opt_in is None:
+        monkeypatch.delenv("VIJIL_DOME_OTLP_EXPORT")
+    else:
+        monkeypatch.setenv("VIJIL_DOME_OTLP_EXPORT", opt_in)
+
+    first = Dome(GUARD_CFG, enforce=False)
+    second = Dome(GUARD_CFG, enforce=False)
+    first.guard_input(ATTACK)
+
+    assert otlp_env._provider is None
+    _assert_uninstrumented(first)
+    _assert_uninstrumented(second)
+    _assert_nothing_wrapped(first)
+    assert receiver.requests == []
+    notices = [r for r in dome_records if "VIJIL_DOME_OTLP_EXPORT" in r.getMessage()]
+    assert len(notices) == 1
+    assert notices[0].levelno == logging.INFO
+    message = notices[0].getMessage()
+    assert "VIJIL_DOME_OTLP_EXPORT=1" in message and "prompt and response text" in message
+    assert receiver.url not in message and "127.0.0.1" not in message and "abc123" not in message
+
+
+@pytest.mark.parametrize("opt_in", ["1", "true", " TRUE ", "Yes"])
+def test_opt_in_values_enable_export(receiver, monkeypatch, dome_records, opt_in) -> None:
+    monkeypatch.setenv("OTEL_EXPORTER_OTLP_ENDPOINT", receiver.url)
+    monkeypatch.setenv("VIJIL_DOME_OTLP_EXPORT", opt_in)
+
+    Dome(GUARD_CFG, enforce=False).guard_input(ATTACK)
+    _flush()
+
+    assert "dome-detection" in {s.name for _, s in receiver.spans()}
+    assert not [r for r in dome_records if "VIJIL_DOME_OTLP_EXPORT" in r.getMessage()]

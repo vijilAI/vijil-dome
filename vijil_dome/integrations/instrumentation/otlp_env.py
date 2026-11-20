@@ -14,12 +14,18 @@
 #
 # vijil and vijil-dome are trademarks owned by Vijil Inc.
 
-"""Export a Dome's guard spans over OTLP when the standard OTEL_EXPORTER_OTLP_* env vars are set.
+"""Export a Dome's guard spans over OTLP when the app opts in and the OTLP env vars are set.
+
+Export needs both ``VIJIL_DOME_OTLP_EXPORT`` set to ``1``, ``true`` or
+``yes`` and a standard ``OTEL_EXPORTER_OTLP_[TRACES_]ENDPOINT``. Dome's
+spans carry prompt and response text, so an endpoint configured for the
+app's own telemetry is not enough: sending that text is an explicit choice.
+With the endpoint set but no opt-in, one INFO line per process says so.
 
 This module imports no OpenTelemetry code at import time: ``Dome.__init__``
 imports it unconditionally, and an install without the ``opentelemetry``
-extra must keep working. OpenTelemetry is imported only once an endpoint
-variable is set.
+extra must keep working. OpenTelemetry is imported only once the env asks
+for export.
 
 Every ``Dome`` in the process shares one ``TracerProvider``, built on first
 use. The SDK registers an atexit hook that flushes and shuts it down. The
@@ -50,6 +56,8 @@ from typing import Any, Iterator, Optional
 
 logger = logging.getLogger("vijil.dome")
 
+_OPT_IN_VAR = "VIJIL_DOME_OTLP_EXPORT"
+_TRUTHY = frozenset({"1", "true", "yes"})
 _ENDPOINT_VARS = ("OTEL_EXPORTER_OTLP_TRACES_ENDPOINT", "OTEL_EXPORTER_OTLP_ENDPOINT")
 _PROTOCOL_VARS = ("OTEL_EXPORTER_OTLP_TRACES_PROTOCOL", "OTEL_EXPORTER_OTLP_PROTOCOL")
 # The OTEL_TRACES_EXPORTER names the Python SDK registers for OTLP, and the
@@ -89,12 +97,20 @@ def otlp_endpoint_configured() -> bool:
     return any(os.environ.get(name, "").strip() for name in _ENDPOINT_VARS)
 
 
-def _warn_once(key: str, message: str, *args: Any) -> None:
+def _log_once(level: int, key: str, message: str, *args: Any) -> None:
     with _lock:
         if key in _warned:
             return
         _warned.add(key)
-    logger.warning(message, *args)
+    logger.log(level, message, *args)
+
+
+def _warn_once(key: str, message: str, *args: Any) -> None:
+    _log_once(logging.WARNING, key, message, *args)
+
+
+def _opted_in() -> bool:
+    return os.environ.get(_OPT_IN_VAR, "").strip().lower() in _TRUTHY
 
 
 def _otlp_exporter_name() -> Optional[str]:
@@ -105,12 +121,23 @@ def _otlp_exporter_name() -> Optional[str]:
 
 
 def _export_requested() -> bool:
-    """Whether the env asks for Dome spans over OTLP; the one place to add an opt-in gate."""
+    """Whether the env asks for Dome spans over OTLP. Reads env vars only; imports nothing."""
     if not otlp_endpoint_configured():
         return False
     if os.environ.get("OTEL_SDK_DISABLED", "").strip().lower() == "true":
         return False
-    return _otlp_exporter_name() is not None
+    if _otlp_exporter_name() is None:
+        return False
+    if not _opted_in():
+        _log_once(
+            logging.INFO,
+            "opt-in",
+            "An OTLP endpoint is set, but Dome does not export its guard spans, which "
+            "include prompt and response text, unless %s=1 is also set",
+            _OPT_IN_VAR,
+        )
+        return False
+    return True
 
 
 def _protocol() -> str:

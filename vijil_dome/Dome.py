@@ -239,8 +239,8 @@ class Dome:
             self._init_from_dome_config(
                 create_dome_config(get_default_config(), default_on_error)
             )
-        # DOME-223: export guard spans when the standard OTLP env vars are set.
-        # OpenTelemetry is imported only when an endpoint variable is set.
+        # DOME-223: export guard spans over OTLP when VIJIL_DOME_OTLP_EXPORT=1 and an
+        # OTLP endpoint env var are set. OpenTelemetry is imported only then.
         from vijil_dome.integrations.instrumentation.otlp_env import (
             instrument_from_env,
             otlp_endpoint_configured,
