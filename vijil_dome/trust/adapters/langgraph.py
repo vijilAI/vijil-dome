@@ -149,17 +149,23 @@ _MESSAGE_TYPES = frozenset({
 _AI_TYPES = frozenset({"ai", "AIMessageChunk"})
 
 
+def _tag(value: Any) -> str | None:
+    """A message role or type, or None when it isn't a string (and may not be hashable)."""
+    return value if isinstance(value, str) else None
+
+
 def _is_message_dict(node: dict[str, Any]) -> bool:
     """A serialized message, not a state or update that happens to have message-like keys."""
     if "content" not in node or isinstance(node.get("messages"), list):
         return False
-    return node.get("role") in _MESSAGE_ROLES or node.get("type") in _MESSAGE_TYPES
+    return _tag(node.get("role")) in _MESSAGE_ROLES or _tag(node.get("type")) in _MESSAGE_TYPES
 
 
 def _is_ai_message(node: Any) -> bool:
     if isinstance(node, dict):
-        return _is_message_dict(node) and (node.get("role") in ("assistant", "ai") or node.get("type") in _AI_TYPES)
-    return getattr(node, "type", None) in _AI_TYPES
+        role, kind = _tag(node.get("role")), _tag(node.get("type"))
+        return _is_message_dict(node) and (role in ("assistant", "ai") or kind in _AI_TYPES)
+    return _tag(getattr(node, "type", None)) in _AI_TYPES
 
 
 def _ai_messages(node: Any, visited: set[int] | None = None) -> Iterator[Any]:

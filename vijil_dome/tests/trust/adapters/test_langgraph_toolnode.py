@@ -736,3 +736,11 @@ class TestStreamFourthReview:
             streamed.add((), "messages", (AIMessageChunk(content=token, id="f"), {}))
         streamed.add((), "messages", (AIMessage("second", id="s"), {}))
         assert streamed.text() == "first\nsecond"
+
+
+def test_unhashable_role_or_type_does_not_break_the_stream() -> None:
+    streamed = _StreamedOutput()
+    article = {"content": "an article", "type": ["article"], "role": {"kind": "editor"}}
+    tagged = type("Tagged", (), {"type": ["label"], "content": "x"})()
+    streamed.add((), "updates", {"node": {"draft": article, "extra": tagged, "messages": [AIMessage("answer", id="a")]}})
+    assert streamed.text() == "answer"
