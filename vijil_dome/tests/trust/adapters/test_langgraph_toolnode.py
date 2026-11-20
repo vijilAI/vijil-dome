@@ -11,19 +11,22 @@ No external services required. No Dome guards (passthrough).
 from __future__ import annotations
 
 import asyncio
+import operator
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Annotated, Any
+from typing import Annotated, Any, TypedDict
 
 import pytest
-from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
+from langchain_core.messages import AIMessage, AIMessageChunk, HumanMessage, ToolMessage
 from langchain_core.tools import InjectedToolCallId, tool
+from langgraph.checkpoint.memory import InMemorySaver
+from langgraph.config import get_stream_writer
 from langgraph.graph import END, START, MessagesState, StateGraph
 from langgraph.prebuilt import ToolNode
 from langgraph.runtime import Runtime
 from langgraph.types import Command
 
-from vijil_dome.trust.adapters.langgraph import _content_text, secure_graph
+from vijil_dome.trust.adapters.langgraph import _content_text, _StreamedOutput, secure_graph
 
 calls: list[str] = []
 
@@ -410,3 +413,135 @@ class TestStreaming:
             graph, seen = self._graph()
             self._stream(graph, **kwargs)
             assert seen == ["the secret plan"], kwargs
+
+
+class _DictState(TypedDict):
+    messages: Annotated[list[dict[str, Any]], operator.add]
+
+
+def _recording(graph, monkeypatch: pytest.MonkeyPatch) -> list[str]:
+    """Record what the sync post-stream output guard is asked to scan."""
+    seen: list[str] = []
+
+    def record(text: str):
+        seen.append(text)
+        return _flagging()
+
+    monkeypatch.setattr(graph.runtime, "guard_output", record)
+    return seen
+
+
+def _secured(builder, **compile_kwargs):
+    return secure_graph(
+        builder, agent_id="toolnode-test", mode="enforce", constraints=_constraints(permitted=[], denied=[]), **compile_kwargs
+    )
+
+
+def _linear(state_schema, *nodes) -> StateGraph:
+    builder = StateGraph(state_schema)
+    previous = START
+    for name, fn in nodes:
+        builder.add_node(name, fn)
+        builder.add_edge(previous, name)
+        previous = name
+    builder.add_edge(previous, END)
+    return builder
+
+
+class TestStreamOutputCollection:
+    def test_values_mode_scans_only_this_turn_with_a_checkpointer(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        def model(state: MessagesState) -> dict[str, Any]:
+            turn = sum(1 for m in state["messages"] if m.type == "ai") + 1
+            return {"messages": [AIMessage(f"answer-turn-{turn}")]}
+
+        graph = _secured(_linear(MessagesState, ("model", model)), checkpointer=InMemorySaver())
+        seen = _recording(graph, monkeypatch)
+        config = {"configurable": {"thread_id": "t1"}}
+
+        graph.invoke({"messages": [HumanMessage("one")]}, config)
+        seen.clear()  # invoke guards its own answer; only the streamed turn matters here
+        list(graph.stream({"messages": [HumanMessage("two")]}, config, stream_mode="values"))
+
+        assert seen == ["answer-turn-2"]
+
+    def test_dict_messages_reach_the_output_guard(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        def model(state: _DictState) -> dict[str, Any]:
+            return {"messages": [{"role": "assistant", "content": "dict answer"}]}
+
+        def noop(state: _DictState) -> dict[str, Any]:
+            return {"messages": []}
+
+        for mode in ("updates", "values"):
+            graph = _secured(_linear(_DictState, ("model", model), ("noop", noop)))
+            seen = _recording(graph, monkeypatch)
+            list(graph.stream({"messages": [{"role": "user", "content": "hi"}]}, stream_mode=mode))
+            assert seen == ["dict answer"], mode  # repeated across values snapshots, scanned once
+
+    def test_tool_only_output_falls_back_to_the_last_message(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        def unwrapped_tool(state: MessagesState) -> dict[str, Any]:
+            return {"messages": [ToolMessage("raw tool output", tool_call_id="x")]}
+
+        graph = _secured(_linear(MessagesState, ("fetch", unwrapped_tool)))
+        seen = _recording(graph, monkeypatch)
+
+        list(graph.stream({"messages": [HumanMessage("hi")]}))
+
+        assert seen == ["raw tool output"]
+
+    def test_custom_only_stream_is_still_guarded_and_unchanged_for_the_caller(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        def model(state: MessagesState) -> dict[str, Any]:
+            get_stream_writer()("progress")
+            return {"messages": [AIMessage("custom-mode answer")]}
+
+        graph = _secured(_linear(MessagesState, ("model", model)))
+        seen = _recording(graph, monkeypatch)
+
+        chunks = list(graph.stream({"messages": [HumanMessage("hi")]}, stream_mode="custom"))
+
+        assert chunks == ["progress"]
+        assert seen == ["custom-mode answer"]
+
+    def test_every_version_of_a_message_is_scanned(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        def draft(state: MessagesState) -> dict[str, Any]:
+            return {"messages": [AIMessage("secret draft", id="m1")]}
+
+        def revise(state: MessagesState) -> dict[str, Any]:
+            return {"messages": [AIMessage("safe answer", id="m1")]}
+
+        graph = _secured(_linear(MessagesState, ("draft", draft), ("revise", revise)))
+        seen = _recording(graph, monkeypatch)
+
+        list(graph.stream({"messages": [HumanMessage("hi")]}))
+
+        assert "secret draft" in seen[0] and "safe answer" in seen[0]
+
+    def test_chunk_shapes_match_langgraph(self) -> None:
+        def model(state: MessagesState) -> dict[str, Any]:
+            return {"messages": [AIMessage("hi", id="a1")]}
+
+        builder = _linear(MessagesState, ("model", model))
+        raw = builder.compile()
+        graph = _secured(builder)
+        for kwargs in ({}, {"stream_mode": "values"}, {"stream_mode": ["updates", "values"]}, {"stream_mode": "updates", "subgraphs": True}):
+            expected = list(raw.stream({"messages": [HumanMessage("x")]}, **kwargs))
+            got = list(graph.stream({"messages": [HumanMessage("x")]}, **kwargs))
+            assert [type(c) for c in got] == [type(c) for c in expected], kwargs
+            assert len(got) == len(expected), kwargs
+
+
+def test_anonymous_token_chunks_are_joined() -> None:
+    streamed = _StreamedOutput()
+    for token in ("Hel", "lo"):
+        streamed.add((), "messages", (AIMessageChunk(content=token), {}))
+    assert streamed.text() == "Hello"
+
+
+def test_cyclic_state_does_not_recurse_forever() -> None:
+    state: dict[str, Any] = {"messages": [AIMessage("ok", id="a")]}
+    state["self"] = state
+    streamed = _StreamedOutput()
+    streamed.add((), "updates", {"node": state})
+    assert streamed.text() == "ok"
+
