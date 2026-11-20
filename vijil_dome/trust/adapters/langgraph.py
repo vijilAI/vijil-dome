@@ -51,6 +51,8 @@ def _content_text(content: Any) -> str:
     when it keeps its text elsewhere (Anthropic ``document`` sources, ``tool_result``
     content), the whole block serialized, as ``str(content)`` did before.
     """
+    if content is None:  # e.g. an assistant tool-call message with no text
+        return ""
     if isinstance(content, str):
         return content
     if isinstance(content, list):
@@ -94,7 +96,10 @@ class _StreamPlan:
     LangGraph is always asked for a list of modes, which tags each chunk with its mode
     (and namespace, with ``subgraphs=True``). When the caller asked only for modes
     without messages (``custom``, ``debug``, ...), ``updates`` is added so the output
-    guard still sees the answer, and its chunks are held back from the caller. Chunks
+    guard still sees the answer, and its chunks are held back from the caller. ``updates``
+    is also added when the caller asked for ``values`` without it: the output is collected
+    from updates, which carry only what this run's nodes returned, instead of re-reading
+    the whole message history in every ``values`` snapshot. Chunks
     are handed back in the shape the caller asked for. A graph that isn't a LangGraph
     graph is streamed exactly as called.
     """
@@ -109,7 +114,10 @@ class _StreamPlan:
         self.modes: list[str] = [requested] if isinstance(requested, str) else list(requested or [])
         self.subgraphs = bool(kwargs.get("subgraphs", False))
         self.v2 = kwargs.get("version") not in (None, "v1")
-        internal = [] if _OUTPUT_MODES.intersection(self.modes) else ["updates"]
+        needs_updates = "updates" not in self.modes and (
+            "values" in self.modes or not _OUTPUT_MODES.intersection(self.modes)
+        )
+        internal = ["updates"] if needs_updates else []
         self.all_modes = self.modes + internal
         self.kwargs = {**kwargs, "stream_mode": self.all_modes} if self.tagged else kwargs
 
@@ -132,14 +140,33 @@ class _StreamPlan:
         return (), None, chunk, chunk
 
 
+_MESSAGE_ROLES = frozenset({"user", "human", "assistant", "ai", "system", "developer", "tool", "function"})
+_MESSAGE_TYPES = frozenset({
+    "human", "ai", "system", "tool", "function", "chat", "remove",
+    "HumanMessageChunk", "AIMessageChunk", "SystemMessageChunk", "ToolMessageChunk",
+    "FunctionMessageChunk", "ChatMessageChunk",
+})
+_AI_TYPES = frozenset({"ai", "AIMessageChunk"})
+
+
+def _is_message_dict(node: dict[str, Any]) -> bool:
+    """A serialized message, not a state or update that happens to have message-like keys."""
+    if "content" not in node or isinstance(node.get("messages"), list):
+        return False
+    return node.get("role") in _MESSAGE_ROLES or node.get("type") in _MESSAGE_TYPES
+
+
 def _is_ai_message(node: Any) -> bool:
-    if isinstance(node, dict):  # a message dict, not a state or update that happens to have these keys
-        return "content" in node and (node.get("role") in ("assistant", "ai") or node.get("type") == "ai")
-    return getattr(node, "type", None) in ("ai", "AIMessageChunk")
+    if isinstance(node, dict):
+        return _is_message_dict(node) and (node.get("role") in ("assistant", "ai") or node.get("type") in _AI_TYPES)
+    return getattr(node, "type", None) in _AI_TYPES
 
 
 def _ai_messages(node: Any, visited: set[int] | None = None) -> Iterator[Any]:
-    """Every AI message in a chunk, as an object or a ``{"role": "assistant"}`` dict."""
+    """Every AI message in a chunk, as an object or a serialized dict.
+
+    Other messages are leaves: their content and metadata are never walked into.
+    """
     visited = set() if visited is None else visited
     if isinstance(node, (dict, list, tuple)):
         if id(node) in visited:  # graph state can hold cyclic containers
@@ -148,6 +175,8 @@ def _ai_messages(node: Any, visited: set[int] | None = None) -> Iterator[Any]:
     if _is_ai_message(node):
         yield node
     elif isinstance(node, dict):
+        if _is_message_dict(node):
+            return
         for value in node.values():
             yield from _ai_messages(value, visited)
     elif isinstance(node, (list, tuple)):
@@ -172,66 +201,56 @@ def _last_message_text(data: Any, visited: set[int] | None = None) -> str:
 class _StreamedOutput:
     """Collects what a run's model said, from stream chunks of any mode.
 
-    - Only this run's output counts: in ``values`` mode, AI messages already in the
-      first chunk for a namespace (the incoming state and checkpointed history) are
-      skipped, unless this run changed their text.
-    - Each distinct version of a message is kept; identical repeats (across ``values``
-      snapshots, or the same message in two modes) count once. Messages without an id
-      are deduplicated by their text.
+    - Only this run's output counts. ``values`` snapshots repeat the incoming state and
+      checkpointed history, so messages are collected from ``updates`` (which
+      ``_StreamPlan`` requests alongside ``values``), ``messages`` and untagged chunks.
+    - Each distinct version of a message is kept; identical repeats (the same message in
+      two modes, or propagated from a subgraph to its parent) count once. Messages are
+      keyed by id across namespaces; messages without an id, by their text.
     - Token chunks of one message are joined; anonymous token chunks are joined per
       namespace.
+    - Messages and token groups are scanned in the order they first appeared.
     - If no AI message is found (tool-only output from an unwrapped node, or messages
       the walker cannot recognize), the last message of the latest state or update is
       scanned instead.
     """
 
     def __init__(self) -> None:
-        self._versions: dict[tuple[Any, ...], list[str]] = {}
-        self._fragments: dict[tuple[Any, ...], list[str]] = {}
-        self._baseline: dict[tuple[Any, ...], set[tuple[tuple[Any, ...], str]]] = {}
+        # first-seen order; each entry holds the message's complete versions and its token fragments
+        self._entries: dict[tuple[Any, ...], tuple[list[str], list[str]]] = {}
         self._fallback = ""
 
-    @staticmethod
-    def _key(namespace: tuple[Any, ...], message: Any, text: str) -> tuple[Any, ...]:
-        message_id = message.get("id") if isinstance(message, dict) else getattr(message, "id", None)
-        return (namespace, "id", message_id) if message_id else (namespace, "text", text)
+    def _entry(self, key: tuple[Any, ...]) -> tuple[list[str], list[str]]:
+        return self._entries.setdefault(key, ([], []))
 
     def add(self, namespace: tuple[Any, ...], mode: str | None, data: Any) -> None:
         if mode not in (None, "values", "updates", "messages"):
             return  # custom, debug, checkpoints, tasks: not this run's model output
         if mode != "messages":
             self._fallback = _last_message_text(data) or self._fallback
-        seen_before = None
         if mode == "values":
-            if namespace not in self._baseline:
-                # (key, text): a checkpointed message edited during this run is new output
-                texts = [(m, _extract_text(m)) for m in _ai_messages(data)]
-                self._baseline[namespace] = {(self._key(namespace, m, text), text) for m, text in texts}
-                return
-            seen_before = self._baseline[namespace]
+            return  # collected from the matching updates instead
         # messages mode yields (message, metadata): metadata is the caller's, not output
         source = data[0] if mode == "messages" and isinstance(data, tuple) and data else data
         for message in _ai_messages(source):
             text = _extract_text(message)
+            message_id = message.get("id") if isinstance(message, dict) else getattr(message, "id", None)
             # Token fragments only come from message events; an AIMessageChunk in a state or
             # update event is a complete node result, deduplicated like any full message.
             if mode == "messages" and getattr(message, "type", None) == "AIMessageChunk":
-                message_id = getattr(message, "id", None)
-                key = (namespace, "id", message_id) if message_id else (namespace, "anonymous-chunks")
-                self._fragments.setdefault(key, []).append(text)
+                key = ("id", message_id) if message_id else (namespace, "anonymous-chunks")
+                self._entry(key)[1].append(text)
                 continue
-            key = self._key(namespace, message, text)
-            if seen_before is not None and (key, text) in seen_before:
-                continue
-            versions = self._versions.setdefault(key, [])
+            versions = self._entry(("id", message_id) if message_id else ("text", text))[0]
             if text not in versions:
                 versions.append(text)
 
     def text(self) -> str:
-        parts = [text for versions in self._versions.values() for text in versions]
-        for key, fragments in self._fragments.items():
+        parts: list[str] = []
+        for versions, fragments in self._entries.values():
+            parts.extend(versions)
             joined = "".join(fragments)
-            if joined not in self._versions.get(key, []):
+            if joined not in versions:
                 parts.append(joined)
         collected = "\n".join(part for part in parts if part)
         return collected or self._fallback

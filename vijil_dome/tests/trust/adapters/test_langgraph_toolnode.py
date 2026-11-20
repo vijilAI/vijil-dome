@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import asyncio
 import operator
+from collections.abc import Iterator
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Annotated, Any, TypedDict
@@ -663,3 +664,75 @@ class TestStreamThirdReview:
 
         assert chunks == ["progress"]
         assert seen == ["subclass answer"]
+
+
+class TestStreamFourthReview:
+    def test_serialized_chunk_in_an_update_is_scanned(self) -> None:
+        streamed = _StreamedOutput()
+        chunk = {"type": "AIMessageChunk", "content": "unsafe chunk", "id": "c"}
+        streamed.add((), "updates", {"node": {"messages": [chunk, {"role": "assistant", "content": "normal", "id": "d"}]}})
+        assert "unsafe chunk" in streamed.text()
+
+    def test_state_with_message_keys_is_walked_into(self) -> None:
+        streamed = _StreamedOutput()
+        state = {"role": "assistant", "content": "safe", "messages": [AIMessage("unsafe answer", id="u")]}
+        streamed.add((), "updates", {"node": state})
+        assert "unsafe answer" in streamed.text()
+
+    def test_null_content_does_not_hide_a_tool_only_result(self) -> None:
+        streamed = _StreamedOutput()
+        call = {"role": "assistant", "content": None, "tool_calls": [{"id": "t", "name": "fetch", "args": {}}]}
+        streamed.add((), "updates", {"model": {"messages": [call]}})
+        streamed.add((), "updates", {"fetch": {"messages": [ToolMessage("raw tool output", tool_call_id="t")]}})
+        assert streamed.text() == "raw tool output"
+
+    def test_non_ai_message_dict_is_a_leaf(self) -> None:
+        streamed = _StreamedOutput()
+        tool_result = {
+            "role": "tool",
+            "content": "raw tool output",
+            "additional_kwargs": {"echo": {"role": "assistant", "content": "metadata"}},
+        }
+        streamed.add((), "updates", {"fetch": {"messages": [tool_result]}})
+        assert streamed.text() == "raw tool output"
+
+    def test_message_propagated_from_a_subgraph_is_scanned_once(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        def model(state: MessagesState) -> dict[str, Any]:
+            return {"messages": [AIMessage("subgraph answer", id="s1")]}
+
+        inner = _linear(MessagesState, ("model", model)).compile()
+        graph = _secured(_linear(MessagesState, ("inner", inner)))
+        for mode in ("updates", "values"):
+            seen = _recording(graph, monkeypatch)
+            list(graph.stream({"messages": [HumanMessage("hi")]}, stream_mode=mode, subgraphs=True))
+            assert seen == ["subgraph answer"], mode
+
+    def test_values_snapshots_are_not_walked_again(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        import vijil_dome.trust.adapters.langgraph as adapter
+
+        walked: list[Any] = []
+        original = adapter._ai_messages
+
+        def counting(node: Any, visited: set[int] | None = None) -> Iterator[Any]:
+            top_level = visited is None  # the walker recurses through the patched name too
+            for message in original(node, visited):
+                if top_level:
+                    walked.append(message)
+                yield message
+
+        monkeypatch.setattr(adapter, "_ai_messages", counting)
+        steps = [(f"n{i}", lambda state, i=i: {"messages": [AIMessage(f"step {i}", id=f"m{i}")]}) for i in range(20)]
+        graph = _secured(_linear(MessagesState, *steps))
+        seen = _recording(graph, monkeypatch)
+
+        list(graph.stream({"messages": [HumanMessage("hi")]}, stream_mode="values"))
+
+        assert len(walked) == 20  # once per message, not once per message per snapshot
+        assert seen == ["\n".join(f"step {i}" for i in range(20))]
+
+    def test_messages_and_token_groups_keep_their_order(self) -> None:
+        streamed = _StreamedOutput()
+        for token in ("fir", "st"):
+            streamed.add((), "messages", (AIMessageChunk(content=token, id="f"), {}))
+        streamed.add((), "messages", (AIMessage("second", id="s"), {}))
+        assert streamed.text() == "first\nsecond"
