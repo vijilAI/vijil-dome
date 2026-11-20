@@ -81,6 +81,37 @@ def _extract_output_text(result: dict[str, Any]) -> str:
     return _extract_text(messages[-1])
 
 
+class _StreamedOutput:
+    """Collects the model's text from stream chunks, whatever the stream mode.
+
+    ``updates`` chunks nest messages under node names, ``values`` chunks repeat the whole
+    state, ``messages`` mode yields ``(token, metadata)`` tuples, and list modes or
+    ``subgraphs=True`` wrap chunks in tuples. Only AI messages count (tool results are
+    guarded at the ToolNode); each is keyed by id, so a message repeated across chunks is
+    counted once and token chunks of one message are joined.
+    """
+
+    def __init__(self) -> None:
+        self._texts: dict[str, str] = {}
+
+    def add(self, chunk: Any) -> None:
+        if isinstance(chunk, dict):
+            for value in chunk.values():
+                self.add(value)
+        elif isinstance(chunk, (list, tuple)):
+            for item in chunk:
+                self.add(item)
+        elif getattr(chunk, "type", None) in ("ai", "AIMessageChunk"):
+            key = str(getattr(chunk, "id", None) or f"anonymous-{len(self._texts)}")
+            text = _content_text(getattr(chunk, "content", ""))
+            if getattr(chunk, "type", None) == "AIMessageChunk":
+                self._texts[key] = self._texts.get(key, "") + text
+            else:
+                self._texts[key] = text
+
+    def text(self) -> str:
+        return " ".join(text for text in self._texts.values() if text)
+
 
 # ------------------------------------------------------------------
 # SecureGraph
@@ -147,16 +178,14 @@ class SecureGraph:
             yield {"messages": [input_result.guarded_response]}
             return
 
-        # Yield chunks, accumulating output for post-stream guard
-        accumulated_texts: list[str] = []
+        # Yield chunks, collecting the model's text for the post-stream guard
+        streamed = _StreamedOutput()
         for chunk in self._graph.stream(input, config, **kwargs):
-            chunk_text = _extract_output_text(chunk)
-            if chunk_text:
-                accumulated_texts.append(chunk_text)
+            streamed.add(chunk)
             yield chunk
 
         # Post-stream output guard (best-effort — cannot retract chunks)
-        full_output = " ".join(accumulated_texts)
+        full_output = streamed.text()
         if full_output:
             output_result = self._runtime.guard_output(full_output)
             if output_result.flagged:
@@ -205,14 +234,12 @@ class SecureGraph:
             yield {"messages": [input_result.guarded_response]}
             return
 
-        accumulated_texts: list[str] = []
+        streamed = _StreamedOutput()
         async for chunk in self._graph.astream(input, config, **kwargs):
-            chunk_text = _extract_output_text(chunk) if isinstance(chunk, dict) else ""
-            if chunk_text:
-                accumulated_texts.append(chunk_text)
+            streamed.add(chunk)
             yield chunk
 
-        full_output = " ".join(accumulated_texts)
+        full_output = streamed.text()
         if full_output:
             output_result = await self._runtime.aguard_output(full_output)
             if output_result.flagged:
