@@ -43,6 +43,12 @@ from vijil_dome.instrumentation.tracing import (
     _set_guardrail_span_output,
 )
 from vijil_dome.instrumentation.logging import _get_ip_address
+from vijil_dome.integrations.instrumentation.otlp_env import (
+    env_only_instrumented,
+    instrumentation_lock,
+    mark_explicitly_instrumented,
+    undo_env_instrumentation,
+)
 
 
 class VijilLogFormatter(logging.Formatter):
@@ -249,10 +255,20 @@ def instrument_dome(
     tracer: Optional[Tracer],
     meter: Optional[Meter],
 ):
-    if getattr(dome, "_instrumented", False):
-        return
-    _instrument_guardrails(dome, handler, tracer, meter, dome.enforce)
-    dome._instrumented = True  # type: ignore[attr-defined]
+    # Instrumentation from the OTEL_EXPORTER_OTLP_* env vars alone does not
+    # make this call a no-op. With a tracer, the explicit tracer replaces the
+    # env layer; without one, the env trace export stays (see otlp_env C4, C5).
+    # Guardrails can be shared with env-instrumented Domes, so the check, the env
+    # undo and the wrapping run under the env layer's lock as one step (C1, C2).
+    with instrumentation_lock() as notices:
+        env_only = env_only_instrumented(dome)
+        if getattr(dome, "_instrumented", False) and not env_only:
+            return
+        if env_only and tracer is not None:
+            undo_env_instrumentation(dome, notices)
+        _instrument_guardrails(dome, handler, tracer, meter, dome.enforce)
+        dome._instrumented = True  # type: ignore[attr-defined]
+        mark_explicitly_instrumented(dome)
 
 
 def _as_attribute_text(value: Any) -> Optional[str]:
