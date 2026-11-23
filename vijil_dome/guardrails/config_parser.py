@@ -203,10 +203,17 @@ def create_detector_for_guard(
 
     detector_instance: DetectionMethod
     if use_remote:
-        threshold = config.pop("threshold", 0.5)
+        # None leaves the threshold to the server's details["threshold"], the
+        # detector model's own operating point (VIJIL-1670).
+        if "threshold" in config and config["threshold"] is None:
+            # An explicit null is a config mistake, not "unset": refuse it, as
+            # dome-go does, rather than silently defer to the server.
+            raise ValueError(f"threshold for {detector_name} is null; omit it to use the server's")
+        threshold = config.pop("threshold", None)
         logger.info(
-            "Using remote detector for %s (route=%s, source=%s, threshold=%.2f)",
-            detector_name, resolved_route.value, resolved_source, threshold,
+            "Using remote detector for %s (route=%s, source=%s, threshold=%s)",
+            detector_name, resolved_route.value, resolved_source,
+            "from server" if threshold is None else threshold,
         )
         detector_instance = RemoteDetectionMethod(
             detector_name=detector_name,
