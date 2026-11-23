@@ -48,6 +48,10 @@ logger = logging.getLogger(__name__)
 # follow-up PR will add a long-lived AsyncClient on this singleton.
 _dispatcher: RemoteDetectorDispatcher | None = None
 
+# Used only when neither the guard config nor the server supplies a threshold:
+# servers that predate detector manifests send no details["threshold"].
+_LEGACY_THRESHOLD = 0.5
+
 
 def _get_dispatcher() -> RemoteDetectorDispatcher:
     global _dispatcher
@@ -65,8 +69,11 @@ class RemoteDetectionMethod(DetectionMethod):
 
     Args:
         detector_name: Server-side detector name (e.g., ``pi_mbert``).
-        threshold: Score threshold for flagging. Scores above this
-            value produce ``hit=True``.
+        threshold: Score threshold for flagging; a score at or above it
+            produces ``hit=True``. ``None`` (the default) uses the server's
+            ``details["threshold"]``, the detector model's own operating point
+            from its vijil_detector.json manifest, and 0.5 only when the
+            server sends none (VIJIL-1670).
         config: Additional detector-specific config passed to the server.
         blocked_response: Response string when the detector flags input.
     """
@@ -77,10 +84,14 @@ class RemoteDetectionMethod(DetectionMethod):
     def __init__(
         self,
         detector_name: str,
-        threshold: float = 0.5,
+        threshold: float | None = None,
         config: dict[str, Any] | None = None,
         blocked_response: str = "Blocked by guardrail",
     ) -> None:
+        if threshold is not None and not _is_threshold(threshold):
+            raise ValueError(
+                f"threshold for {detector_name} must be a number in (0, 1], got {threshold!r}"
+            )
         self._detector_name = detector_name
         self._threshold = threshold
         self._config = config or {}
@@ -139,7 +150,12 @@ class RemoteDetectionMethod(DetectionMethod):
                 "error": result.error,
             })
 
-        hit = result.score >= self._threshold
+        # A malformed details["threshold"] raises ValueError, deliberately not
+        # the soft error dict above: detect_with_time records a raise as
+        # label="error", so it reaches errored_methods under every policy,
+        # like a transport failure. A soft error would read as a clean scan.
+        threshold = _resolve_threshold(self._threshold, result.details)
+        hit = result.score >= threshold
         response_string = self._blocked_response if hit else flat_text
 
         return (hit, {
@@ -150,3 +166,32 @@ class RemoteDetectionMethod(DetectionMethod):
             "details": result.details,
             "latency_ms": result.latency_ms,
         })
+
+
+def _is_threshold(value: Any) -> bool:
+    """True for a real number in (0, 1]. Excludes bool, which is an int subtype."""
+    # NaN fails both comparisons, so it is refused too.
+    return (
+        not isinstance(value, bool)
+        and isinstance(value, (int, float))
+        and 0.0 < value <= 1.0
+    )
+
+
+def _resolve_threshold(configured: float | None, details: dict[str, Any]) -> float:
+    """The threshold to judge a server score against.
+
+    The configured threshold wins; otherwise the server's
+    ``details["threshold"]`` applies; otherwise the legacy 0.5. A
+    ``details["threshold"]`` that is present but invalid raises ValueError:
+    falling back to a default there would judge the score against a number the
+    model never specified.
+    """
+    if configured is not None:
+        return configured
+    if "threshold" not in details:
+        return _LEGACY_THRESHOLD
+    sent = details["threshold"]
+    if not _is_threshold(sent):
+        raise ValueError(f"server details.threshold {sent!r} is not a number in (0, 1]")
+    return float(sent)
