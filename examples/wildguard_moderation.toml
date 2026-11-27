@@ -1,0 +1,34 @@
+# Content moderation with WildGuard (allenai/wildguard).
+#
+# Serve the model yourself first, for example:
+#   vllm serve allenai/wildguard --port 8000
+# then point base_url (or the WILDGUARD_BASE_URL env var) at it.
+#
+# If the endpoint fails or the answer can't be parsed, the method returns an
+# error. With on-error = "fail_closed" the guard blocks instead of passing.
+
+[guardrail]
+input-guards = ["wildguard-input"]
+output-guards = ["wildguard-output"]
+input-on-error = "fail_closed"
+output-on-error = "fail_closed"
+
+[wildguard-input]
+type = "moderation"
+methods = ["moderation-wildguard"]
+
+[wildguard-input.moderation-wildguard]
+mode = "request"                       # reads "Harmful request: yes/no"
+base_url = "http://localhost:8000/v1"
+model_name = "allenai/wildguard"
+timeout = 60
+
+[wildguard-output]
+type = "moderation"
+methods = ["moderation-wildguard"]
+
+[wildguard-output.moderation-wildguard]
+mode = "response"                      # reads "Harmful response: yes/no"
+base_url = "http://localhost:8000/v1"
+model_name = "allenai/wildguard"
+timeout = 60
