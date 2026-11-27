@@ -38,6 +38,7 @@ MODERATION_MBERT = "moderation-mbert"
 MODERATION_MBERT_SAFEGUARD = "moderation-mbert-safeguard"
 MODERATION_MBERT_HYBRID = "moderation-mbert-hybrid"
 MODERATION_MBERT_REMOTE = "moderation-mbert-remote"
+MODERATION_WILDGUARD = "moderation-wildguard"
 
 PRIVACY_PRESIDIO = "privacy-presidio"
 DETECT_SECRETS = "detect-secrets"

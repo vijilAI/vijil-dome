@@ -37,6 +37,7 @@ try:
         "llm_models",
         "openai_models",
         "gpt_oss_safeguard_policy",
+        "wildguard_moderation",
     ])
 except ImportError:
     pass

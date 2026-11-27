@@ -366,6 +366,48 @@ LLM-based moderation classification via LiteLLM.
 
 - **Class**: `LlmModerations`
 
+### `moderation-wildguard`
+
+Harmful-content moderation with AI2's
+[WildGuard](https://huggingface.co/allenai/wildguard), a 7B classifier
+fine-tuned from Mistral-7B-v0.3 ([arXiv:2406.18495](https://arxiv.org/abs/2406.18495)).
+You host the model yourself behind an OpenAI-compatible `/completions`
+endpoint, for example vLLM. Dome sends the model card's prompt template
+unchanged and reads one label from the answer.
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `mode` | `str` | required | `"request"` reads `Harmful request: yes/no` (input guard); `"response"` reads `Harmful response: yes/no` (output guard) |
+| `base_url` | `str` | `None` | Endpoint base URL, e.g. `http://wildguard:8000/v1` (falls back to `WILDGUARD_BASE_URL`; required) |
+| `model_name` | `str` | `None` | Served model name (falls back to `WILDGUARD_MODEL`, then `"allenai/wildguard"`) |
+| `api_key` | `str` | `None` | Endpoint key, if any (falls back to `WILDGUARD_API_KEY`) |
+| `timeout` | `int` | `60` | Request timeout in seconds |
+| `max_retries` | `int` | `0` | LiteLLM retries |
+| `max_tokens` | `int` | `32` | Completion length (the model card uses 32) |
+| `max_input_chars` | `int` | `None` | Truncate input to this many characters |
+
+- **Class**: `WildGuardModeration`
+- **Requires**: the `llm` extra and a running WildGuard server, e.g.
+  `vllm serve allenai/wildguard`
+- **Input**: a plain string goes in the `Human user` slot in `request` mode and
+  in the `AI assistant` slot in `response` mode, with the other slot empty.
+  A `DomePayload` with `prompt` and `response` fills both slots.
+- **Errors**: an endpoint failure, or an answer without a `yes`/`no` value for
+  the mode's label (including `N/A`), or a label that appears more than once
+  with different values, returns `label="error"`. A guard with
+  `on-error = "fail_closed"` (the default when Dome runs in enforce mode)
+  blocks on it. With `fail_open`, the error is logged and the text passes.
+- **Prompt steering**: the text is inserted verbatim into WildGuard's
+  published template. Input that imitates the template's answer section can
+  steer the classifier, so pair this method with a prompt-injection guard on
+  untrusted input.
+- **License**: the weights are Apache 2.0. The Hugging Face repo is gated, and
+  to download them you must accept the AI2 Responsible Use Guidelines and
+  agree to use the model "for research purposes". Check that this fits your
+  use before you deploy it.
+- **Not in the default config.** Add it explicitly. See
+  [`examples/wildguard_moderation.toml`](../../examples/wildguard_moderation.toml).
+
 ### `moderation-flashtext`
 
 Keyword ban-list detector using FlashText for fast matching.

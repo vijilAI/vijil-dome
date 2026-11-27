@@ -209,7 +209,7 @@ dome = Dome.from_toml("guardrails.toml")
 | Category | Detectors | Purpose |
 |----------|-----------|---------|
 | **Security** | `prompt-injection-deberta`, `prompt-injection-mbert`, `security-llm`, `jailbreak-heuristics` | Detect adversarial inputs |
-| **Moderation** | `toxicity-deberta`, `toxicity-mbert`, `stereotype-eeoc-fast`, `prompt-harmfulness-fast`, `moderations-oai-api`, `perspective-api` | Content moderation |
+| **Moderation** | `toxicity-deberta`, `toxicity-mbert`, `stereotype-eeoc-fast`, `prompt-harmfulness-fast`, `moderations-oai-api`, `perspective-api`, `moderation-wildguard` | Content moderation |
 | **Privacy** | `pii-presidio`, `secret-detector` | PII/credential detection |
 | **Integrity** | `hhem-hallucination`, `factcheck-roberta` | Factual accuracy |
 
@@ -250,6 +250,7 @@ poetry run ruff check vijil_dome/ demo/
 | `GOOGLE_API_KEY` | — | Perspective API |
 | `ANTHROPIC_API_KEY` | — | Claude-based detection |
 | `HF_TOKEN` | — | Gated HuggingFace models |
+| `WILDGUARD_BASE_URL` / `WILDGUARD_MODEL` / `WILDGUARD_API_KEY` | — / `allenai/wildguard` / — | Self-hosted WildGuard endpoint for `moderation-wildguard` |
 | `VIJIL_MODEL_DIR` | `/models` | Local model directory (S3-synced in production) |
 | `VIJIL_CONSOLE_URL` | `https://console-api.vijil.ai` for telemetry | Console URL for constraints, manifest signing and telemetry |
 | `VIJIL_API_KEY` | — | Console API key |

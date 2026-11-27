@@ -258,6 +258,22 @@ dome = Dome(config)
 
 Dome includes 20+ prebuilt detectors. See the [Detector Reference](vijil_dome/detectors/DETECTOR_INFO.md) for the full list.
 
+### Moderation with WildGuard
+
+`moderation-wildguard` sends text to a [WildGuard](https://huggingface.co/allenai/wildguard) model that you serve yourself (for example `vllm serve allenai/wildguard`). In `request` mode it flags harmful user requests, and in `response` mode it flags harmful agent responses. It is not in the default config. If the endpoint fails or the model's answer can't be parsed, the guard blocks under `fail_closed`, which is the default in enforce mode.
+
+```toml
+[wildguard-input]
+type = "moderation"
+methods = ["moderation-wildguard"]
+
+[wildguard-input.moderation-wildguard]
+mode = "request"                      # "response" for an output guard
+base_url = "http://localhost:8000/v1" # or set WILDGUARD_BASE_URL
+```
+
+See [`examples/wildguard_moderation.toml`](examples/wildguard_moderation.toml) for a full input and output config. The weights are Apache 2.0, but downloading them from Hugging Face means accepting AI2's gated terms, which include a research-use agreement. Review those terms before you deploy it.
+
 
 ## Framework integrations
 
