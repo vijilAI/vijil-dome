@@ -79,15 +79,16 @@ def build_wildguard_prompt(prompt: str, response: str) -> str:
 
 
 def parse_wildguard_label(output: str, mode: WildGuardMode) -> Optional[bool]:
-    """Return True/False for the mode's yes/no label, or None if it is absent or not yes/no."""
-    pattern = rf"^\s*{_LABELS[mode]}\s*:\s*(\S+)\s*$"
-    match = re.search(pattern, output, flags=re.IGNORECASE | re.MULTILINE)
-    if match is None:
+    """Return True/False for the mode's yes/no label, or None if it is absent, not yes/no, or contradictory.
+
+    The value must sit on the label's own line, and every occurrence of the label must agree, so a
+    repeated or wrapped label can never turn an unsafe answer into a safe one.
+    """
+    pattern = rf"^[ \t]*{_LABELS[mode]}[ \t]*:[ \t]*(\S+)[ \t]*$"
+    answers = {a.lower() for a in re.findall(pattern, output, flags=re.IGNORECASE | re.MULTILINE)}
+    if len(answers) != 1 or not answers <= {"yes", "no"}:
         return None
-    answer = match.group(1).lower()
-    if answer not in ("yes", "no"):
-        return None
-    return answer == "yes"
+    return answers == {"yes"}
 
 
 @register_method(DetectionCategory.Moderation, MODERATION_WILDGUARD)

@@ -393,9 +393,14 @@ unchanged and reads one label from the answer.
   in the `AI assistant` slot in `response` mode, with the other slot empty.
   A `DomePayload` with `prompt` and `response` fills both slots.
 - **Errors**: an endpoint failure, or an answer without a `yes`/`no` value for
-  the mode's label (including `N/A`), returns `label="error"`. A guard with
+  the mode's label (including `N/A`), or a label that appears more than once
+  with different values, returns `label="error"`. A guard with
   `on-error = "fail_closed"` (the default when Dome runs in enforce mode)
   blocks on it. With `fail_open`, the error is logged and the text passes.
+- **Prompt steering**: the text is inserted verbatim into WildGuard's
+  published template. Input that imitates the template's answer section can
+  steer the classifier, so pair this method with a prompt-injection guard on
+  untrusted input.
 - **License**: the weights are Apache 2.0. The Hugging Face repo is gated, and
   to download them you must accept the AI2 Responsible Use Guidelines and
   agree to use the model "for research purposes". Check that this fits your

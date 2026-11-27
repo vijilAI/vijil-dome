@@ -200,6 +200,8 @@ async def test_request_sent_to_endpoint(monkeypatch, mode, payload, prompt, resp
     assert kwargs["api_base"] == BASE_URL
     assert kwargs["temperature"] == 0
     assert kwargs["extra_body"] == {"add_special_tokens": False}
+    assert kwargs["timeout"] == 60
+    assert kwargs["max_retries"] == 0
 
 
 # --- construction -----------------------------------------------------------
@@ -223,3 +225,20 @@ def test_env_config_and_registry(monkeypatch):
     )
     assert isinstance(detector, WildGuardModeration)
     assert detector.config == {"model": "served-wildguard", "base_url": BASE_URL, "mode": "response"}
+
+
+@pytest.mark.parametrize(
+    "output",
+    [
+        "Harmful request: no\nHarmful request: yes",  # contradiction must not read as safe
+        "Harmful request: yes\nHarmful request: no",
+        "Harmful request:\nyes",  # value wrapped onto the next line is not this label's value
+        "Harmful request: no\nHarmful request: maybe",
+    ],
+)
+def test_ambiguous_label_is_unparseable(output):
+    assert parse_wildguard_label(output, "request") is None
+
+
+def test_repeated_agreeing_label_parses():
+    assert parse_wildguard_label("Harmful request: yes\nharmful request: YES", "request") is True
