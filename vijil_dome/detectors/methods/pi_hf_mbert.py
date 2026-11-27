@@ -82,6 +82,78 @@ DEFAULT_SAFEGUARD_MODEL = "openai/gpt-oss-safeguard-20b"
 # Default model name on Vijil's inference endpoint (matches HuggingFace).
 DEFAULT_VIJIL_INFERENCE_PI_MODEL = "vijil/prompt-injection-v5-20260827"
 
+# Label layout of a two-head checkpoint: logits 0-1 are a softmax pair
+# (benign vs injection), logit 2 is an independent sigmoid jailbreak head.
+TWO_HEAD_ID2LABEL = {0: "benign", 1: "injection", 2: "jailbreak"}
+
+
+def _is_two_head(id2label: dict) -> bool:
+    """Classify a checkpoint's label layout; raise on any layout we cannot score.
+
+    Two labels keep the original pipeline scoring and are not name-checked,
+    so existing two-label checkpoints load exactly as before. Three labels must be
+    exactly ``TWO_HEAD_ID2LABEL``: a silently mis-read head would score
+    every input with the wrong logit.
+    """
+    labels = {int(k): str(v).lower() for k, v in id2label.items()}
+    if len(labels) == 2:
+        return False
+    if labels == TWO_HEAD_ID2LABEL:
+        return True
+    raise ValueError(
+        f"{PI_MBERT}: unsupported label layout {labels}; expected two labels "
+        f"or the two-head layout {TWO_HEAD_ID2LABEL}"
+    )
+
+
+def _two_head_classifier(model, tokenizer, truncation: bool, max_length: int):
+    """Return a callable with the text-classification pipeline's output shape.
+
+    A pipeline would softmax across all three logits, which is wrong for an
+    independent jailbreak head, so the model is called directly. Each item is
+    ``{"label": "injection", "score": max(p_injection, p_jailbreak), ...}``
+    so the existing score extraction and window aggregation apply unchanged.
+    """
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    model.to(device).eval()
+
+    def _score(texts: list[str]) -> list[dict]:
+        enc = tokenizer(
+            texts,
+            truncation=truncation,
+            max_length=max_length,
+            padding=True,
+            return_tensors="pt",
+        ).to(device)
+        with torch.no_grad():
+            # Only the two inputs ModernBERT accepts; some tokenizers also emit token_type_ids.
+            logits = model(
+                input_ids=enc["input_ids"], attention_mask=enc["attention_mask"]
+            ).logits.float()
+        p_injection = torch.softmax(logits[:, :2], dim=-1)[:, 1]
+        p_jailbreak = torch.sigmoid(logits[:, 2])
+        return [
+            {
+                "label": "injection",
+                "score": max(inj, jb),
+                "injection_score": inj,
+                "jailbreak_score": jb,
+            }
+            for inj, jb in zip(p_injection.tolist(), p_jailbreak.tolist())
+        ]
+
+    def classify(inputs, batch_size: int | None = None):
+        if isinstance(inputs, str):
+            return _score([inputs])
+        step = batch_size or 1
+        return [
+            item
+            for i in range(0, len(inputs), step)
+            for item in _score(inputs[i : i + step])
+        ]
+
+    return classify
+
 
 # ----------------------------------------------------------------------
 # Fast mode (original detector, unchanged interface)
@@ -100,10 +172,21 @@ class MBertPromptInjectionModel(HFBaseModel):
         truncation: bool = True,
         max_length: int = 1024,
         window_stride: int = 960,
+        model_name: str = DEFAULT_VIJIL_INFERENCE_PI_MODEL,
     ):
         """
         Parameters
         ----------
+        model_name:
+            HF Hub repo id or local directory of the checkpoint. Defaults
+            to Vijil's published two-label model. The label layout is read
+            from ``config.id2label``: two labels score as before; the
+            two-head layout ``{0: benign, 1: injection, 2: jailbreak}``
+            scores ``max(softmax(z[:2])[1], sigmoid(z[2]))``. Any other
+            layout raises at load time. Point at a two-head checkpoint
+            with e.g. ``{"type": "security", "methods":
+            ["prompt-injection-mbert"], "prompt-injection-mbert":
+            {"model_name": "/models/my-two-head-checkpoint"}}``.
         score_threshold:
             Model score at or above which input is flagged.
 
@@ -133,20 +216,25 @@ class MBertPromptInjectionModel(HFBaseModel):
             )
         try:
             super().__init__(
-                model_name=DEFAULT_VIJIL_INFERENCE_PI_MODEL,
+                model_name=model_name,
             )
 
             self.score_threshold = score_threshold
             self.max_length = max_length
             self.window_stride = window_stride
-            self.classifier = pipeline(
-                "text-classification",
-                model=self.model,
-                tokenizer=self.tokenizer,
-                truncation=truncation,
-                max_length=max_length,
-                device=torch.device("cuda" if torch.cuda.is_available() else "cpu"),
-            )
+            if _is_two_head(self.model.config.id2label):
+                self.classifier = _two_head_classifier(
+                    self.model, self.tokenizer, truncation, max_length
+                )
+            else:
+                self.classifier = pipeline(
+                    "text-classification",
+                    model=self.model,
+                    tokenizer=self.tokenizer,
+                    truncation=truncation,
+                    max_length=max_length,
+                    device=torch.device("cuda" if torch.cuda.is_available() else "cpu"),
+                )
             self.response_string = f"Method:{PI_MBERT}"
             self.run_in_executor = True
             logger.info("Initialized Vijil Mbert model..")
