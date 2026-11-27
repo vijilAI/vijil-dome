@@ -87,8 +87,8 @@ def test_delegate_attestation_with_mock(monkeypatch: pytest.MonkeyPatch) -> None
             pass
         def json(self) -> dict:
             return {
-                "jwt_svid": "eyJ0eXAiOiJKV1QiLCJhbGciOiJub25lIn0.eyJzdWIiOiJzcGlmZmU6Ly92aWppbC5haS9ucy9tYW5hZ2VkL2FnZW50L3Rlc3QiLCJhdWQiOlsidmlqaWwiXX0.",
-                "spiffe_id": "spiffe://vijil.ai/ns/managed/agent/test",
+                "jwt_svid": "eyJ0eXAiOiJKV1QiLCJhbGciOiJub25lIn0.eyJzdWIiOiJzcGlmZmU6Ly92aWppbC5haS9vcmcvMTExMTExMTEtMTExMS00MTExLTgxMTEtMTExMTExMTExMTExL2FnZW50LzIyMjIyMjIyLTIyMjItNDIyMi04MjIyLTIyMjIyMjIyMjIyMiIsImF1ZCI6WyJ2aWppbCJdfQ.",
+                "spiffe_id": "spiffe://vijil.ai/org/11111111-1111-4111-8111-111111111111/agent/22222222-2222-4222-8222-222222222222",
                 "expires_at": "2026-04-10T12:00:00Z",
                 "trust_domain": "vijil.ai",
             }
@@ -105,7 +105,7 @@ def test_delegate_attestation_with_mock(monkeypatch: pytest.MonkeyPatch) -> None
     )
 
     assert identity.is_attested()
-    assert identity.spiffe_id == "spiffe://vijil.ai/ns/managed/agent/test"
+    assert identity.spiffe_id == "spiffe://vijil.ai/org/11111111-1111-4111-8111-111111111111/agent/22222222-2222-4222-8222-222222222222"
     assert identity.jwt_svid is not None
     assert identity.jwt_svid.startswith("eyJ")
 
@@ -119,7 +119,7 @@ def test_jwt_svid_auth_header(monkeypatch: pytest.MonkeyPatch) -> None:
         def json(self) -> dict:
             return {
                 "jwt_svid": "jwt-token-value",
-                "spiffe_id": "spiffe://vijil.ai/ns/managed/agent/test",
+                "spiffe_id": "spiffe://vijil.ai/org/11111111-1111-4111-8111-111111111111/agent/22222222-2222-4222-8222-222222222222",
                 "expires_at": "2026-04-10T12:00:00Z",
                 "trust_domain": "vijil.ai",
             }

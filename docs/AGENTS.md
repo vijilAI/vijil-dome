@@ -69,12 +69,6 @@ vijil_dome/
 ├── cli/                       # CLI commands
 │   └── manifest_cmd.py        # vijil manifest sign|verify
 │
-├── deploy/                    # Trust infrastructure artifacts
-│   ├── llm-proxy/             # SPIFFE-authenticated LLM credential proxy (Go)
-│   ├── identity-delegate/     # JWT-SVID identity delegate
-│   ├── spire-*.yaml           # SPIRE Helm values and registrations
-│   └── vault-*.yaml           # Vault configuration
-│
 └── instrumentation/           # Observability
     ├── tracing.py             # OTEL tracing
     └── logging/               # Structured logging
