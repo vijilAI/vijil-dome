@@ -197,7 +197,7 @@ The tool SVIDs it verifies come from your own SPIRE deployment. Vijil Identify 1
 
 ### Tool manifests
 
-A tool manifest lists every tool the agent is authorized to call, along with each tool's expected SPIFFE identity. Manifests are signed via the Vijil Console. Verify the signature with `vijil manifest verify` before passing the manifest to `TrustRuntime`: `attest()` checks tool identities against it but does not check its signature.
+A tool manifest lists every tool the agent is authorized to call, along with each tool's expected SPIFFE identity. Manifests are signed via the Vijil Console. Verify the signature with `ToolManifest.verify_signature(public_key)` before passing the manifest to `TrustRuntime`: `attest()` checks tool identities against it but does not check its signature.
 
 ```python
 runtime = TrustRuntime(
