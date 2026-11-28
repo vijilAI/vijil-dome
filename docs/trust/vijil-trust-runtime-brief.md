@@ -60,7 +60,7 @@ The trust runtime integrates directly into the agent development frameworks deve
 
 ### 2. Workload attestation for agents and tools
 
-Every agent and every tool carries a cryptographic identity issued by an attestation server after verifying the workload's container image, namespace, and service account. At boot, the agent verifies every tool's identity against a signed manifest — a substituted or compromised tool presents a different identity and the agent refuses to start. At runtime, the agent re-verifies tool identity on every call via mutual TLS. Agents running in managed environments (such as AWS AgentCore) that cannot host a local attestation agent receive identity through a delegation service that bridges the cloud provider's native identity to the attestation model.
+Every agent carries a cryptographic identity issued by an attestation server after verifying the workload's namespace and service account. Tools carry one too when the customer's own SPIRE deployment issues it: Vijil Identify 1.0 issues identities to registered agents and their executions only, not to tools ([VIJIL-1715](https://linear.app/vijil/issue/VIJIL-1715)). At boot, `attest()` checks each tool's SPIFFE ID against a signed manifest, so a substituted tool presents a different identity and fails attestation. The application decides whether a failed attestation stops it from starting. Agents running in managed environments (such as AWS AgentCore) that cannot host a local attestation agent receive identity through a delegation service that bridges the cloud provider's native identity to the attestation model.
 
 ### 3. Least-privilege enforcement with no persistent key access
 
