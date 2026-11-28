@@ -5,7 +5,7 @@
 [![Downloads](https://static.pepy.tech/badge/vijil-dome)](https://pepy.tech/project/vijil-dome)
 [![Docs](https://img.shields.io/badge/Docs-blue?link=https%3A%2F%2Fdocs.vijil.ai%2Fdome%2Fintro.html)](https://docs.vijil.ai/dome/intro.html)
 
-**Vijil Dome** secures AI agents at runtime. It guards inputs and outputs with 20+ content detectors, enforces tool-level access control, attests agent and tool identity via SPIFFE, and emits structured audit logs — all in a single pip-installable library that works with LangGraph, Google ADK, Strands, and any other agent framework.
+**Vijil Dome** secures AI agents at runtime. It guards inputs and outputs with 20+ content detectors, enforces tool-level access control, can verify agent and tool identity via SPIFFE, and emits structured audit logs — all in a single pip-installable library that works with LangGraph, Google ADK, Strands, and any other agent framework.
 
 ## Installation
 
@@ -193,9 +193,11 @@ safe_tools = runtime.wrap_tools([search_flights, book_hotel])
 
 When SPIFFE is available, `TrustRuntime` can verify tool identity by connecting to each tool's endpoint and checking the server certificate's SPIFFE ID against the signed manifest.
 
+The tool SVIDs it verifies come from your own SPIRE deployment. Vijil Identify 1.0 issues identities to registered agents and their executions only, not to tools ([VIJIL-1715](https://linear.app/vijil/issue/VIJIL-1715)).
+
 ### Tool manifests
 
-A tool manifest lists every tool the agent is authorized to call, along with each tool's expected SPIFFE identity. Manifests are signed via the Vijil Console and verified locally.
+A tool manifest lists every tool the agent is authorized to call, along with each tool's expected SPIFFE identity. Manifests are signed via the Vijil Console. Verify the signature with `ToolManifest.verify_signature(public_key)` before passing the manifest to `TrustRuntime`: `attest()` checks tool identities against it but does not check its signature.
 
 ```python
 runtime = TrustRuntime(
